@@ -15,7 +15,7 @@ use na_seq::Element;
 use crate::{AtomGeneric, BondGeneric};
 
 #[derive(Clone, Copy, PartialEq)]
-enum MolType {
+pub enum MolType {
     Small,
     Bipolymer,
     Protein,
