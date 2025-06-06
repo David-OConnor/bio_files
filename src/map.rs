@@ -593,9 +593,11 @@ impl DensityCube {
         cell: &UnitCell,      // use the very same cell you built the cube with
     ) -> Vec<Density> {
         // Step *vectors* along a, b, c — not just their lengths
-        let step_vec_a = cell.ortho.column(0) / (self.step[0] / cell.a); // a / nx
-        let step_vec_b = cell.ortho.column(1) / (self.step[1] / cell.b); // b / ny
-        let step_vec_c = cell.ortho.column(2) / (self.step[2] / cell.c); // c / nz
+        let cols = cell.ortho.to_cols();
+
+        let step_vec_a = cols.0 / (self.step[0] / cell.a); // a / nx
+        let step_vec_b = cols.1 / (self.step[1] / cell.b); // b / ny
+        let step_vec_c = cols.2 / (self.step[2] / cell.c); // c / nz
 
         let (nx, ny, nz) = (self.dims[0], self.dims[1], self.dims[2]);
         let mut out = Vec::with_capacity(nx * ny * nz);
