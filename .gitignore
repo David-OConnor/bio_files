@@ -1,0 +1,16 @@
+/.idea
+
+/target
+Cargo.lock
+
+
+# Molecular formats
+*.pdb
+*.cif
+*.bcif
+*.gz
+*.sdf
+*.mol2
+*.pdbqt
+*.mtz
+*.map
