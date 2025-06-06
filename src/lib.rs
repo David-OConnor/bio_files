@@ -1,18 +1,16 @@
+pub mod ab1;
 pub mod map;
 pub mod mol2;
 mod mtz;
 mod sdf;
-pub mod ab1;
 
+pub use ab1::*;
 use lin_alg::f64::Vec3;
-use na_seq::Element;
 pub use map::*;
 pub use mol2::*;
-pub use ab1::*;
+use na_seq::Element;
 
-
-
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
     pub serial_number: usize,
     pub posit: Vec3,

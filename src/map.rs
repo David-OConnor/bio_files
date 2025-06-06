@@ -246,15 +246,15 @@ fn read_map_data_raw(path: &Path) -> io::Result<(MapHeader, Vec<f32>)> {
 }
 
 fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
-        if let (Some(ox), Some(oy), Some(oz)) = (hdr.xorigin, hdr.yorigin, hdr.zorigin) {
-            cell.cartesian_to_fractional(Vec3::new(ox as f64, oy as f64, oz as f64))
-        } else {
-            Vec3::new(
-                hdr.nxstart as f64 / hdr.mx as f64,
-                hdr.nystart as f64 / hdr.my as f64,
-                hdr.nzstart as f64 / hdr.mz as f64,
-            )
-        }
+    if let (Some(ox), Some(oy), Some(oz)) = (hdr.xorigin, hdr.yorigin, hdr.zorigin) {
+        cell.cartesian_to_fractional(Vec3::new(ox as f64, oy as f64, oz as f64))
+    } else {
+        Vec3::new(
+            hdr.nxstart as f64 / hdr.mx as f64,
+            hdr.nystart as f64 / hdr.my as f64,
+            hdr.nzstart as f64 / hdr.mz as f64,
+        )
+    }
 }
 
 /// Reads the entire density grid.
@@ -466,19 +466,15 @@ impl DensityCube {
     /// Extract the smallest cube that covers all atoms plus `margin` Å.
     /// `margin = 0.0` means “touch each atom’s centre”.
     /// // todo: Cube or rect?
-    pub fn new(
-        atom_posits: &[Vec3],
-        map: &DensityMap,
-        margin: f64,
-    ) -> Self {
-        let hdr  = &map.hdr;
+    pub fn new(atom_posits: &[Vec3], map: &DensityMap, margin: f64) -> Self {
+        let hdr = &map.hdr;
         let cell = &map.cell;
 
         // ——————————————————————————————————————————
         // 1.  Atom bounds in *fractional* coords
         //     (wrap each atom into 0–1 first)
-        let mut min_f = Vec3::new( 1.0,  1.0,  1.0);
-        let mut max_f = Vec3::new( 0.0,  0.0,  0.0);
+        let mut min_f = Vec3::new(1.0, 1.0, 1.0);
+        let mut max_f = Vec3::new(0.0, 0.0, 0.0);
 
         for atom_posit in atom_posits {
             let mut f = cell.cartesian_to_fractional(*atom_posit);
@@ -491,11 +487,7 @@ impl DensityCube {
         }
 
         // Optional margin in *fractional* units
-        let margin_f = Vec3::new(
-            margin / cell.a,
-            margin / cell.b,
-            margin / cell.c,
-        );
+        let margin_f = Vec3::new(margin / cell.a, margin / cell.b, margin / cell.c);
 
         min_f = Vec3::new(
             (min_f.x - margin_f.x).max(0.0),
@@ -515,7 +507,7 @@ impl DensityCube {
         let to_idx = |f: f64, n: i32| -> isize { (f * n as f64 - 0.5).floor() as isize };
 
         let mut lo_i = [
-            to_idx(min_f.x, hdr.mx),  // crystallographic indices
+            to_idx(min_f.x, hdr.mx), // crystallographic indices
             to_idx(min_f.y, hdr.my),
             to_idx(min_f.z, hdr.mz),
         ];
@@ -539,7 +531,7 @@ impl DensityCube {
             (lo_i[0] as f64 + 0.5) / hdr.mx as f64,
             (lo_i[1] as f64 + 0.5) / hdr.my as f64,
             (lo_i[2] as f64 + 0.5) / hdr.mz as f64,
-        ) + map.origin_frac;   // shift by header origin
+        ) + map.origin_frac; // shift by header origin
 
         let origin_cart = cell.fractional_to_cartesian(lo_frac);
 
@@ -564,11 +556,12 @@ impl DensityCube {
                     ];
 
                     // crystallographic → Cartesian centre of this voxel
-                    let frac = map.origin_frac + Vec3::new(
-                        (idx_c[0] as f64 + 0.5) / hdr.mx as f64,
-                        (idx_c[1] as f64 + 0.5) / hdr.my as f64,
-                        (idx_c[2] as f64 + 0.5) / hdr.mz as f64,
-                    );
+                    let frac = map.origin_frac
+                        + Vec3::new(
+                            (idx_c[0] as f64 + 0.5) / hdr.mx as f64,
+                            (idx_c[1] as f64 + 0.5) / hdr.my as f64,
+                            (idx_c[2] as f64 + 0.5) / hdr.mz as f64,
+                        );
                     let cart = cell.fractional_to_cartesian(frac);
 
                     data.push(map.density_at_point(cart));
@@ -590,7 +583,7 @@ impl DensityCube {
     /// so non-orthogonal (triclinic, monoclinic, …) cells come out correct.
     pub fn make_densities(
         &self,
-        cell: &UnitCell,      // use the very same cell you built the cube with
+        cell: &UnitCell, // use the very same cell you built the cube with
     ) -> Vec<Density> {
         // Step *vectors* along a, b, c — not just their lengths
         let cols = cell.ortho.to_cols();
@@ -615,15 +608,16 @@ impl DensityCube {
                         + step_vec_b * ky as f64
                         + step_vec_c * kz as f64;
 
-                    out.push(Density { coords, density: rho });
+                    out.push(Density {
+                        coords,
+                        density: rho,
+                    });
                 }
             }
         }
         out
     }
 }
-
-
 
 /// Stopgap approach?
 pub fn density_from_rcsb_gemmi(ident: &str) -> io::Result<(MapHeader, Vec<Density>)> {

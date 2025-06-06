@@ -6,16 +6,16 @@
 //! We are unable to find the official format spec for AB1 files.
 
 use std::{
+    collections::HashMap,
     fs::File,
     io::{self, ErrorKind, Read, Seek, SeekFrom},
     path::Path,
 };
-use std::collections::HashMap;
-use bio::io::fastq;
-use na_seq::{Seq, seq_from_str};
 
 #[cfg(feature = "encode")]
-use bincode::{Encode, Decode};
+use bincode::{Decode, Encode};
+use bio::io::fastq;
+use na_seq::{Seq, seq_from_str};
 
 const HEADER_SIZE: usize = 26;
 const DIR_SIZE: usize = 28;
@@ -47,7 +47,6 @@ pub struct SeqRecordAb1 {
     /// Peak locations edited by user.
     pub peak_locations_user: Option<Vec<u16>>,
 }
-
 
 #[derive(Debug)]
 struct Header {

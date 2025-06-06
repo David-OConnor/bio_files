@@ -8,13 +8,15 @@ use std::{
     io,
     io::{ErrorKind, Read, Write},
     path::Path,
+    str::FromStr,
 };
 
 use lin_alg::f64::Vec3;
 use na_seq::Element;
+
 use crate::{AtomGeneric, BondGeneric};
 
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MolType {
     Small,
     Bipolymer,
@@ -36,8 +38,26 @@ impl MolType {
     }
 }
 
-#[derive(Clone, Copy, PartialEq)]
-enum ChargeType {
+impl FromStr for MolType {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "SMALL" => Ok(MolType::Small),
+            "BIPOLYMER" => Ok(MolType::Bipolymer),
+            "PROTEIN" => Ok(MolType::Protein),
+            "NUCLEIC_ACID" => Ok(MolType::NucleicAcid),
+            "SACCHARIDE" => Ok(MolType::Saccharide),
+            _ => Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid MolType: {s}"),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ChargeType {
     None,
     DelRe,
     Gasteiger,
@@ -72,16 +92,92 @@ impl ChargeType {
     }
 }
 
+impl FromStr for ChargeType {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_uppercase().as_str() {
+            "NO_CHARGES" => Ok(ChargeType::None),
+            "DEL_RE" => Ok(ChargeType::DelRe),
+            "GASTEIGER" => Ok(ChargeType::Gasteiger),
+            "GAST_HUCK" => Ok(ChargeType::GastHuck),
+            "HUCKEL" => Ok(ChargeType::Huckel),
+            "PULLMAN" => Ok(ChargeType::Pullman),
+            "GAUSS80_CHARGES" => Ok(ChargeType::Gauss80),
+            "AMPAC_CHARGES" => Ok(ChargeType::Ampac),
+            "MULLIKEN_CHARGES" => Ok(ChargeType::Mulliken),
+            "DICT_CHARGES" => Ok(ChargeType::Dict),
+            "MMFF94_CHARGES" => Ok(ChargeType::MmFf94),
+            "USER_CHARGES" => Ok(ChargeType::User),
+            _ => Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid ChargeType: {s}"),
+            )),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BondType {
+    Single,
+    Double,
+    Triple,
+    Aromatic,
+    Amide,
+    Dummy,
+    Unknown,
+    NotConnected,
+}
+
+impl BondType {
+    /// Return the exact MOL2 bond-type token as an owned `String`.
+    /// (Use `&'static str` if you never need it allocated.)
+    pub fn to_str(self) -> String {
+        match self {
+            Self::Single => "1",
+            Self::Double => "2",
+            Self::Triple => "3",
+            Self::Aromatic => "ar",
+            Self::Amide => "am",
+            Self::Dummy => "du",
+            Self::Unknown => "un",
+            Self::NotConnected => "nc",
+        }
+        .to_owned()
+    }
+}
+
+impl FromStr for BondType {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "1" => Ok(BondType::Single),
+            "2" => Ok(BondType::Double),
+            "3" => Ok(BondType::Triple),
+            "ar" => Ok(BondType::Aromatic),
+            "am" => Ok(BondType::Amide),
+            "du" => Ok(BondType::Dummy),
+            "un" => Ok(BondType::Unknown),
+            "nc" => Ok(BondType::NotConnected),
+            _ => Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid BondType: {s}"),
+            )),
+        }
+    }
+}
+
 pub struct Mol2 {
-    /// These fields aren't universal to the format.
     pub ident: String,
     pub mol_type: MolType,
-    pub metadata: HashMap<String, String>,
+    pub charge_type: ChargeType,
+    pub comment: Option<String>,
+    // pub metadata: HashMap<String, String>,
     pub atoms: Vec<AtomGeneric>,
     pub bonds: Vec<BondGeneric>,
 }
 
-// impl Molecule {
 impl Mol2 {
     /// From a string of a CIF or PDB text file.
     pub fn new(sdf_text: &str) -> io::Result<Self> {
@@ -245,13 +341,23 @@ impl Mol2 {
 
         // Note: This may not be the identifier we think of.
         let ident = lines[1].to_owned();
+        let mol_type = MolType::from_str(lines[3])?;
+        let charge_type = ChargeType::from_str(lines[4])?;
+
+        // todo: Multi-line comments are supported by Mol2.
+        let comment = if lines[5].contains("****") {
+            None
+        } else {
+            Some(lines[5].to_owned())
+        };
 
         Ok(Self {
             ident,
-            mol_type: MolType::Small, // todo temp; pull from the data.
-            metadata: HashMap::new(), // todo: Load this.
+            mol_type,
+            charge_type,
             atoms,
             bonds,
+            comment,
         })
     }
 
@@ -266,10 +372,16 @@ impl Mol2 {
         writeln!(file, "{}", self.ident)?;
         writeln!(file, "{} {}", self.atoms.len(), self.bonds.len())?;
         writeln!(file, "{}", self.mol_type.to_str())?;
-        writeln!(file, "{}", ChargeType::None.to_str())?;
+        writeln!(file, "{}", self.charge_type.to_str())?;
+
+        // todo: Multi-line comments are supported by Mol2
+        let comment = match &self.comment {
+            Some(c) => &c,
+            None => "****",
+        };
 
         // **** Means a non-optional field is empty.
-        writeln!(file, "****")?;
+        writeln!(file, "{comment}")?;
         // Optional line (comments, molecule weight, etc.)
 
         writeln!(file, "@<TRIPOS>ATOM")?;
