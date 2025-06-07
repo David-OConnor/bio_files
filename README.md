@@ -6,11 +6,12 @@
 
 ### Currently supported:
 - Mol2 (Molecules)
+- SDF (Molecules)
 - Map (Electron density, e.g. from crystallography)
 - AB1 (Sequence tracing)
 
 ### Planned:
-- SDF
+
 - PDBQT
 - MTZ
 - DNA

@@ -1,14 +1,20 @@
+//! The `generic` label in names in this module are to differentiate from more specific
+//! ones used in e.g. Daedalus.
+
 pub mod ab1;
 pub mod map;
 pub mod mol2;
+pub mod sdf;
+
 mod mtz;
-mod sdf;
+
+use std::str::FromStr;
 
 pub use ab1::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mol2::*;
-use na_seq::Element;
+use na_seq::{AminoAcid, Element};
 
 #[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
@@ -27,4 +33,51 @@ pub struct BondGeneric {
     pub bond_type: String, // todo: Enum
     pub atom_0: usize,
     pub atom_1: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum ResidueType {
+    AminoAcid(AminoAcid),
+    Water,
+    Other(String),
+}
+
+impl Default for ResidueType {
+    fn default() -> Self {
+        Self::Other(String::new())
+    }
+}
+
+impl ResidueType {
+    /// Parses from the "name" field in common text-based formats lik CIF, PDB, and PDBQT.
+    pub fn from_str(name: &str) -> Self {
+        if name.to_uppercase() == "HOH" {
+            ResidueType::Water
+        } else {
+            match AminoAcid::from_str(name) {
+                Ok(aa) => ResidueType::AminoAcid(aa),
+                Err(_) => ResidueType::Other(name.to_owned()),
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct ResidueGeneric {
+    /// We use serial number of display, search etc, and array index to select. Residue serial number is not
+    /// unique in the molecule; only in the chain.
+    pub serial_number: isize, // pdbtbx uses isize. Negative allowed?
+    pub res_type: ResidueType,
+    pub atoms: Vec<usize>, // Atom index
+}
+
+#[derive(Debug, Clone)]
+pub struct Chain {
+    pub id: String,
+    // todo: Do we want both residues and atoms stored here? It's an overconstraint.
+    pub residues: Vec<usize>,
+    /// Indexes
+    pub atoms: Vec<usize>,
+    // todo: Perhaps vis would make more sense in a separate UI-related place.
+    pub visible: bool,
 }
