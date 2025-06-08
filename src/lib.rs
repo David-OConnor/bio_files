@@ -7,6 +7,7 @@ pub mod mol2;
 pub mod sdf;
 
 mod mtz;
+mod cif_sf;
 
 use std::str::FromStr;
 

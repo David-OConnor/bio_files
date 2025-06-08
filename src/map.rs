@@ -243,9 +243,9 @@ impl UnitCell {
     }
 }
 
-fn read_map_data_raw(path: &Path) -> io::Result<(MapHeader, Vec<f32>)> {
-    let mut file = File::open(path)?;
-    let hdr = read_map_header(&mut file)?;
+/// Load the header, and density from Map data.
+fn read_header_dens<R: Read + Seek>(data: &mut R) -> io::Result<(MapHeader, Vec<f32>)> {
+    let hdr = read_map_header(&mut *data)?;
 
     if hdr.mode != 2 {
         return Err(io::Error::new(
@@ -254,16 +254,16 @@ fn read_map_data_raw(path: &Path) -> io::Result<(MapHeader, Vec<f32>)> {
         ));
     }
 
-    file.seek(SeekFrom::Start(HEADER_SIZE + hdr.nsymbt as u64))?;
+    data.seek(SeekFrom::Start(HEADER_SIZE + hdr.nsymbt as u64))?;
 
     let n = (hdr.nx * hdr.ny * hdr.nz) as usize;
-    let mut data = Vec::with_capacity(n);
+    let mut dens = Vec::with_capacity(n);
 
     for _ in 0..n {
-        data.push(file.read_f32::<LittleEndian>()?);
+        dens.push(data.read_f32::<LittleEndian>()?);
     }
 
-    Ok((hdr, data))
+    Ok((hdr, dens))
 }
 
 fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
@@ -277,124 +277,10 @@ fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
         )
     }
 }
-//
-// /// Reads the entire density grid.
-// /// Assumes `mode == 2` (i.e. 32-bit floats);
-// /// todo: We may deprecate this one in favor of the symmetry-general version below.
-// pub fn read_map_data(path: &Path) -> io::Result<(MapHeader, Vec<Density>)> {
-//     let (hdr, data) = read_map_data_raw(path)?;
-//
-//     println!("HEADER: {:?}", hdr);
-//
-//     // todo: QC all these; simplify A/R.
-//
-//     // Compute crystal geometry
-//     let (nx, ny, nz) = (hdr.nx as usize, hdr.ny as usize, hdr.nz as usize);
-//     let npoints = nx * ny * nz;
-//
-//     let a = hdr.cell[0] as f64;
-//     let b = hdr.cell[1] as f64;
-//     let c = hdr.cell[2] as f64;
-//
-//     let α = (hdr.cell[3] as f64).to_radians();
-//     let β = (hdr.cell[4] as f64).to_radians();
-//     let γ = (hdr.cell[5] as f64).to_radians();
-//
-//     // Crystallographic basis vectors
-//     let cosα = α.cos();
-//     let cosβ = β.cos();
-//     let cosγ = γ.cos();
-//     let sinγ = γ.sin();
-//
-//     // let v_a = Vec3::new(a, 0.0, 0.0);
-//     // let v_b = Vec3::new(b * cosγ, b * sinγ, 0.0);
-//     let cx = c * cosβ;
-//     let cy = c * (cosα - cosβ * cosγ) / sinγ;
-//     let cz = c * (1.0 - cosβ * cosβ - ((cosα - cosβ * cosγ) / sinγ).powi(2)).sqrt();
-//     // let v_c = Vec3::new(cx, cy, cz);
-//
-//     // // Origin offset: Voxel units
-//     // let step = [a / hdr.mx as f64, b / hdr.my as f64, c / hdr.mz as f64];
-//
-//     // let start_vox = if let (Some(xo), Some(yo), Some(zo)) = (hdr.xorigin, hdr.yorigin, hdr.zorigin)
-//     // {
-//     //     [
-//     //         xo as f64 / step[0],
-//     //         yo as f64 / step[1],
-//     //         zo as f64 / step[2],
-//     //     ]
-//     // } else {
-//     //     [hdr.nxstart as f64, hdr.nystart as f64, hdr.nzstart as f64]
-//     // };
-//
-//     // Axis permutation: file -> crystal
-//     let perm = [
-//         hdr.mapc as usize - 1, // header values are 1-based
-//         hdr.mapr as usize - 1,
-//         hdr.maps as usize - 1,
-//     ];
-//     // inverse permutation: crystal_axis → file_axis
-//     let mut f_of_c = [0usize; 3];
-//     for (file_axis, cryst_axis) in perm.iter().enumerate() {
-//         f_of_c[*cryst_axis] = file_axis;
-//     }
-//
-//     // Read voxels; build coordinates.
-//
-//     let mut densities = Vec::with_capacity(npoints);
-//
-//     let cell = UnitCell::new(
-//         hdr.cell[0] as f64,
-//         hdr.cell[1] as f64,
-//         hdr.cell[2] as f64,
-//         hdr.cell[3] as f64,
-//         hdr.cell[4] as f64,
-//         hdr.cell[5] as f64,
-//     );
-//
-//     let origin_frac = get_origin_frac(&hdr, &cell);
-//
-//     let mut idx = 0;
-//     for k in 0..nz {
-//         for j in 0..ny {
-//             for i in 0..nx {
-//                 let density = data[idx] as f64;
-//                 idx += 1;
-//
-//                 let idx_file = [i as f64, j as f64, k as f64]; // voxel corners
-//                 let frac = origin_frac
-//                     + Vec3::new(
-//                         (idx_file[f_of_c[0]] + 0.5) / hdr.mx as f64,
-//                         (idx_file[f_of_c[1]] + 0.5) / hdr.my as f64,
-//                         (idx_file[f_of_c[2]] + 0.5) / hdr.mz as f64,
-//                     );
-//
-//                 let mut coords = cell.fractional_to_cartesian(frac); // Å
-//
-//                 densities.push(Density { coords, density });
-//             }
-//         }
-//     }
-//
-//     // // todo: Symmetry augmentation experimentation.
-//     // let mut slid_x_ = Vec::with_capacity(npoints);
-//     // for density in &densities {
-//     //     let slid_x = Density {
-//     //         // coords: Vec3::new(density.x - hdr.dmax, density.y, density.z),
-//     //         coords: Vec3::new(density.coords.x + hdr.cell[0] as f64 * nx as f64, density.coords.y, density.coords.z),
-//     //         density: density.density,
-//     //     };
-//     //     slid_x_.push(slid_x);
-//     // }
-//     //
-//     // densities.append(&mut slid_x_);
-//
-//     Ok((hdr, densities))
-// }
 
 #[derive(Clone, Debug)]
-/// The 1-D array is stored in **file order**
-///   fastest-varying index = MAPC
+/// Represents electron density data. Set up in a flexible way that can be overlayed over
+/// atom coordinates, with symmetry considerations taken into account.
 pub struct DensityMap {
     pub hdr: MapHeader,
     pub cell: UnitCell,
@@ -408,9 +294,10 @@ pub struct DensityMap {
 }
 
 impl DensityMap {
-    /// Build the helper once
-    pub fn new(path: &Path) -> io::Result<Self> {
-        let (hdr, data) = read_map_data_raw(path)?; // see § 7
+    /// Create a new density map, e.g. from a File or byte array.
+    pub fn new<R: Read + Seek>(data: &mut R) -> io::Result<Self> {
+        let (hdr, data) = read_header_dens(data)?;
+
         let cell = UnitCell::new(
             hdr.cell[0] as f64,
             hdr.cell[1] as f64,
@@ -425,7 +312,8 @@ impl DensityMap {
             hdr.mapr as usize - 1,
             hdr.maps as usize - 1,
         ];
-        let mut perm_c2f = [0usize; 3];
+
+        let mut perm_c2f = [0; 3];
         for (f, c) in perm_f2c.iter().enumerate() {
             perm_c2f[*c] = f;
         }
@@ -442,49 +330,54 @@ impl DensityMap {
         })
     }
 
-    /// Positive modulus that always lands in 0..n-1
-    fn pmod(i: isize, n: usize) -> usize {
-        ((i % n as isize) + n as isize) as usize % n
-    }
-
-    /// Nearest-neighbour lookup – add trilinear if you like
+    /// Uses nearest-neighbour lookup to calculate density at a point.
     pub fn density_at_point(&self, cart: Vec3) -> f32 {
-        // 1. Cartesian ➜ fractional (wrap to [0,1) )
+        // Cartesian to fractional (wrap to [0,1) )
         let mut frac = self.cell.cartesian_to_fractional(cart);
         frac.x -= frac.x.floor();
         frac.y -= frac.y.floor();
         frac.z -= frac.z.floor();
 
-        // 2. fractional ➜ crystallographic voxel index (float).
-        //    • drop the spurious minus sign on Z
-        //    • subtract 0.5 because coords in A were centred in the voxel
+        // Fractional to crystallographic voxel index.
         let ic = [
             (frac.x * self.hdr.mx as f64 - 0.5).round() as isize,
             (frac.y * self.hdr.my as f64 - 0.5).round() as isize,
             (frac.z * self.hdr.mz as f64 - 0.5).round() as isize,
         ];
 
-        // 3. crystallographic ➜ file order,             <-- changed
-        //    use the inverse permutation (cryst→file)
+        // Crystallographic ➜ file order
         let ifile = [
-            Self::pmod(ic[self.perm_c2f[0]], self.hdr.nx as usize),
-            Self::pmod(ic[self.perm_c2f[1]], self.hdr.ny as usize),
-            Self::pmod(ic[self.perm_c2f[2]], self.hdr.nz as usize),
+            pmod(ic[self.perm_c2f[0]], self.hdr.nx as usize),
+            pmod(ic[self.perm_c2f[1]], self.hdr.ny as usize),
+            pmod(ic[self.perm_c2f[2]], self.hdr.nz as usize),
         ];
 
-        // 4. linear offset in file order (x fastest)
+        // Linear offset in file order (x is fastest dimesion, from the experimental data)
         let offset = (ifile[2] * self.hdr.ny as usize + ifile[1]) * self.hdr.nx as usize + ifile[0];
 
         self.data[offset]
     }
+
+    /// Load a map from file.
+    pub fn load(path: &Path) -> io::Result<Self> {
+        let mut file = File::open(path)?;
+
+        Self::new(&mut file)
+    }
+
+    // todo: Implement
+    // pub fn save(&self, path: &Path) -> io::Result<()> {
+    //
+    // }
 }
 
+/// Assumes `gemmi` is available on the path.
 pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
     let _status = Command::new("gemmi")
         .args(["sf2map", cif_path, "temp_map.map"])
         .status()?;
 
-    let map = DensityMap::new(Path::new("temp_map.map"))?;
+    let map = DensityMap::load(Path::new("temp_map.map"))?;
 
     fs::remove_file(Path::new(cif_path))?;
     fs::remove_file(Path::new("temp_map.map"))?;
@@ -492,8 +385,8 @@ pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
     Ok(map)
 }
 
-/// Stopgap approach?
-pub fn density_from_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
+/// Assumes `gemmi` is available on the path.
+pub fn density_from_2fo_fc_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
     println!("Downloading Map data for {ident}...");
 
     let map_2fo_fc = rcsb::load_validation_2fo_fc_cif(ident)
@@ -505,10 +398,15 @@ pub fn density_from_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
         .args(["sf2map", "temp_map.cif", "temp_map.map"])
         .status()?;
 
-    let map = DensityMap::new(Path::new("temp_map.map"))?;
+    let map = DensityMap::load(Path::new("temp_map.map"))?;
 
     fs::remove_file(Path::new("temp_map.cif"))?;
     fs::remove_file(Path::new("temp_map.map"))?;
 
     Ok(map)
+}
+
+/// Positive modulus that always lands in 0..n-1
+fn pmod(i: isize, n: usize) -> usize {
+    ((i % n as isize) + n as isize) as usize % n
 }
