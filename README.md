@@ -26,9 +26,10 @@ For Genbank, we recommend [GB-IO](https://docs.rs/gb-io/latest/gb_io/). For atom
 and PDB, we recommend [PDBTBX](https://docs.rs/pdbtbx/latest/pdbtbx/). We do not plan to support
 these in these formats in bio_files due to these high-quality libraries.
 
-
-The API is straightforward to use. It outputs structs with public fields, which you can explore
-using the API docs, or your IDE. Example use:
+The API is straightforward to use. It operates using structs with public fields, which you can explore
+using the API docs, or your IDE. These structs generally include these three methods: `new()`, `save()` and `load()`.
+`new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and `load()` accept `&Path`. 
+Example use:
 
 ```rust
 pub fn open_molecule(&mut self, path: &Path) -> io::Result<()> {
@@ -39,11 +40,15 @@ pub fn open_molecule(&mut self, path: &Path) -> io::Result<()> {
         "sdf" => Ok(Sdf::load(path)?.into()),
         "mol2" => Ok(Mol2::load(path)?.into()),
         _ => ()
-    }
+    };
 }
 
 pub fn open_map(&mut self, path: &Path) -> io::Result<()> {
     let dm = DensityMap::load(path)?;
+    
+    // Call dm.density_at_point_trilinear(coord) to get density
+    // Run `density_to_sig` to get sigma-normalized density, for uniform display.
+    
     self.load_density(dm);
 
     Ok(())

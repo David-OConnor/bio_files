@@ -6,8 +6,8 @@ pub mod map;
 pub mod mol2;
 pub mod sdf;
 
-mod mtz;
 mod cif_sf;
+mod mtz;
 
 use std::str::FromStr;
 

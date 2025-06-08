@@ -19,14 +19,6 @@ use lin_alg::f64::{Mat3, Vec3};
 
 const HEADER_SIZE: u64 = 1_024;
 
-#[derive(Clone, Debug)]
-pub struct Density {
-    /// In Å
-    pub coords: Vec3,
-    /// Normalized, using the unit cell volume, as reported in the reflection data.
-    pub density: f64,
-}
-
 /// Minimal subset of the 1024-byte CCP4/MRC header
 #[allow(unused)]
 #[derive(Clone, Debug)]
@@ -291,6 +283,10 @@ pub struct DensityMap {
     /// cryst-axis → file-axis (inverse permutation)
     pub perm_c2f: [usize; 3],
     pub data: Vec<f32>,
+    /// In case the header mean is rounded or otherwise incorrect.
+    pub mean: f32,
+    /// Sigma; used for normalizing data, e.g. prior to display.
+    pub inv_sigma: f32,
 }
 
 impl DensityMap {
@@ -320,6 +316,21 @@ impl DensityMap {
 
         let origin_frac = get_origin_frac(&hdr, &cell);
 
+        let n = data.len() as f32;
+
+        let mut mean = 0.;
+        for val in &data {
+            mean += val;
+        }
+        mean /= data.len() as f32;
+
+        println!("Map means. Hdr: {}, calculated: {}", hdr.dmean, mean);
+
+        let variance: f32 = data.iter().map(|v| (*v - mean).powi(2)).sum::<f32>() / n;
+
+        let sigma = variance.sqrt().max(1e-6); // guard against σ ≈ 0
+        let inv_sigma = 1. / sigma;
+
         Ok(Self {
             hdr,
             cell,
@@ -327,6 +338,8 @@ impl DensityMap {
             perm_f2c,
             perm_c2f,
             data,
+            mean,
+            inv_sigma,
         })
     }
 
@@ -355,7 +368,86 @@ impl DensityMap {
         // Linear offset in file order (x is fastest dimesion, from the experimental data)
         let offset = (ifile[2] * self.hdr.ny as usize + ifile[1]) * self.hdr.nx as usize + ifile[0];
 
+        // Divide by volume: These values are density per unit volume. This is required to get consistent values
+        // that are invariant of the cell parameters, and that can be used in physical calculations.
         self.data[offset]
+    }
+
+    /// Electron-density value at a Cartesian point, using periodic trilinear
+    /// interpolation.  Returned value is still in whatever scale `self.data`
+    /// is stored (e·Å⁻³ or σ-units after your normalisation pass).
+    ///
+    /// This produces smoother visuals than the nearest-neighbor approach.
+    pub fn density_at_point_trilinear(&self, cart: Vec3) -> f32 {
+        // ---- 1. Cartesian → fractional, wrap into [0,1)  ------------------
+        let mut frac = self.cell.cartesian_to_fractional(cart);
+
+        // shift by the map origin if you want strict CCP4 compliance:
+        // frac -= self.origin_frac;
+
+        frac.x -= frac.x.floor();
+        frac.y -= frac.y.floor();
+        frac.z -= frac.z.floor();
+
+        // Crystallographic fractional → cryst grid coordinates
+        // grid coordinate in *float* space;  (0 … mx−1) etc.
+        let gx = frac.x * self.hdr.mx as f64 - 0.5;
+        let gy = frac.y * self.hdr.my as f64 - 0.5;
+        let gz = frac.z * self.hdr.mz as f64 - 0.5;
+
+        let ix0 = gx.floor() as isize;
+        let iy0 = gy.floor() as isize;
+        let iz0 = gz.floor() as isize;
+
+        let dx = (gx - ix0 as f64) as f32; // 0 … 1
+        let dy = (gy - iy0 as f64) as f32;
+        let dz = (gz - iz0 as f64) as f32;
+
+        // weights for the eight corners
+        let wx = [1.0 - dx, dx];
+        let wy = [1.0 - dy, dy];
+        let wz = [1.0 - dz, dz];
+
+        // 3. Accumulate weighted density from the 8 surrounding voxels
+        let mut rho = 0.0_f32;
+
+        for (cz, w_z) in [iz0, iz0 + 1].iter().zip(wz) {
+            // convert cryst-Z to file-Z
+            let fz = pmod(*cz, self.hdr.nz as usize);
+            for (cy, w_y) in [iy0, iy0 + 1].iter().zip(wy) {
+                let fy = pmod(*cy, self.hdr.ny as usize);
+                for (cx, w_x) in [ix0, ix0 + 1].iter().zip(wx) {
+                    let fx = pmod(*cx, self.hdr.nx as usize);
+
+                    // crystallographic → file order permutation
+                    let ifile = [fx, fy, fz];
+
+                    let voxel = [
+                        ifile[self.perm_c2f[0]],
+                        ifile[self.perm_c2f[1]],
+                        ifile[self.perm_c2f[2]],
+                    ];
+
+                    let offset = (voxel[2] * self.hdr.ny as usize + voxel[1])
+                        * self.hdr.nx as usize
+                        + voxel[0];
+
+                    rho += w_x * w_y * w_z * self.data[offset];
+                }
+            }
+        }
+
+        rho
+    }
+
+    /// Convert raw density to sigma units for display purposes. The density values held in, and output
+    /// by this struct, are in
+    /// e · Å⁻³. This isn't great for our dot and isosurface displays, and produces varying effects
+    /// from molecule to molecule. This converts it to a unified value suitable for display.
+    ///
+    /// (ρ(x)−⟨ρ⟩) / σ_p
+    pub fn density_to_sig(&self, val: f32) -> f32 {
+        (val - self.mean) * self.inv_sigma
     }
 
     /// Load a map from file.
