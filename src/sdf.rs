@@ -70,10 +70,10 @@ impl Sdf {
 
         // Typically, the first number is the number of atoms (natoms)
         // and the second number is the number of bonds (nbonds).
-        let natoms = counts_cols[0].parse::<usize>().map_err(|_| {
+        let n_atoms = counts_cols[0].parse::<usize>().map_err(|_| {
             io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms")
         })?;
-        let nbonds = counts_cols[1].parse::<usize>().map_err(|_| {
+        let n_bonds = counts_cols[1].parse::<usize>().map_err(|_| {
             io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds")
         })?;
 
@@ -82,9 +82,12 @@ impl Sdf {
         //   X Y Z Element ??? ??? ...
         //   e.g. "    1.4386   -0.8054   -0.4963 O   0  0  0  0  0  0  0  0  0  0  0  0"
         //
-        // Make sure we have enough lines in the file:
+
         let first_atom_line = 4;
-        let last_atom_line = first_atom_line + natoms;
+        let last_atom_line = first_atom_line + n_atoms;
+        let first_bond_line = last_atom_line;
+        let last_bond_line = first_bond_line + n_bonds;
+
         if lines.len() < last_atom_line {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
@@ -92,11 +95,11 @@ impl Sdf {
             ));
         }
 
-        let mut atoms = Vec::new();
+        let mut atoms = Vec::with_capacity(n_atoms);
 
         for i in first_atom_line..last_atom_line {
-            let atom_line = lines[i];
-            let cols: Vec<&str> = atom_line.split_whitespace().collect();
+            let line = lines[i];
+            let cols: Vec<&str> = line.split_whitespace().collect();
 
             if cols.len() < 4 {
                 return Err(io::Error::new(
@@ -123,6 +126,33 @@ impl Sdf {
                 occupancy: None,
                 partial_charge: None,
             });
+        }
+
+        let mut bonds = Vec::with_capacity(n_bonds);
+        for i in first_bond_line..last_bond_line {
+            let line = lines[i];
+            let cols: Vec<&str> = line.split_whitespace().collect();
+
+            if cols.len() < 3 {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Bond line {} does not have enough columns", i),
+                ));
+            }
+
+            let atom_0 = cols[0].parse::<usize>().map_err(|_| {
+                io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 0")
+            })?;
+            let atom_1 = cols[1].parse::<usize>().map_err(|_| {
+                io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1")
+            })?;
+            let bond_type = cols[2].to_owned();
+
+            bonds.push(BondGeneric {
+                atom_0,
+                atom_1,
+                bond_type,
+            })
         }
 
         // Look for a molecule identifier in the file. Check for either
@@ -187,7 +217,7 @@ impl Sdf {
             pubchem_cid,
             drugbank_id,
             metadata: HashMap::new(), // todo: A/R
-            bonds: Vec::new(),        // todo are these included??
+            bonds,
         })
     }
 

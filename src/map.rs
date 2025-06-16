@@ -284,9 +284,9 @@ pub struct DensityMap {
     pub perm_c2f: [usize; 3],
     pub data: Vec<f32>,
     /// In case the header mean is rounded or otherwise incorrect.
-    pub mean: f32,
+    mean: f32,
     /// Sigma; used for normalizing data, e.g. prior to display.
-    pub inv_sigma: f32,
+    inv_sigma: f32,
 }
 
 impl DensityMap {
