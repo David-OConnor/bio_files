@@ -22,11 +22,19 @@ pub struct AtomGeneric {
     pub serial_number: usize,
     pub posit: Vec3,
     pub element: Element,
-    // pub name: String,
+    /// e.g. "CG1", "CA", "O", "C" etc.
+    pub name: Option<String>,
     // pub role: Option<AtomRole>,
     // pub residue: Option<usize>,
     pub occupancy: Option<f32>,
     pub partial_charge: Option<f32>,
+    /// E.g. "c6", "ca", "n3", "ha", "h0" etc, as seen in Mol2 files from AMBER.
+    /// e.g.: "ha": hydrogen attached to an aromatic carbon.
+    /// "ho": hydrogen on a hydroxyl oxygen
+    /// "n3": sp³ nitrogen with three substituents
+    /// "c6": 	sp² carbon in a pure six-membered aromatic ring (new in GAFF2; lets GAFF distinguish
+    /// a benzene carbon from other aromatic caca carbons)
+    pub force_field_atom_type: Option<String>,
 }
 
 #[derive(Clone, Debug)]

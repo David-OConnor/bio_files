@@ -3,7 +3,7 @@
 //! descripts the format.
 
 use std::{
-    collections::HashMap,
+    fmt,
     fs::File,
     io,
     io::{ErrorKind, Read, Write},
@@ -56,7 +56,7 @@ impl FromStr for MolType {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, PartialEq, Debug)]
 pub enum ChargeType {
     None,
     DelRe,
@@ -71,26 +71,27 @@ pub enum ChargeType {
     MmFf94,
     User,
     Amber,
+    Other(String),
 }
 
-impl ChargeType {
-    pub fn to_str(self) -> String {
+impl fmt::Display for ChargeType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::None => "NO_CHARGES",
-            Self::DelRe => "DEL_RE",
-            Self::Gasteiger => "GASTEIGER",
-            Self::GastHuck => "GAST_HUCK",
-            Self::Huckel => "HUCKEL",
-            Self::Pullman => "PULLMAN",
-            Self::Gauss80 => "GAUSS80_CHARGES",
-            Self::Ampac => "AMPAC_CHARGES",
-            Self::Mulliken => "MULLIKEN_CHARGES",
-            Self::Dict => "DICT_CHARGES",
-            Self::MmFf94 => "MMFF94_CHARGES",
-            Self::User => "USER_CHARGES",
-            Self::Amber => "ABCG2",
+            ChargeType::None => write!(f, "NO_CHARGES"),
+            ChargeType::DelRe => write!(f, "DEL_RE"),
+            ChargeType::Gasteiger => write!(f, "GASTEIGER"),
+            ChargeType::GastHuck => write!(f, "GAST_HUCK"),
+            ChargeType::Huckel => write!(f, "HUCKEL"),
+            ChargeType::Pullman => write!(f, "PULLMAN"),
+            ChargeType::Gauss80 => write!(f, "GAUSS80_CHARGES"),
+            ChargeType::Ampac => write!(f, "AMPAC_CHARGES"),
+            ChargeType::Mulliken => write!(f, "MULLIKEN_CHARGES"),
+            ChargeType::Dict => write!(f, "DICT_CHARGES"),
+            ChargeType::MmFf94 => write!(f, "MMFF94_CHARGES"),
+            ChargeType::User => write!(f, "USER_CHARGES"),
+            ChargeType::Amber => write!(f, "ABCG2"),
+            ChargeType::Other(v) => write!(f, "{}", v),
         }
-        .to_owned()
     }
 }
 
@@ -112,10 +113,8 @@ impl FromStr for ChargeType {
             "MMFF94_CHARGES" => Ok(ChargeType::MmFf94),
             "USER_CHARGES" => Ok(ChargeType::User),
             "ABCG2" => Ok(ChargeType::Amber),
-            _ => Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid ChargeType: {s}"),
-            )),
+            "AMBER ff14SB" => Ok(ChargeType::Amber),
+            _ => Ok(ChargeType::Other(s.to_owned())),
         }
     }
 }
@@ -268,17 +267,17 @@ impl Mol2 {
                 })?;
 
                 // Col 1: e.g. "H", "HG22" etc. Col 5: "C.3", "N.p13" etc.
-                let mut elem_txt = cols[5].to_owned();
-                if let Some((before_dot, _after_dot)) = elem_txt.split_once('.') {
-                    elem_txt = before_dot.to_string();
+                let mut atom_name = cols[1].to_owned();
+                if let Some((before_dot, _after_dot)) = atom_name.split_once('.') {
+                    atom_name = before_dot.to_string();
                 }
 
-                let element = match Element::from_letter(&elem_txt) {
+                let element = match Element::from_letter(&atom_name) {
                     Ok(l) => l,
                     Err(e) => {
-                        if elem_txt.len() > 1 {
+                        if atom_name.len() > 1 {
                             // It might be something like "c3", "c1" etc."
-                            Element::from_letter(&elem_txt[0..1])?
+                            Element::from_letter(&atom_name[0..1])?
                         } else {
                             return Err(e);
                         }
@@ -308,6 +307,7 @@ impl Mol2 {
 
                 atoms.push(AtomGeneric {
                     serial_number,
+                    name: Some(atom_name),
                     posit: Vec3 { x, y, z }, // or however you store coordinates
                     element,
                     // name: String::new(),
@@ -316,6 +316,7 @@ impl Mol2 {
                     // residue_type: ResidueType::Other(String::new()), // Not available in SDF.
                     occupancy: None,
                     partial_charge,
+                    force_field_atom_type: Some(cols[5].to_string()),
                 });
             }
 
@@ -385,7 +386,7 @@ impl Mol2 {
         writeln!(file, "{}", self.ident)?;
         writeln!(file, "{} {}", self.atoms.len(), self.bonds.len())?;
         writeln!(file, "{}", self.mol_type.to_str())?;
-        writeln!(file, "{}", self.charge_type.to_str())?;
+        writeln!(file, "{}", self.charge_type)?;
 
         // todo: Multi-line comments are supported by Mol2
         let comment = match &self.comment {
@@ -399,15 +400,25 @@ impl Mol2 {
 
         writeln!(file, "@<TRIPOS>ATOM")?;
         for (i, atom) in self.atoms.iter().enumerate() {
+            let atom_name = match &atom.name {
+                Some(n) => n.to_owned(),
+                None => atom.element.to_letter(),
+            };
+
+            let ff_atom_type = match &atom.force_field_atom_type {
+                Some(f) => f.to_owned(),
+                None => atom.element.to_letter(),
+            };
+
             writeln!(
                 file,
                 "{:>5} {:<2} {:>12.3} {:>8.3} {:>8.3} {:<2} {:>6} {:<3} {:>6.3}",
                 i + 1,
-                atom.element.to_letter(),
+                atom_name,
                 atom.posit.x,
                 atom.posit.y,
                 atom.posit.z,
-                atom.element.to_letter(),
+                ff_atom_type,
                 0,
                 "UNL",
                 atom.partial_charge.unwrap_or_default()

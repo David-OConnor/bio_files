@@ -121,10 +121,12 @@ impl Sdf {
 
             atoms.push(AtomGeneric {
                 serial_number: i - first_atom_line + 1,
+                name: None,
                 posit: Vec3 { x, y, z }, // or however you store coordinates
                 element: Element::from_letter(element)?,
                 occupancy: None,
                 partial_charge: None,
+                force_field_atom_type: None,
             });
         }
 
