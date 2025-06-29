@@ -70,6 +70,7 @@ pub enum ChargeType {
     Dict,
     MmFf94,
     User,
+    Amber,
 }
 
 impl ChargeType {
@@ -87,6 +88,7 @@ impl ChargeType {
             Self::Dict => "DICT_CHARGES",
             Self::MmFf94 => "MMFF94_CHARGES",
             Self::User => "USER_CHARGES",
+            Self::Amber => "ABCG2",
         }
         .to_owned()
     }
@@ -109,6 +111,7 @@ impl FromStr for ChargeType {
             "DICT_CHARGES" => Ok(ChargeType::Dict),
             "MMFF94_CHARGES" => Ok(ChargeType::MmFf94),
             "USER_CHARGES" => Ok(ChargeType::User),
+            "ABCG2" => Ok(ChargeType::Amber),
             _ => Err(io::Error::new(
                 ErrorKind::InvalidData,
                 format!("Invalid ChargeType: {s}"),
@@ -270,7 +273,17 @@ impl Mol2 {
                     elem_txt = before_dot.to_string();
                 }
 
-                let element = Element::from_letter(&elem_txt)?;
+                let element = match Element::from_letter(&elem_txt) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        if elem_txt.len() > 1 {
+                            // It might be something like "c3", "c1" etc."
+                            Element::from_letter(&elem_txt[0..1])?
+                        } else {
+                            return Err(e);
+                        }
+                    }
+                };
 
                 let x = cols[2].parse::<f64>().map_err(|_| {
                     io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate")
