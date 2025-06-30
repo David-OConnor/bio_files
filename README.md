@@ -14,6 +14,7 @@ used by your application. The API docs, and examples below are sufficient to get
 - SDF (Molecules)
 - Map (Electron density, e.g. from crystallography, Cryo EM)
 - AB1 (Sequence tracing)
+- FRCMOD (Amber force field data for small molecules)
 
 ### Planned:
 - PDBQT
