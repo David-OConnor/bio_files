@@ -205,6 +205,7 @@ impl Sdf {
         });
 
         chains.push(Chain {
+            // todo: Fix this.
             id: "A".to_string(),
             residues: vec![0],
             atoms: atom_indices,

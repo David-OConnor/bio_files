@@ -1,14 +1,10 @@
+///! For operating on frcmod files, which describe Amber force fields for small molecules.
 use std::{
     fs::File,
     io,
     io::{ErrorKind, Read, Write},
     path::Path,
-    ptr::write,
 };
-
-use crate::Mol2;
-
-///! For operating on frcmod files, which describe Amber force fields for small molecules.
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
@@ -40,10 +36,14 @@ pub struct AngleData {
 #[derive(Debug, Clone)]
 pub struct DihedralData {
     pub atom_names: (String, String, String, String),
-    pub periodicity: u8,
-    pub phase: f32,
-    pub k: f32,
-    pub _unused: f32,
+    /// Aka idivf. 	Scaling factor for barrier height (divide Vn by this)
+    pub scaling_factor: u8,
+    /// aka "vn". kcal/mol
+    pub barrier_height_vn: f32,
+    /// aka "gamma". Degrees.
+    pub gamma: f32,
+    /// An integer, but uses decimals in the file format.
+    pub periodicity: i8,
     pub notes: Option<String>,
     pub penalty_score: f32,
 }
@@ -120,6 +120,7 @@ impl FrcmodData {
                 }
                 _ => {}
             }
+
             match section {
                 Section::Remark => {
                     out.remarks.push(line.to_owned());
@@ -154,11 +155,13 @@ impl FrcmodData {
                     let mut atoms = pair.split('-');
                     let a1 = atoms.next().unwrap().to_string();
                     let a2 = atoms.next().unwrap().to_string();
+
                     let k = parts
                         .next()
                         .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "BOND missing k"))?
                         .parse::<f32>()
                         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid BOND k"))?;
+
                     let length = parts
                         .next()
                         .ok_or_else(|| {
@@ -168,6 +171,7 @@ impl FrcmodData {
                         .map_err(|_| {
                             io::Error::new(ErrorKind::InvalidData, "Invalid BOND length")
                         })?;
+
                     let comment = parts.next().map(|s| s.to_string());
                     out.bond.push(BondData {
                         pair: (a1, a2),
@@ -208,33 +212,46 @@ impl FrcmodData {
                     });
                 }
                 Section::Dihedral => {
-                    let tokens: Vec<&str> = raw
-                        .splitn(6, char::is_whitespace)
-                        .filter(|s| !s.is_empty())
-                        .collect();
-                    if tokens.len() < 6 {
-                        continue;
+                    let cols: Vec<&str> = line.split_whitespace().collect();
+
+                    if cols.len() < 5 {
+                        return Err(io::Error::new(
+                            ErrorKind::InvalidData,
+                            format!("Dihedral line is too short: {:?}", line),
+                        ));
                     }
-                    let names: Vec<&str> = tokens[0].split('-').collect();
-                    let periodicity = tokens[1].parse::<u8>().unwrap_or(1);
-                    let phase = tokens[2].parse::<f32>().unwrap_or(0.0);
-                    let k = tokens[3].parse::<f32>().unwrap_or(0.0);
-                    let unused = tokens[4].parse::<f32>().unwrap_or(0.0);
-                    let mut notes_raw = tokens[5].trim().to_string();
-                    let mut penalty = 0.0;
-                    if let Some(idx) = notes_raw.to_lowercase().find("penalty score=") {
-                        let note_part = notes_raw[..idx].trim().to_string();
-                        let score_part = notes_raw[idx..]
-                            .trim_start_matches(|c: char| !c.is_digit(10) && c != '-' && c != '.')
-                            .trim();
-                        penalty = score_part.parse::<f32>().unwrap_or(0.0);
-                        notes_raw = note_part;
+
+                    let names: Vec<&str> = cols[0].split('-').collect();
+                    let scaling_factor = cols[1].parse().unwrap_or(1);
+                    let barrier_height_vn = cols[2].parse().unwrap_or(0.0);
+                    let gamma = cols[3].parse().unwrap_or(0.0);
+
+                    /// Integer, but often represented as a float, e.g. "1.000" in the files Amber
+                    /// generates.
+                    let periodicity: f32 = cols[4].parse().unwrap_or(0.0);
+
+                    // let mut notes_raw = cols[5].trim().to_string();
+
+                    let mut notes = String::new();
+                    for col in &cols[5..cols.len() - 1] {
+                        notes += &format!("{col} ");
                     }
-                    let notes = if notes_raw.is_empty() {
-                        None
-                    } else {
-                        Some(notes_raw)
-                    };
+                    //
+                    // let mut penalty = 0.0;
+                    // if let Some(idx) = notes_raw.to_lowercase().find("penalty score=") {
+                    //     let note_part = notes_raw[..idx].trim().to_string();
+                    //     let score_part = notes_raw[idx..]
+                    //         .trim_start_matches(|c: char| !c.is_digit(10) && c != '-' && c != '.')
+                    //         .trim();
+                    //     penalty = score_part.parse::<f32>().unwrap_or(0.0);
+                    //     notes_raw = note_part;
+                    // }
+                    // let notes = if notes_raw.is_empty() {
+                    //     None
+                    // } else {
+                    //     Some(notes_raw)
+                    // };
+
                     out.dihedral.push(DihedralData {
                         atom_names: (
                             names.get(0).unwrap_or(&"").to_string(),
@@ -242,12 +259,13 @@ impl FrcmodData {
                             names.get(2).unwrap_or(&"").to_string(),
                             names.get(3).unwrap_or(&"").to_string(),
                         ),
-                        periodicity,
-                        phase,
-                        k,
-                        _unused: unused,
-                        notes,
-                        penalty_score: penalty,
+                        scaling_factor,
+                        barrier_height_vn,
+                        gamma,
+                        periodicity: periodicity as i8,
+                        notes: if notes.len() > 0 { Some(notes) } else { None },
+                        /// FOr now, we don't parse penalty.
+                        penalty_score: 0.,
                     });
                 }
                 Section::Improper => {
@@ -337,7 +355,6 @@ impl FrcmodData {
             }
         }
         writeln!(f)?;
-        // DIHE
         writeln!(f, "DIHE")?;
         for d in &self.dihedral {
             let names = format!(
@@ -346,7 +363,7 @@ impl FrcmodData {
             );
             let mut line = format!(
                 "{} {:>3} {:>8.3} {:>8.3} {:>8.3}",
-                names, d.periodicity, d.phase, d.k, d._unused
+                names, d.scaling_factor, d.barrier_height_vn, d.gamma, d.periodicity
             );
             if let Some(n) = &d.notes {
                 line.push_str(&format!("  {}", n));
