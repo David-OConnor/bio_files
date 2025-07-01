@@ -13,7 +13,7 @@ use std::{
     path::Path,
 };
 
-use crate::frcmod::{AngleData, BondData, DihedralData, ForceFieldParams, ImproperData, MassData, VdwData};
+use crate::frcmod::{AngleData, BondData, DihedralData, ForceFieldParams, ImproperDihedralData, MassData, VdwData};
 
 impl ForceFieldParams {
     /// From a string of a dat text file, from Amber.
@@ -81,7 +81,7 @@ impl ForceFieldParams {
                             let eps: f32 = eps_str.parse().unwrap();
                             let comment = remainder_as_comment(2);
                             result.van_der_waals.push(VdwData {
-                                name: atoms[0].to_string(),
+                                atom_name: atoms[0].to_string(),
                                 sigma,
                                 eps,
                             });
@@ -108,9 +108,9 @@ impl ForceFieldParams {
                     };
                     let comment = remainder_as_comment(2);
                     result.bond.push(BondData {
-                        pair: (atoms[0].to_string(), atoms[1].to_string()),
+                        atom_names: (atoms[0].to_string(), atoms[1].to_string()),
                         k,
-                        length: len,
+                        r_0: len,
                         comment,
                     });
                 }
@@ -128,7 +128,7 @@ impl ForceFieldParams {
 
                     let comment = remainder_as_comment(2);
                     result.angle.push(AngleData {
-                        triple: (
+                        atom_names: (
                             atoms[0].to_string(),
                             atoms[1].to_string(),
                             atoms[2].to_string(),
@@ -151,9 +151,9 @@ impl ForceFieldParams {
                             // IMPROPER: k  phase  periodicity
                             let k = numeric[0];
                             let phase = numeric[1];
-                            let periodicity = numeric[2];
+                            let periodicity = numeric[2] as i8;
                             let comment = remainder_as_comment(3);
-                            result.improper.push(ImproperData {
+                            result.improper.push(ImproperDihedralData {
                                 atom_names: (
                                     atoms[0].to_string(),
                                     atoms[1].to_string(),
