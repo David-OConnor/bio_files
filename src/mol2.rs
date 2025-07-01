@@ -181,8 +181,11 @@ pub struct Mol2 {
 }
 
 impl Mol2 {
-    /// From a string of a CIF or PDB text file.
+    /// From a string of a Mol2 text file.
     pub fn new(sdf_text: &str) -> io::Result<Self> {
+        // todo: For these `new` methods in general that take a &str param: Should we use
+        // todo R: Reed + Seek instead, and pass a Cursor or File object? Probably doesn't matter.
+        // todo Either way, we should keep it consistent between the files.
         let lines: Vec<&str> = sdf_text.lines().collect();
 
         // Example Mol2 header:

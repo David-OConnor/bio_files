@@ -1,8 +1,7 @@
 ///! For operating on frcmod files, which describe Amber force fields for small molecules.
 use std::{
     fs::File,
-    io,
-    io::{ErrorKind, Read, Write},
+    io::{self, ErrorKind, Read, Write},
     path::Path,
 };
 
@@ -58,16 +57,26 @@ pub struct ImproperData {
     pub comment: Option<String>,
 }
 
-/// Top-level frcmod data
+#[derive(Debug, Clone)]
+pub struct VdwData {
+    pub name: String,
+    // todo: Is this what it is?
+    pub sigma: f32,
+    pub eps: f32,
+}
+
+/// Top-level dat or frcmod data
 #[derive(Debug, Default)]
-pub struct FrcmodData {
+pub struct ForceFieldParams {
     pub remarks: Vec<String>,
     pub mass: Vec<MassData>,
     pub bond: Vec<BondData>,
     pub angle: Vec<AngleData>,
     pub dihedral: Vec<DihedralData>,
     pub improper: Vec<ImproperData>,
-    // pub nonbond: Vec<NonbondData>, // implement as needed
+    // todo: As required.
+    // pub partial_charge: Vec<PartialChargeData>,
+    pub van_der_waals: Vec<VdwData>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -82,13 +91,16 @@ enum Section {
     None,
 }
 
-impl FrcmodData {
-    /// From a string of a CIF or PDB text file.
-    pub fn new(text: &str) -> io::Result<Self> {
-        let mut out = FrcmodData::default();
+impl ForceFieldParams {
+    /// From a string of a FRCMOD text file.
+    pub fn from_frcmod(text: &str) -> io::Result<Self> {
+        let mut result = Self::default();
+
+        let lines: Vec<&str> = text.lines().collect();
+
         let mut section = Section::Remark;
 
-        for raw in text.lines() {
+        for raw in lines {
             let line = raw.trim();
             if line.is_empty() {
                 continue;
@@ -123,7 +135,7 @@ impl FrcmodData {
 
             match section {
                 Section::Remark => {
-                    out.remarks.push(line.to_owned());
+                    result.remarks.push(line.to_owned());
                 }
                 Section::Mass => {
                     let mut parts = line
@@ -141,7 +153,7 @@ impl FrcmodData {
                     let comment = parts
                         .next()
                         .map(|s| s.trim_start_matches('!').trim().to_string());
-                    out.mass.push(MassData {
+                    result.mass.push(MassData {
                         atom_type: atom.to_string(),
                         mass,
                         comment,
@@ -173,7 +185,7 @@ impl FrcmodData {
                         })?;
 
                     let comment = parts.next().map(|s| s.to_string());
-                    out.bond.push(BondData {
+                    result.bond.push(BondData {
                         pair: (a1, a2),
                         k,
                         length,
@@ -204,7 +216,7 @@ impl FrcmodData {
                             io::Error::new(ErrorKind::InvalidData, "Invalid ANGLE angle")
                         })?;
                     let comment = parts.next().map(|s| s.to_string());
-                    out.angle.push(AngleData {
+                    result.angle.push(AngleData {
                         triple: (a1, a2, a3),
                         k,
                         angle,
@@ -252,7 +264,7 @@ impl FrcmodData {
                     //     Some(notes_raw)
                     // };
 
-                    out.dihedral.push(DihedralData {
+                    result.dihedral.push(DihedralData {
                         atom_names: (
                             names.get(0).unwrap_or(&"").to_string(),
                             names.get(1).unwrap_or(&"").to_string(),
@@ -281,7 +293,7 @@ impl FrcmodData {
                     let phase = tokens[2].parse::<f32>().unwrap_or(0.0);
                     let per = tokens[3].parse::<f32>().unwrap_or(0.0);
                     let comment = tokens.get(4).map(|s| s.to_string());
-                    out.improper.push(ImproperData {
+                    result.improper.push(ImproperData {
                         atom_names: (
                             names.get(0).unwrap_or(&"").to_string(),
                             names.get(1).unwrap_or(&"").to_string(),
@@ -297,19 +309,19 @@ impl FrcmodData {
                 Section::Nonbond | Section::None => { /* skip or extend */ }
             }
         }
-        Ok(out)
+        Ok(result)
     }
 
-    /// Write back to file
-    pub fn save(&self, path: &Path) -> io::Result<()> {
+    /// Write to file
+    pub fn save_frcmod(&self, path: &Path) -> io::Result<()> {
         let mut f = File::create(path)?;
 
-        // remarks
         for r in &self.remarks {
             writeln!(f, "{}", r)?;
         }
+
         writeln!(f)?;
-        // MASS
+
         writeln!(f, "MASS")?;
         for m in &self.mass {
             if let Some(c) = &m.comment {
@@ -319,7 +331,7 @@ impl FrcmodData {
             }
         }
         writeln!(f)?;
-        // BOND
+
         writeln!(f, "BOND")?;
         for b in &self.bond {
             if let Some(c) = &b.comment {
@@ -337,7 +349,7 @@ impl FrcmodData {
             }
         }
         writeln!(f)?;
-        // ANGLE
+
         writeln!(f, "ANGLE")?;
         for a in &self.angle {
             if let Some(c) = &a.comment {
@@ -355,6 +367,7 @@ impl FrcmodData {
             }
         }
         writeln!(f)?;
+
         writeln!(f, "DIHE")?;
         for d in &self.dihedral {
             let names = format!(
@@ -374,7 +387,7 @@ impl FrcmodData {
             writeln!(f, "{}", line)?;
         }
         writeln!(f)?;
-        // IMPROPER
+
         writeln!(f, "IMPROPER")?;
         for imp in &self.improper {
             let names = format!(
@@ -396,13 +409,15 @@ impl FrcmodData {
             }
         }
         writeln!(f)?;
-        // NONBON placeholder
+
+        // todo: Placeholder. A/R.
         writeln!(f, "NONBON")?;
-        // extend when nonbond data present
+
         Ok(())
     }
 
-    pub fn load(path: &Path) -> io::Result<Self> {
+    /// todo: Sort out the syntax for loading from different sources.
+    pub fn load_frcmod(path: &Path) -> io::Result<Self> {
         let mut file = File::open(path)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
@@ -410,6 +425,6 @@ impl FrcmodData {
         let data_str: String = String::from_utf8(buffer)
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
-        Self::new(&data_str)
+        Self::from_frcmod(&data_str)
     }
 }

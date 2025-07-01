@@ -7,6 +7,7 @@ pub mod mol2;
 pub mod sdf;
 
 mod cif_sf;
+mod dat;
 pub mod frcmod;
 mod mtz;
 

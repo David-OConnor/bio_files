@@ -28,7 +28,7 @@ pub struct Sdf {
 }
 
 impl Sdf {
-    /// From a string of a CIF or PDB text file.
+    /// From a string of an SDF text file.
     pub fn new(sdf_text: &str) -> io::Result<Self> {
         let lines: Vec<&str> = sdf_text.lines().collect();
 
