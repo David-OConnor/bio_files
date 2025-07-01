@@ -10,11 +10,12 @@ used by your application. The API docs, and examples below are sufficient to get
 
 
 ### Currently supported formats:
-- Mol2 (Molecules)
-- SDF (Molecules)
+- Mol2 (Small molecules, e.g. ligands)
+- SDF (Small molecules, e.g. ligands)
 - Map (Electron density, e.g. from crystallography, Cryo EM)
 - AB1 (Sequence tracing)
-- FRCMOD (Amber force field data for small molecules)
+- DAT (Amber force field data for small molecules)
+- FRCMOD (Amber force field patch data for small molecules)
 
 ### Planned:
 - PDBQT
@@ -23,13 +24,17 @@ used by your application. The API docs, and examples below are sufficient to get
 - CIF structure formats (2fo-fc etc)
 
 
-For Genbank, we recommend [GB-IO](https://docs.rs/gb-io/latest/gb_io/). For atom coordinate mmCIF
-and PDB, we recommend [PDBTBX](https://docs.rs/pdbtbx/latest/pdbtbx/). We do not plan to support
+For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/). For atom coordinate mmCIF
+and PDB, we recommend [Pdbtbx](https://docs.rs/pdbtbx/latest/pdbtbx/). We do not plan to support
 these in these formats in bio_files due to these high-quality libraries.
 
-The API is straightforward to use. It operates using structs with public fields, which you can explore
-using the API docs, or your IDE. These structs generally include these three methods: `new()`, `save()` and `load()`.
-`new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and `load()` accept `&Path`. 
+Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
+
+It operates using structs with public fields, which you can explore
+using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`, 
+`save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and `load()` accept `&Path`.
+The Force Field formats instead use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
+
 Example use:
 
 ```rust
