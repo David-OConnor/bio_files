@@ -310,7 +310,7 @@ impl Mol2 {
 
                 atoms.push(AtomGeneric {
                     serial_number,
-                    name: Some(atom_name),
+                    name: Some(cols[1].to_owned()),
                     posit: Vec3 { x, y, z }, // or however you store coordinates
                     element,
                     // name: String::new(),

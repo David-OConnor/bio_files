@@ -8,7 +8,8 @@ use std::{
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
 pub struct MassData {
-    pub atom_type: String,
+    pub ff_type: String,
+    /// todo: What units? Daltons?
     pub mass: f32,
     pub comment: Option<String>,
 }
@@ -16,7 +17,7 @@ pub struct MassData {
 /// Data for a BOND entry: e.g. "CT-CT  310.0    1.526" with optional comment
 #[derive(Debug, Clone)]
 pub struct BondData {
-    pub atom_names: (String, String),
+    pub ff_types: (String, String),
     /// Force constant. (Similar to a spring constant). kcal/mol/Å²
     pub k: f32,
     /// Equilibrium bond length. Å
@@ -27,7 +28,7 @@ pub struct BondData {
 /// Data for an ANGLE entry: e.g. "CT-CT-CT  63.0    109.5" with optional comment
 #[derive(Debug, Clone)]
 pub struct AngleData {
-    pub atom_names: (String, String, String),
+    pub ff_types: (String, String, String),
     /// Force constant. kcal/mol/rad²
     pub k: f32,
     /// In degrees.
@@ -39,7 +40,7 @@ pub struct AngleData {
 #[derive(Debug, Clone)]
 pub struct DihedralData {
     /// "ca", "n", "cd", "sh" etc.
-    pub atom_names: (String, String, String, String),
+    pub ff_types: (String, String, String, String),
     /// Aka idivf. 	Scaling factor for barrier height (divide Vn by this)
     pub scaling_factor: u8,
     /// aka "vn". kcal/mol
@@ -55,7 +56,7 @@ pub struct DihedralData {
 /// Used to envforce planarity or chirality.
 #[derive(Debug, Clone)]
 pub struct ImproperDihedralData {
-    pub atom_names: (String, String, String, String),
+    pub ff_types: (String, String, String, String),
     /// kcal/mol/rad²
     pub k: f32,
     /// Equilibrium angle, or phase.  Often 0 or τ/2.
@@ -66,10 +67,17 @@ pub struct ImproperDihedralData {
 
 #[derive(Debug, Clone)]
 pub struct VdwData {
-    pub atom_name: String,
+    pub ff_type: String,
     // todo: Is this what it is?
     pub sigma: f32,
     pub eps: f32,
+}
+
+#[derive(Debug, Clone)]
+pub struct PartialChargeData {
+    pub ff_type: String,
+    pub charge: f32,
+    pub comment: Option<String>,
 }
 
 /// Top-level dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
@@ -81,8 +89,7 @@ pub struct ForceFieldParams {
     pub angle: Vec<AngleData>,
     pub dihedral: Vec<DihedralData>,
     pub improper: Vec<ImproperDihedralData>,
-    // todo: As required.
-    // pub partial_charge: Vec<PartialChargeData>,
+    pub partial_charge: Vec<PartialChargeData>,
     pub van_der_waals: Vec<VdwData>,
     pub remarks: Vec<String>,
 }
@@ -162,7 +169,7 @@ impl ForceFieldParams {
                         .next()
                         .map(|s| s.trim_start_matches('!').trim().to_string());
                     result.mass.push(MassData {
-                        atom_type: atom.to_string(),
+                        ff_type: atom.to_string(),
                         mass,
                         comment,
                     });
@@ -194,7 +201,7 @@ impl ForceFieldParams {
 
                     let comment = parts.next().map(|s| s.to_string());
                     result.bond.push(BondData {
-                        atom_names: (a1, a2),
+                        ff_types: (a1, a2),
                         k,
                         r_0: length,
                         comment,
@@ -225,7 +232,7 @@ impl ForceFieldParams {
                         })?;
                     let comment = parts.next().map(|s| s.to_string());
                     result.angle.push(AngleData {
-                        atom_names: (a1, a2, a3),
+                        ff_types: (a1, a2, a3),
                         k,
                         angle,
                         comment,
@@ -241,7 +248,7 @@ impl ForceFieldParams {
                         ));
                     }
 
-                    let names: Vec<&str> = cols[0].split('-').collect();
+                    let ff_types: Vec<&str> = cols[0].split('-').collect();
                     let scaling_factor = cols[1].parse().unwrap_or(1);
                     let barrier_height_vn = cols[2].parse().unwrap_or(0.0);
                     let gamma = cols[3].parse().unwrap_or(0.0);
@@ -273,11 +280,11 @@ impl ForceFieldParams {
                     // };
 
                     result.dihedral.push(DihedralData {
-                        atom_names: (
-                            names.get(0).unwrap_or(&"").to_string(),
-                            names.get(1).unwrap_or(&"").to_string(),
-                            names.get(2).unwrap_or(&"").to_string(),
-                            names.get(3).unwrap_or(&"").to_string(),
+                        ff_types: (
+                            ff_types.get(0).unwrap_or(&"").to_string(),
+                            ff_types.get(1).unwrap_or(&"").to_string(),
+                            ff_types.get(2).unwrap_or(&"").to_string(),
+                            ff_types.get(3).unwrap_or(&"").to_string(),
                         ),
                         scaling_factor,
                         barrier_height_vn,
@@ -296,18 +303,18 @@ impl ForceFieldParams {
                     if tokens.len() < 5 {
                         continue;
                     }
-                    let names: Vec<&str> = tokens[0].split('-').collect();
+                    let ff_types: Vec<&str> = tokens[0].split('-').collect();
                     let k = tokens[1].parse::<f32>().unwrap_or(0.0);
                     let phase = tokens[2].parse::<f32>().unwrap_or(0.0);
                     let per = tokens[3].parse::<f32>().unwrap_or(0.0) as i8;
                     let comment = tokens.get(4).map(|s| s.to_string());
 
                     result.improper.push(ImproperDihedralData {
-                        atom_names: (
-                            names.get(0).unwrap_or(&"").to_string(),
-                            names.get(1).unwrap_or(&"").to_string(),
-                            names.get(2).unwrap_or(&"").to_string(),
-                            names.get(3).unwrap_or(&"").to_string(),
+                        ff_types: (
+                            ff_types.get(0).unwrap_or(&"").to_string(),
+                            ff_types.get(1).unwrap_or(&"").to_string(),
+                            ff_types.get(2).unwrap_or(&"").to_string(),
+                            ff_types.get(3).unwrap_or(&"").to_string(),
                         ),
                         k,
                         phase,
@@ -334,9 +341,9 @@ impl ForceFieldParams {
         writeln!(f, "MASS")?;
         for m in &self.mass {
             if let Some(c) = &m.comment {
-                writeln!(f, "{} {:>10.4} ! {}", m.atom_type, m.mass, c)?;
+                writeln!(f, "{} {:>10.4} ! {}", m.ff_type, m.mass, c)?;
             } else {
-                writeln!(f, "{} {:>10.4}", m.atom_type, m.mass)?;
+                writeln!(f, "{} {:>10.4}", m.ff_type, m.mass)?;
             }
         }
         writeln!(f)?;
@@ -347,13 +354,13 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{}-{} {:>8.3} {:>8.3} {}",
-                    b.atom_names.0, b.atom_names.1, b.k, b.r_0, c
+                    b.ff_types.0, b.ff_types.1, b.k, b.r_0, c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{}-{} {:>8.3} {:>8.3}",
-                    b.atom_names.0, b.atom_names.1, b.k, b.r_0
+                    b.ff_types.0, b.ff_types.1, b.k, b.r_0
                 )?;
             }
         }
@@ -365,13 +372,13 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3} {}",
-                    a.atom_names.0, a.atom_names.1, a.atom_names.2, a.k, a.angle, c
+                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle, c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3}",
-                    a.atom_names.0, a.atom_names.1, a.atom_names.2, a.k, a.angle
+                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle
                 )?;
             }
         }
@@ -381,7 +388,7 @@ impl ForceFieldParams {
         for d in &self.dihedral {
             let names = format!(
                 "{}-{}-{}-{}",
-                d.atom_names.0, d.atom_names.1, d.atom_names.2, d.atom_names.3
+                d.ff_types.0, d.ff_types.1, d.ff_types.2, d.ff_types.3
             );
             let mut line = format!(
                 "{} {:>3} {:>8.3} {:>8.3} {:>8.3}",
@@ -401,7 +408,7 @@ impl ForceFieldParams {
         for imp in &self.improper {
             let names = format!(
                 "{}-{}-{}-{}",
-                imp.atom_names.0, imp.atom_names.1, imp.atom_names.2, imp.atom_names.3
+                imp.ff_types.0, imp.ff_types.1, imp.ff_types.2, imp.ff_types.3
             );
             if let Some(c) = &imp.comment {
                 writeln!(

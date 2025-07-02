@@ -18,15 +18,15 @@ used by your application. The API docs, and examples below are sufficient to get
 - FRCMOD (Amber force field patch data for small molecules)
 
 ### Planned:
-- PDBQT
-- MTZ
-- DNA
-- CIF structure formats (2fo-fc etc)
+- PDBQT (Exists in Daedalus; needs to be decoupled)
+- MTZ (Exists in Daedalus; needs to be decoupled)
+- DNA (Exists in PlasCAD; needs to be decoupled)
+- CIF structure formats (2fo-fc etc) (Exists in Daedalus; needs to be decoupled)
 
 
 For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/). For atom coordinate mmCIF
 and PDB, we recommend [Pdbtbx](https://docs.rs/pdbtbx/latest/pdbtbx/). We do not plan to support
-these in these formats in bio_files due to these high-quality libraries.
+these formats, due to the existence of these high-quality libraries.
 
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
@@ -81,6 +81,11 @@ pub fn save(&mut self, path: &Path) -> io::Result<()> {
     }
 }
 ```
+
+The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Linear bond parameters,
+angle between 3 atoms, dihedral angles etc.) You may wish to parse these into a format that has faster lookups for your application.
+This might mean using a HashMap with the `atom_names` fields set as keys, etc.
+
 
 Note that the above examples expect that your application has a struct representing the molecule that has
 `From<Mol2>`, and `to_mol2(&self)` (etc) methods. The details of these depend on the application. For example:

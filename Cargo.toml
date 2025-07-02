@@ -23,12 +23,12 @@ exclude = [".gitignore"]
 byteorder = "1.5.0"  # For use with some parsers.
 na_seq = "0.2.8"  # Element, atom etc primitives
 bio_apis = "0.1.4" # Loading data from RCSB etc.
-lin_alg = "1.1.10"
+lin_alg = "1.2.0"
 
 # todo: Ditch `bio` for your own FASTA parser.
 bio = "2.3.0"  # For FASTA parsing.
 
-bincode = { version = "2.0.1", optional = true }
+bincode = { version = "2.0.1", optional = true }  # Optional [de]serializing
 
 
 [features]

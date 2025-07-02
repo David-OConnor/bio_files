@@ -13,7 +13,9 @@ use std::{
     path::Path,
 };
 
-use crate::frcmod::{AngleData, BondData, DihedralData, ForceFieldParams, ImproperDihedralData, MassData, VdwData};
+use crate::frcmod::{
+    AngleData, BondData, DihedralData, ForceFieldParams, ImproperDihedralData, MassData, VdwData,
+};
 
 impl ForceFieldParams {
     /// From a string of a dat text file, from Amber.
@@ -58,7 +60,6 @@ impl ForceFieldParams {
                 .filter(|s| !s.is_empty())
                 .collect();
 
-            
             match atoms.len() {
                 1 => {
                     // Could be MASS or a vdW record.  MASS must have at least
@@ -71,7 +72,7 @@ impl ForceFieldParams {
                             let _pol: f32 = pol_str.parse().unwrap();
                             let comment = remainder_as_comment(2);
                             result.mass.push(MassData {
-                                atom_type: atoms[0].to_string(),
+                                ff_type: atoms[0].to_string(),
                                 mass,
                                 comment,
                             });
@@ -81,7 +82,7 @@ impl ForceFieldParams {
                             let eps: f32 = eps_str.parse().unwrap();
                             let comment = remainder_as_comment(2);
                             result.van_der_waals.push(VdwData {
-                                atom_name: atoms[0].to_string(),
+                                ff_type: atoms[0].to_string(),
                                 sigma,
                                 eps,
                             });
@@ -98,37 +99,34 @@ impl ForceFieldParams {
                 }
                 2 => {
                     // BOND – expect exactly two numeric fields (k, r0).
-                    let (Ok(k), Ok(len)) = (cols.next().unwrap_or("0").parse(), cols
-                        .next()
-                        .unwrap_or("0")
-                        .parse())
-                    else {
+                    let (Ok(k), Ok(len)) = (
+                        cols.next().unwrap_or("0").parse(),
+                        cols.next().unwrap_or("0").parse(),
+                    ) else {
                         result.remarks.push(line.to_string());
                         continue;
                     };
                     let comment = remainder_as_comment(2);
                     result.bond.push(BondData {
-                        atom_names: (atoms[0].to_string(), atoms[1].to_string()),
+                        ff_types: (atoms[0].to_string(), atoms[1].to_string()),
                         k,
                         r_0: len,
                         comment,
                     });
                 }
                 3 => {
-
                     // Angle data between 3 atoms.
-                    let (Ok(k), Ok(angle)) = (cols.next().unwrap_or("0").parse(), cols
-                        .next()
-                        .unwrap_or("0")
-                        .parse())
-                    else {
+                    let (Ok(k), Ok(angle)) = (
+                        cols.next().unwrap_or("0").parse(),
+                        cols.next().unwrap_or("0").parse(),
+                    ) else {
                         result.remarks.push(line.to_string());
                         continue;
                     };
 
                     let comment = remainder_as_comment(2);
                     result.angle.push(AngleData {
-                        atom_names: (
+                        ff_types: (
                             atoms[0].to_string(),
                             atoms[1].to_string(),
                             atoms[2].to_string(),
@@ -154,7 +152,7 @@ impl ForceFieldParams {
                             let periodicity = numeric[2] as i8;
                             let comment = remainder_as_comment(3);
                             result.improper.push(ImproperDihedralData {
-                                atom_names: (
+                                ff_types: (
                                     atoms[0].to_string(),
                                     atoms[1].to_string(),
                                     atoms[2].to_string(),
@@ -192,7 +190,7 @@ impl ForceFieldParams {
                             };
 
                             result.dihedral.push(DihedralData {
-                                atom_names: (
+                                ff_types: (
                                     atoms[0].to_string(),
                                     atoms[1].to_string(),
                                     atoms[2].to_string(),
@@ -215,7 +213,6 @@ impl ForceFieldParams {
                 }
             }
         }
-
 
         Ok(result)
     }
