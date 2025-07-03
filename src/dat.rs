@@ -125,8 +125,8 @@ impl ForceFieldParams {
                     match numeric.len() {
                         3 => {
                             // IMPROPER: k  phase  periodicity
-                            let k = numeric[0];
-                            let phase = numeric[1];
+                            let barrier_height_vn = numeric[0];
+                            let gamma = numeric[1];
                             let periodicity = numeric[2] as i8;
                             let comment = remainder_as_comment(3);
                             result.improper.push(ImproperDihedralData {
@@ -136,8 +136,8 @@ impl ForceFieldParams {
                                     atoms[2].to_string(),
                                     atoms[3].to_string(),
                                 ),
-                                k,
-                                phase,
+                                barrier_height_vn,
+                                gamma,
                                 periodicity,
                                 comment,
                             });

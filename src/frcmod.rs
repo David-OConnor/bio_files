@@ -45,7 +45,7 @@ pub struct DihedralData {
     pub scaling_factor: u8,
     /// aka "vn". kcal/mol
     pub barrier_height_vn: f32,
-    /// aka "gamma". Degrees. Often 0 or τ/2.
+    /// Equilibrium angle, or phase. Degrees. Often 0 or τ/2.
     pub gamma: f32,
     /// An integer, but uses decimals in the file format.
     pub periodicity: i8,
@@ -57,10 +57,10 @@ pub struct DihedralData {
 #[derive(Debug, Clone)]
 pub struct ImproperDihedralData {
     pub ff_types: (String, String, String, String),
-    /// kcal/mol/rad²
-    pub k: f32,
-    /// Equilibrium angle, or phase.  Often 0 or τ/2.
-    pub phase: f32,
+    /// kcal/mol/rad² // todo: Compaore units to proper  dihedra. todo: Replace this struct with normal Dihedral?
+    pub barrier_height_vn: f32,
+    /// Equilibrium angle, or phase. Degrees. Often 0 or τ/2.
+    pub gamma: f32,
     pub periodicity: i8,
     pub comment: Option<String>,
 }
@@ -304,8 +304,8 @@ impl ForceFieldParams {
                         continue;
                     }
                     let ff_types: Vec<&str> = tokens[0].split('-').collect();
-                    let k = tokens[1].parse::<f32>().unwrap_or(0.0);
-                    let phase = tokens[2].parse::<f32>().unwrap_or(0.0);
+                    let barrier_height_vn = tokens[1].parse::<f32>().unwrap_or(0.0);
+                    let gamma = tokens[2].parse::<f32>().unwrap_or(0.0);
                     let per = tokens[3].parse::<f32>().unwrap_or(0.0) as i8;
                     let comment = tokens.get(4).map(|s| s.to_string());
 
@@ -316,8 +316,8 @@ impl ForceFieldParams {
                             ff_types.get(2).unwrap_or(&"").to_string(),
                             ff_types.get(3).unwrap_or(&"").to_string(),
                         ),
-                        k,
-                        phase,
+                        barrier_height_vn,
+                        gamma,
                         periodicity: per,
                         comment,
                     });
@@ -414,13 +414,13 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3} {}",
-                    names, imp.k, imp.phase, imp.periodicity, c
+                    names, imp.barrier_height_vn, imp.gamma, imp.periodicity, c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3}",
-                    names, imp.k, imp.phase, imp.periodicity
+                    names, imp.barrier_height_vn, imp.gamma, imp.periodicity
                 )?;
             }
         }
