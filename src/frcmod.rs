@@ -9,7 +9,7 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct MassData {
     pub ff_type: String,
-    /// todo: What units? Daltons?
+    /// Daltons?
     pub mass: f32,
     pub comment: Option<String>,
 }
@@ -37,13 +37,13 @@ pub struct AngleData {
 }
 
 /// Data for a DIHEDRAL (proper) entry
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct DihedralData {
     /// "ca", "n", "cd", "sh" etc.
     pub ff_types: (String, String, String, String),
     /// Aka idivf. 	Scaling factor for barrier height (divide Vn by this)
     pub scaling_factor: u8,
-    /// aka "vn". kcal/mol
+    /// kcal/mol/rad²
     pub barrier_height_vn: f32,
     /// Equilibrium angle, or phase. Degrees. Often 0 or τ/2.
     pub gamma: f32,
@@ -53,11 +53,12 @@ pub struct DihedralData {
     pub penalty_score: f32,
 }
 
-/// Used to envforce planarity or chirality.
+/// Used to envorce planarity or chirality. For when one atom is out-of-plane.
+/// todo: Remove this struct in liu of `DihedralData`?
 #[derive(Debug, Clone)]
 pub struct ImproperDihedralData {
     pub ff_types: (String, String, String, String),
-    /// kcal/mol/rad² // todo: Compaore units to proper  dihedra. todo: Replace this struct with normal Dihedral?
+    /// kcal/mol/rad²
     pub barrier_height_vn: f32,
     /// Equilibrium angle, or phase. Degrees. Often 0 or τ/2.
     pub gamma: f32,
@@ -68,7 +69,6 @@ pub struct ImproperDihedralData {
 #[derive(Debug, Clone)]
 pub struct VdwData {
     pub ff_type: String,
-    // todo: Is this what it is?
     pub sigma: f32,
     pub eps: f32,
 }
@@ -213,14 +213,17 @@ impl ForceFieldParams {
                         io::Error::new(ErrorKind::InvalidData, "ANGLE missing triple")
                     })?;
                     let mut atoms = triple.split('-');
+
                     let a1 = atoms.next().unwrap().to_string();
                     let a2 = atoms.next().unwrap().to_string();
                     let a3 = atoms.next().unwrap().to_string();
+
                     let k = parts
                         .next()
                         .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "ANGLE missing k"))?
                         .parse::<f32>()
                         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid ANGLE k"))?;
+
                     let angle = parts
                         .next()
                         .ok_or_else(|| {
@@ -229,8 +232,10 @@ impl ForceFieldParams {
                         .parse::<f32>()
                         .map_err(|_| {
                             io::Error::new(ErrorKind::InvalidData, "Invalid ANGLE angle")
-                        })?;
+                        })?.to_radians();
+
                     let comment = parts.next().map(|s| s.to_string());
+
                     result.angle.push(AngleData {
                         ff_types: (a1, a2, a3),
                         k,
@@ -251,7 +256,7 @@ impl ForceFieldParams {
                     let ff_types: Vec<&str> = cols[0].split('-').collect();
                     let scaling_factor = cols[1].parse().unwrap_or(1);
                     let barrier_height_vn = cols[2].parse().unwrap_or(0.0);
-                    let gamma = cols[3].parse().unwrap_or(0.0);
+                    let gamma = cols[3].parse::<f32>().unwrap_or(0.0).to_radians();
 
                     /// Integer, but often represented as a float, e.g. "1.000" in the files Amber
                     /// generates.
@@ -305,7 +310,8 @@ impl ForceFieldParams {
                     }
                     let ff_types: Vec<&str> = tokens[0].split('-').collect();
                     let barrier_height_vn = tokens[1].parse::<f32>().unwrap_or(0.0);
-                    let gamma = tokens[2].parse::<f32>().unwrap_or(0.0);
+                    let gamma = tokens[2].parse::<f32>().unwrap_or(0.0).to_radians();
+
                     let per = tokens[3].parse::<f32>().unwrap_or(0.0) as i8;
                     let comment = tokens.get(4).map(|s| s.to_string());
 
@@ -372,13 +378,13 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3} {}",
-                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle, c
+                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle.to_degrees(), c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3}",
-                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle
+                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle.to_degrees()
                 )?;
             }
         }
@@ -392,7 +398,7 @@ impl ForceFieldParams {
             );
             let mut line = format!(
                 "{} {:>3} {:>8.3} {:>8.3} {:>8.3}",
-                names, d.scaling_factor, d.barrier_height_vn, d.gamma, d.periodicity
+                names, d.scaling_factor, d.barrier_height_vn, d.gamma.to_degrees(), d.periodicity
             );
             if let Some(n) = &d.notes {
                 line.push_str(&format!("  {}", n));
@@ -414,13 +420,13 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3} {}",
-                    names, imp.barrier_height_vn, imp.gamma, imp.periodicity, c
+                    names, imp.barrier_height_vn, imp.gamma.to_degrees(), imp.periodicity, c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3}",
-                    names, imp.barrier_height_vn, imp.gamma, imp.periodicity
+                    names, imp.barrier_height_vn, imp.gamma.to_degrees(), imp.periodicity
                 )?;
             }
         }

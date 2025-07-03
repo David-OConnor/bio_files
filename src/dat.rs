@@ -93,15 +93,17 @@ impl ForceFieldParams {
                 }
 
                 3 => {
-                    // ANGLE — same as before
+                    // ANGLE
                     let (Ok(k), Ok(angle)) = (
                         cols.next().unwrap_or(&"0").parse(),
-                        cols.next().unwrap_or(&"0").parse(),
+                        cols.next().unwrap_or(&"0").parse::<f32>(),
                     ) else {
                         result.remarks.push(line.to_string());
                         continue;
                     };
+
                     let comment = remainder_as_comment(2);
+
                     result.angle.push(AngleData {
                         ff_types: (
                             atoms[0].to_string(),
@@ -109,7 +111,7 @@ impl ForceFieldParams {
                             atoms[2].to_string(),
                         ),
                         k,
-                        angle,
+                        angle: angle.to_radians(),
                         comment,
                     });
                 }
@@ -126,8 +128,9 @@ impl ForceFieldParams {
                         3 => {
                             // IMPROPER: k  phase  periodicity
                             let barrier_height_vn = numeric[0];
-                            let gamma = numeric[1];
+                            let gamma = numeric[1].to_radians();
                             let periodicity = numeric[2] as i8;
+
                             let comment = remainder_as_comment(3);
                             result.improper.push(ImproperDihedralData {
                                 ff_types: (
@@ -146,7 +149,7 @@ impl ForceFieldParams {
                             // DIHEDRAL: scaling  Vn  γ  n  [notes…]
                             let scaling_factor = cols.next().unwrap().parse::<u8>().unwrap_or(1);
                             let barrier_height_vn = cols.next().unwrap().parse().unwrap_or(0.0);
-                            let gamma = cols.next().unwrap().parse().unwrap_or(0.0);
+                            let gamma = cols.next().unwrap().parse::<f32>().unwrap_or(0.0).to_radians();;
                             let periodicity = cols.next().unwrap().parse().unwrap_or(1.0) as i8;
 
                             let rest_of_line: String = cols
@@ -196,195 +199,6 @@ impl ForceFieldParams {
                 }
             }
         }
-
-        //
-        // for line in  text.lines() {
-        //     let line = line.trim();
-        //     if line.is_empty() {
-        //         continue;
-        //     }
-        //
-        //
-        //     let tokens: Vec<&str> = line.split_whitespace().collect();
-        //
-        //     // Tokenise on ASCII‐whitespace first – *do not* allocate yet.
-        //     let mut cols = line.split_whitespace();
-        //     let head = cols.next().unwrap(); // safe: line is non‑empty
-        //
-        //     // Helper closure: grab the rest of the original line after *n*
-        //     // numeric tokens to retain the author’s comment section intact.
-        //     let remainder_as_comment = |consumed_numeric: usize| -> Option<String> {
-        //         // Re‑tokenise for slicing so we can keep exact spacing.
-        //         let tokens: Vec<&str> = line.split_whitespace().collect();
-        //         if tokens.len() > consumed_numeric + 1 {
-        //             // +1 because `head` itself is the first token.
-        //             Some(tokens[(consumed_numeric + 1)..].join(" "))
-        //         } else {
-        //             None
-        //         }
-        //     };
-        //
-        //     // Remove any leading / trailing hyphens so `split('-')` doesn’t
-        //     // yield empty segments (e.g. `-n2-ss`).
-        //     let atom_field_clean = head.trim_matches('-');
-        //     let atoms: Vec<&str> = atom_field_clean
-        //         .split('-')
-        //         .filter(|s| !s.is_empty())
-        //         .collect();
-        //
-        //     match atoms.len() {
-        //         1 => {
-        //             // Could be MASS or a vdW record.  MASS must have at least
-        //             // one *float* directly after the atom‑type.
-        //             let next1 = cols.next();
-        //             let next2 = cols.next();
-        //             match (next1.and_then(|s| s.parse().ok()), next2) {
-        //                 (Some(mass), Some(pol_str)) if pol_str.parse::<f32>().is_ok() => {
-        //                     // Classic MASS record: `<type> <mass> <pol> [comment…]`
-        //                     let _pol: f32 = pol_str.parse().unwrap();
-        //                     let comment = remainder_as_comment(2);
-        //                     result.mass.push(MassData {
-        //                         ff_type: atoms[0].to_string(),
-        //                         mass,
-        //                         comment,
-        //                     });
-        //                 }
-        //                 (Some(sigma), Some(eps_str)) if eps_str.parse::<f32>().is_ok() => {
-        //                     // Treat as vdW line: `<type> <sigma> <eps> [comment…]`
-        //                     let eps: f32 = eps_str.parse().unwrap();
-        //                     let comment = remainder_as_comment(2);
-        //                     result.van_der_waals.push(VdwData {
-        //                         ff_type: atoms[0].to_string(),
-        //                         sigma,
-        //                         eps,
-        //                     });
-        //                     if let Some(c) = comment {
-        //                         result.remarks.push(format!("[vdW comment] {}", c));
-        //                     }
-        //                 }
-        //                 _ => {
-        //                     // Fallback to remark – covers the title line and
-        //                     // other housekeeping rows.
-        //                     result.remarks.push(line.to_string());
-        //                 }
-        //             }
-        //         }
-        //         2 => {
-        //             // BOND – expect exactly two numeric fields (k, r0).
-        //             let (Ok(k), Ok(len)) = (
-        //                 cols.next().unwrap_or("0").parse(),
-        //                 cols.next().unwrap_or("0").parse(),
-        //             ) else {
-        //                 result.remarks.push(line.to_string());
-        //                 continue;
-        //             };
-        //             let comment = remainder_as_comment(2);
-        //             result.bond.push(BondData {
-        //                 ff_types: (atoms[0].to_string(), atoms[1].to_string()),
-        //                 k,
-        //                 r_0: len,
-        //                 comment,
-        //             });
-        //         }
-        //         3 => {
-        //             // Angle data between 3 atoms.
-        //             let (Ok(k), Ok(angle)) = (
-        //                 cols.next().unwrap_or("0").parse(),
-        //                 cols.next().unwrap_or("0").parse(),
-        //             ) else {
-        //                 result.remarks.push(line.to_string());
-        //                 continue;
-        //             };
-        //
-        //             let comment = remainder_as_comment(2);
-        //             result.angle.push(AngleData {
-        //                 ff_types: (
-        //                     atoms[0].to_string(),
-        //                     atoms[1].to_string(),
-        //                     atoms[2].to_string(),
-        //                 ),
-        //                 k,
-        //                 angle,
-        //                 comment,
-        //             });
-        //         }
-        //         4 => {
-        //             // Either DIHEDRAL or IMPROPER.  We decide by counting how
-        //             // many numeric tokens follow.
-        //             let numeric: Vec<f32> = cols
-        //                 .clone() // don’t consume yet
-        //                 .filter_map(|t| t.parse().ok())
-        //                 .collect();
-        //
-        //             match numeric.len() {
-        //                 3 => {
-        //                     // IMPROPER: k  phase  periodicity
-        //                     let k = numeric[0];
-        //                     let phase = numeric[1];
-        //                     let periodicity = numeric[2] as i8;
-        //                     let comment = remainder_as_comment(3);
-        //                     result.improper.push(ImproperDihedralData {
-        //                         ff_types: (
-        //                             atoms[0].to_string(),
-        //                             atoms[1].to_string(),
-        //                             atoms[2].to_string(),
-        //                             atoms[3].to_string(),
-        //                         ),
-        //                         k,
-        //                         phase,
-        //                         periodicity,
-        //                         comment,
-        //                     });
-        //                 }
-        //                 4.. => {
-        //                     // DIHEDRAL: scaling  Vn  γ  n  [notes…]
-        //                     let scaling_factor = cols.next().unwrap().parse::<u8>().unwrap_or(1);
-        //                     let barrier_height_vn = cols.next().unwrap().parse().unwrap_or(0.0);
-        //                     let gamma = cols.next().unwrap().parse().unwrap_or(0.0);
-        //                     let periodicity = cols.next().unwrap().parse().unwrap_or(1.0) as i8;
-        //
-        //                     let rest_of_line: String = cols.collect::<Vec<&str>>().join(" ");
-        //                     let (notes, penalty_score) = if rest_of_line.is_empty() {
-        //                         (None, 0.0)
-        //                     } else {
-        //                         let lower = rest_of_line.to_lowercase();
-        //                         if let Some(idx) = lower.find("penalty score=") {
-        //                             let after = &rest_of_line[(idx + 14)..];
-        //                             let penalty_val = after
-        //                                 .split_whitespace()
-        //                                 .next()
-        //                                 .and_then(|s| s.parse().ok())
-        //                                 .unwrap_or(0.0);
-        //                             (Some(rest_of_line.clone()), penalty_val)
-        //                         } else {
-        //                             (Some(rest_of_line.clone()), 0.0)
-        //                         }
-        //                     };
-        //
-        //                     result.dihedral.push(DihedralData {
-        //                         ff_types: (
-        //                             atoms[0].to_string(),
-        //                             atoms[1].to_string(),
-        //                             atoms[2].to_string(),
-        //                             atoms[3].to_string(),
-        //                         ),
-        //                         scaling_factor,
-        //                         barrier_height_vn,
-        //                         gamma,
-        //                         periodicity,
-        //                         notes,
-        //                         penalty_score,
-        //                     });
-        //                 }
-        //                 _ => result.remarks.push(line.to_string()),
-        //             }
-        //         }
-        //         _ => {
-        //             // Anything else is preserved verbatim for later inspection.
-        //             result.remarks.push(line.to_string());
-        //         }
-        //     }
-        // }
 
         Ok(result)
     }
