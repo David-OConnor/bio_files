@@ -329,7 +329,6 @@ impl ForceFieldParamsKeyed {
         &self,
         ff_names: &(String, String, String, String),
     ) -> Option<&DihedralData> {
-        // Helpers – make the key list once, then search it.
         let (a, b, c, d) = (
             ff_names.0.clone(),
             ff_names.1.clone(),
@@ -338,37 +337,29 @@ impl ForceFieldParamsKeyed {
         );
 
         // Candidate keys ordered from most-specific to most-generic.
-        // 1. Exact               (A-B-C-D)
-        // 2. Exact, reversed     (D-C-B-A)
-        // 3. Wildcard leading    (X-B-C-D)
-        // 4. Wildcard trailing   (A-B-C-X)
-        // 5. Both ends “X”       (X-B-C-X)  – orientation-independent
-        // 6. The same three cases on the reversed order
         let mut keys: Vec<(String, String, String, String)> = Vec::with_capacity(8);
 
-        // exact
+        // Exact
         keys.push((a.clone(), b.clone(), c.clone(), d.clone()));
-        // exact (reversed)
         keys.push((d.clone(), c.clone(), b.clone(), a.clone()));
-        // X leading
-        keys.push(("X".into(), b.clone(), c.clone(), d.clone()));
-        // X trailing
-        keys.push((a.clone(), b.clone(), c.clone(), "X".into()));
-        // X --- X
-        keys.push(("X".into(), b.clone(), c.clone(), "X".into()));
-        // X leading (reversed)  == X-C-B-A
-        keys.push(("X".into(), c.clone(), b.clone(), a.clone()));
-        // X trailing (reversed) == D-C-B-X
-        keys.push((d.clone(), c.clone(), b.clone(), "X".into()));
-        // (The “X-B-C-X” tuple is symmetric, so adding it once is enough.)
 
-        // 1) Search proper-dihedral table
+        // One X
+        keys.push(("X".into(), b.clone(), c.clone(), d.clone()));
+        keys.push(("X".into(), c.clone(), b.clone(), a.clone()));
+        keys.push((a.clone(), b.clone(), c.clone(), "X".into()));
+        keys.push((d.clone(), c.clone(), b.clone(), "X".into()));
+
+        // Xs on both ends
+        keys.push(("X".into(), b.clone(), c.clone(), "X".into()));
+        keys.push(("X".into(), c.clone(), b.clone(), "X".into()));
+
+        // Proper
         for k in &keys {
             if let Some(data) = self.dihedral.get(k) {
                 return Some(data);
             }
         }
-        // 2) Search improper-dihedral table
+        // Improper
         for k in &keys {
             if let Some(data) = self.dihedral_improper.get(k) {
                 return Some(data);
