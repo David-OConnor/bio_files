@@ -124,7 +124,7 @@ impl AngleData {
         );
 
         let k = parse_float(cols[col1_i])?;
-        let angle = parse_float(cols[col1_i + 1])?;
+        let angle = parse_float(cols[col1_i + 1])?.to_radians();
 
         // We ignore the remaining cols for now: Source, # of ref geometries used to fit,
         // and RMS deviation of the fit.
@@ -192,7 +192,7 @@ impl DihedralData {
         }
 
         let barrier_height_vn = parse_float(cols[col1_i])?;
-        let phase = parse_float(cols[col1_i + 1])?;
+        let phase = parse_float(cols[col1_i + 1])?.to_radians();
         let periodicity = parse_float(cols[col1_i + 2])? as i8;
 
         // We ignore the remaining cols for now: Source, # of ref geometries used to fit,
@@ -320,6 +320,62 @@ impl ForceFieldParamsKeyed {
         }
 
         result
+    }
+
+    /// A utility function that handles proper and improper dihedral data,
+    /// tries both atom orders, and falls back to wildcard (“X”) matches on
+    /// the outer atoms when an exact hit is not found.
+    pub fn get_dihedral(
+        &self,
+        ff_names: &(String, String, String, String),
+    ) -> Option<&DihedralData> {
+        // Helpers – make the key list once, then search it.
+        let (a, b, c, d) = (
+            ff_names.0.clone(),
+            ff_names.1.clone(),
+            ff_names.2.clone(),
+            ff_names.3.clone(),
+        );
+
+        // Candidate keys ordered from most-specific to most-generic.
+        // 1. Exact               (A-B-C-D)
+        // 2. Exact, reversed     (D-C-B-A)
+        // 3. Wildcard leading    (X-B-C-D)
+        // 4. Wildcard trailing   (A-B-C-X)
+        // 5. Both ends “X”       (X-B-C-X)  – orientation-independent
+        // 6. The same three cases on the reversed order
+        let mut keys: Vec<(String, String, String, String)> = Vec::with_capacity(8);
+
+        // exact
+        keys.push((a.clone(), b.clone(), c.clone(), d.clone()));
+        // exact (reversed)
+        keys.push((d.clone(), c.clone(), b.clone(), a.clone()));
+        // X leading
+        keys.push(("X".into(), b.clone(), c.clone(), d.clone()));
+        // X trailing
+        keys.push((a.clone(), b.clone(), c.clone(), "X".into()));
+        // X --- X
+        keys.push(("X".into(), b.clone(), c.clone(), "X".into()));
+        // X leading (reversed)  == X-C-B-A
+        keys.push(("X".into(), c.clone(), b.clone(), a.clone()));
+        // X trailing (reversed) == D-C-B-X
+        keys.push((d.clone(), c.clone(), b.clone(), "X".into()));
+        // (The “X-B-C-X” tuple is symmetric, so adding it once is enough.)
+
+        // 1) Search proper-dihedral table
+        for k in &keys {
+            if let Some(data) = self.dihedral.get(k) {
+                return Some(data);
+            }
+        }
+        // 2) Search improper-dihedral table
+        for k in &keys {
+            if let Some(data) = self.dihedral_improper.get(k) {
+                return Some(data);
+            }
+        }
+
+        None
     }
 }
 
