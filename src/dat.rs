@@ -13,8 +13,8 @@ use std::{
     path::Path,
 };
 
-use crate::frcmod::{
-    AngleData, BondData, DihedralData, ForceFieldParams, ImproperDihedralData, MassData, VdwData,
+use crate::amber_params::{
+    AngleData, BondData, DihedralData, ForceFieldParams, MassData, VdwData, get_ff_types,
 };
 
 impl ForceFieldParams {
@@ -29,8 +29,21 @@ impl ForceFieldParams {
         // based on the number of dashes in it. Three atom names separated by dashes, e.g. `pf-p2-s` is angle data.
         // Two, e.g. `ca-s6` is linear bond data. (e.g. springiness of the covalent bond). FOur names indicates
         // a dihedral (aka torsion) angle.
-        for line in text.lines() {
+        for (i, line) in text.lines().enumerate() {
+            if i == 0 {
+                continue; // header line.
+            }
+
             let line = line.trim();
+
+            if line.starts_with("hn  ho  hs") || line.starts_with("hw  ow") {
+                continue; // Fragile.
+            }
+
+            if line.starts_with("END") {
+                break;
+            }
+
             if line.is_empty() {
                 // blank line ends MOD4 block
                 in_mod4 = false;
@@ -43,202 +56,72 @@ impl ForceFieldParams {
             }
 
             // 1. Break the line into whitespace‐split tokens.
-            let tokens: Vec<&str> = line.split_whitespace().collect();
+            let cols: Vec<_> = line.split_whitespace().collect();
 
-            // 2. Find the first token that _is_ a number (we assume f32 here).
-            let num_idx = tokens
-                .iter()
-                .position(|t| t.parse::<f32>().is_ok())
-                .unwrap_or(tokens.len());
+            let (ff_types, _) = get_ff_types(&cols);
 
-            // 3. Everything before that is our "atom field"
-            let atom_field = tokens[..num_idx].join(" ");
-
-            // 4. Everything from num_idx onward are the numeric + comment tokens
-            let data_tokens = &tokens[num_idx..];
-            let mut cols = data_tokens.iter();
-
-            // 5. Helper to grab a trailing comment after consuming N numeric tokens
-            let remainder_as_comment = |consumed: usize| -> Option<String> {
-                if data_tokens.len() > consumed {
-                    Some(data_tokens[consumed..].join(" "))
-                } else {
-                    None
-                }
-            };
-
-            // 6. Now split atom_field on hyphens or whitespace to get the atom names
-            let atoms: Vec<&str> = atom_field
-                .split(|c: char| c == '-' || c.is_whitespace())
-                .filter(|s| !s.is_empty())
-                .collect();
-
-            match atoms.len() {
+            match ff_types.len() {
                 1 => {
                     if in_mod4 {
-                        // ---------- VdW line (R*, ε) ---------------------------
-                        let (Ok(r_star), Ok(eps)) = (
-                            cols.next().unwrap_or(&"0").parse(),
-                            cols.next().unwrap_or(&"0").parse(),
-                        ) else {
-                            result.remarks.push(line.to_string());
-                            continue;
-                        };
-                        let comment = remainder_as_comment(2);
-                        result.van_der_waals.push(VdwData {
-                            ff_type: atoms[0].to_string(),
-                            r_star,
-                            eps,
-                        });
+                        result.van_der_waals.push(VdwData::from_line(line)?);
                     } else {
-                        // ---------- normal MASS line ---------------------------
-                        let Ok(mass_val) = cols.next().unwrap_or(&"0").parse() else {
-                            result.remarks.push(line.to_string());
-                            continue;
-                        };
-                        let _ = cols.next(); // skip polarizability
-                        let comment = remainder_as_comment(2);
-                        result.mass.push(MassData {
-                            ff_type: atoms[0].to_string(),
-                            mass: mass_val,
-                            comment,
-                        });
+                        result.mass.push(MassData::from_line(line)?);
                     }
                 }
 
                 2 => {
-                    // (linear) Bond data.
-                    let (Ok(k), Ok(r0)) = (
-                        cols.next().unwrap_or(&"0").parse(),
-                        cols.next().unwrap_or(&"0").parse(),
-                    ) else {
-                        result.remarks.push(line.to_string());
-                        continue;
-                    };
-                    let comment = remainder_as_comment(2);
-                    result.bond.push(BondData {
-                        ff_types: (atoms[0].to_string(), atoms[1].to_string()),
-                        k,
-                        r_0: r0,
-                        comment,
-                    });
+                    result.bond.push(BondData::from_line(line)?);
                 }
 
                 3 => {
-                    // Valence angle data between 3 atoms.
-                    let (Ok(k), Ok(angle)) = (
-                        cols.next().unwrap_or(&"0").parse(),
-                        cols.next().unwrap_or(&"0").parse::<f32>(),
-                    ) else {
-                        result.remarks.push(line.to_string());
-                        continue;
-                    };
-
-                    let comment = remainder_as_comment(2);
-
-                    result.angle.push(AngleData {
-                        ff_types: (
-                            atoms[0].to_string(),
-                            atoms[1].to_string(),
-                            atoms[2].to_string(),
-                        ),
-                        k,
-                        angle: angle.to_radians(),
-                        comment,
-                    });
+                    result.angle.push(AngleData::from_line(line)?);
                 }
 
                 4 => {
-                    // Either DIHEDRAL or IMPROPER.  We decide by counting how
-                    // many numeric tokens follow.
-                    let numeric: Vec<f32> = cols
-                        .clone() // don’t consume yet
-                        .filter_map(|t| t.parse().ok())
-                        .collect();
+                    let (dihedral, improper) = DihedralData::from_line(line)?;
 
-                    match numeric.len() {
-                        3 => {
-                            // IMPROPER: k  phase  periodicity
-                            let barrier_height_vn = numeric[0];
-                            let gamma = numeric[1].to_radians();
-                            let periodicity = numeric[2] as i8;
-
-                            let comment = remainder_as_comment(3);
-                            result.improper.push(ImproperDihedralData {
-                                ff_types: (
-                                    atoms[0].to_string(),
-                                    atoms[1].to_string(),
-                                    atoms[2].to_string(),
-                                    atoms[3].to_string(),
-                                ),
-                                barrier_height_vn,
-                                gamma,
-                                periodicity,
-                                comment,
-                            });
-                        }
-                        4.. => {
-                            // DIHEDRAL: scaling  Vn  γ  n  [notes…]
-                            let scaling_factor = cols.next().unwrap().parse::<u8>().unwrap_or(1);
-                            let barrier_height_vn = cols.next().unwrap().parse().unwrap_or(0.0);
-                            let gamma = cols
-                                .next()
-                                .unwrap()
-                                .parse::<f32>()
-                                .unwrap_or(0.0)
-                                .to_radians();
-                            let periodicity = cols.next().unwrap().parse().unwrap_or(1.0) as i8;
-
-                            let rest_of_line: String = cols
-                                .copied() // turn &&str → &str
-                                .collect::<Vec<&str>>()
-                                .join(" ");
-
-                            let (notes, penalty_score) = if rest_of_line.is_empty() {
-                                (None, 0.0)
-                            } else {
-                                let lower = rest_of_line.to_lowercase();
-                                if let Some(idx) = lower.find("penalty score=") {
-                                    let after = &rest_of_line[(idx + 14)..];
-                                    let penalty_val = after
-                                        .split_whitespace()
-                                        .next()
-                                        .and_then(|s| s.parse().ok())
-                                        .unwrap_or(0.0);
-                                    (Some(rest_of_line.clone()), penalty_val)
-                                } else {
-                                    (Some(rest_of_line.clone()), 0.0)
-                                }
-                            };
-
-                            result.dihedral.push(DihedralData {
-                                ff_types: (
-                                    atoms[0].to_string(),
-                                    atoms[1].to_string(),
-                                    atoms[2].to_string(),
-                                    atoms[3].to_string(),
-                                ),
-                                scaling_factor,
-                                barrier_height_vn,
-                                gamma,
-                                periodicity,
-                                notes,
-                                penalty_score,
-                            });
-                        }
-                        _ => result.remarks.push(line.to_string()),
+                    if improper {
+                        result.improper.push(dihedral);
+                    } else {
+                        result.dihedral.push(dihedral);
                     }
                 }
 
                 _ => {
                     // anything else
+                    println!(
+                        "Pushing a remark: ff len: {:?}, {}, {:?}",
+                        ff_types,
+                        ff_types.len(),
+                        line
+                    );
                     result.remarks.push(line.to_string());
                 }
             }
         }
 
-        println!("Loaded mass data: {:?}", result.mass);
-        println!("Loaded LJ data: {:?}", result.van_der_waals);
+        // for r in &result.van_der_waals {
+        //     println!("Vdw: {:?}", r);
+        // }
+        // for r in &result.bond {
+        //     println!("Bond: {:?}", r);
+        // }
+        //
+        //
+        // for r in &result.mass {
+        //     println!("Mass: {:?}", r);
+        // }
+        //
+        // for r in &result.angle {
+        //     println!("Ang: {:?}", r);
+        // }
+        //
+        // for r in &result.dihedral {
+        //     println!("Dih: {:?}", r);
+        // }
+        // for r in &result.improper {
+        //     println!("Imp: {:?}", r);
+        // }
 
         Ok(result)
     }
