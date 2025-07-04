@@ -69,7 +69,8 @@ pub struct ImproperDihedralData {
 #[derive(Debug, Clone)]
 pub struct VdwData {
     pub ff_type: String,
-    pub sigma: f32,
+    // pub sigma: f32,
+    pub r_star: f32,
     pub eps: f32,
 }
 
@@ -230,9 +231,8 @@ impl ForceFieldParams {
                             io::Error::new(ErrorKind::InvalidData, "ANGLE missing angle")
                         })?
                         .parse::<f32>()
-                        .map_err(|_| {
-                            io::Error::new(ErrorKind::InvalidData, "Invalid ANGLE angle")
-                        })?.to_radians();
+                        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid ANGLE angle"))?
+                        .to_radians();
 
                     let comment = parts.next().map(|s| s.to_string());
 
@@ -378,13 +378,22 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3} {}",
-                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle.to_degrees(), c
+                    a.ff_types.0,
+                    a.ff_types.1,
+                    a.ff_types.2,
+                    a.k,
+                    a.angle.to_degrees(),
+                    c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3}",
-                    a.ff_types.0, a.ff_types.1, a.ff_types.2, a.k, a.angle.to_degrees()
+                    a.ff_types.0,
+                    a.ff_types.1,
+                    a.ff_types.2,
+                    a.k,
+                    a.angle.to_degrees()
                 )?;
             }
         }
@@ -398,7 +407,11 @@ impl ForceFieldParams {
             );
             let mut line = format!(
                 "{} {:>3} {:>8.3} {:>8.3} {:>8.3}",
-                names, d.scaling_factor, d.barrier_height_vn, d.gamma.to_degrees(), d.periodicity
+                names,
+                d.scaling_factor,
+                d.barrier_height_vn,
+                d.gamma.to_degrees(),
+                d.periodicity
             );
             if let Some(n) = &d.notes {
                 line.push_str(&format!("  {}", n));
@@ -420,13 +433,20 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3} {}",
-                    names, imp.barrier_height_vn, imp.gamma.to_degrees(), imp.periodicity, c
+                    names,
+                    imp.barrier_height_vn,
+                    imp.gamma.to_degrees(),
+                    imp.periodicity,
+                    c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3}",
-                    names, imp.barrier_height_vn, imp.gamma.to_degrees(), imp.periodicity
+                    names,
+                    imp.barrier_height_vn,
+                    imp.gamma.to_degrees(),
+                    imp.periodicity
                 )?;
             }
         }

@@ -22,7 +22,7 @@ impl ForceFieldParams {
     pub fn from_dat(text: &str) -> io::Result<Self> {
         let mut result = Self::default();
 
-        // let lines: Vec<&str> = text.lines().collect();
+        let mut in_mod4 = false;
 
         // These dat text-based files are tabular data, and don't have clear delineations bewteen sections.
         // we parse each line based on its content. Notably, the first column alone is a good indicator
@@ -32,7 +32,14 @@ impl ForceFieldParams {
         for line in text.lines() {
             let line = line.trim();
             if line.is_empty() {
+                // blank line ends MOD4 block
+                in_mod4 = false;
                 continue;
+            }
+            // header that *starts* the block
+            if line.starts_with("MOD4") {
+                in_mod4 = true;
+                continue; // nothing else to parse on this header line
             }
 
             // 1. Break the line into whitespace‐split tokens.
@@ -68,14 +75,39 @@ impl ForceFieldParams {
 
             match atoms.len() {
                 1 => {
-                    // MASS or vdW, just as before—but using `cols` and `remainder_as_comment`
-                    let next1 = cols.next().copied();
-                    let next2 = cols.next().copied();
-                    // … your existing detection of mass vs. vdW …
+                    if in_mod4 {
+                        // ---------- VdW line (R*, ε) ---------------------------
+                        let (Ok(r_star), Ok(eps)) = (
+                            cols.next().unwrap_or(&"0").parse(),
+                            cols.next().unwrap_or(&"0").parse(),
+                        ) else {
+                            result.remarks.push(line.to_string());
+                            continue;
+                        };
+                        let comment = remainder_as_comment(2);
+                        result.van_der_waals.push(VdwData {
+                            ff_type: atoms[0].to_string(),
+                            r_star,
+                            eps,
+                        });
+                    } else {
+                        // ---------- normal MASS line ---------------------------
+                        let Ok(mass_val) = cols.next().unwrap_or(&"0").parse() else {
+                            result.remarks.push(line.to_string());
+                            continue;
+                        };
+                        let _ = cols.next(); // skip polarizability
+                        let comment = remainder_as_comment(2);
+                        result.mass.push(MassData {
+                            ff_type: atoms[0].to_string(),
+                            mass: mass_val,
+                            comment,
+                        });
+                    }
                 }
 
                 2 => {
-                    // BOND — exactly two numeric tokens: k, r₀
+                    // (linear) Bond data.
                     let (Ok(k), Ok(r0)) = (
                         cols.next().unwrap_or(&"0").parse(),
                         cols.next().unwrap_or(&"0").parse(),
@@ -93,7 +125,7 @@ impl ForceFieldParams {
                 }
 
                 3 => {
-                    // ANGLE
+                    // Valence angle data between 3 atoms.
                     let (Ok(k), Ok(angle)) = (
                         cols.next().unwrap_or(&"0").parse(),
                         cols.next().unwrap_or(&"0").parse::<f32>(),
@@ -149,7 +181,12 @@ impl ForceFieldParams {
                             // DIHEDRAL: scaling  Vn  γ  n  [notes…]
                             let scaling_factor = cols.next().unwrap().parse::<u8>().unwrap_or(1);
                             let barrier_height_vn = cols.next().unwrap().parse().unwrap_or(0.0);
-                            let gamma = cols.next().unwrap().parse::<f32>().unwrap_or(0.0).to_radians();;
+                            let gamma = cols
+                                .next()
+                                .unwrap()
+                                .parse::<f32>()
+                                .unwrap_or(0.0)
+                                .to_radians();
                             let periodicity = cols.next().unwrap().parse().unwrap_or(1.0) as i8;
 
                             let rest_of_line: String = cols
@@ -199,6 +236,9 @@ impl ForceFieldParams {
                 }
             }
         }
+
+        println!("Loaded mass data: {:?}", result.mass);
+        println!("Loaded LJ data: {:?}", result.van_der_waals);
 
         Ok(result)
     }
