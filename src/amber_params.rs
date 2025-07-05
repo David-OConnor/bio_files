@@ -249,15 +249,11 @@ impl VdwData {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct PartialChargeData {
-    pub ff_type: String,
-    pub charge: f32,
-    pub comment: Option<String>,
-}
-
 /// Top-level dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
 /// for parsing flexibility.
+///
+/// Note that we don't include partial charges here, as they come from Mol2 files; this struct
+/// is for data parsed from DAT, FRCMOD etc files.
 #[derive(Debug, Default)]
 pub struct ForceFieldParams {
     pub mass: Vec<MassData>,
@@ -265,7 +261,7 @@ pub struct ForceFieldParams {
     pub angle: Vec<AngleData>,
     pub dihedral: Vec<DihedralData>,
     pub improper: Vec<DihedralData>,
-    pub partial_charge: Vec<PartialChargeData>,
+    // pub partial_charge: Vec<PartialChargeData>,
     pub van_der_waals: Vec<VdwData>,
     pub remarks: Vec<String>,
 }
@@ -283,8 +279,9 @@ pub struct ForceFieldParamsKeyed {
     pub dihedral: HashMap<(String, String, String, String), DihedralData>,
     pub dihedral_improper: HashMap<(String, String, String, String), DihedralData>,
     pub van_der_waals: HashMap<String, VdwData>,
-    // todo: Partial charges here A/R. Note that we also assign them to the atom directly.
-    pub partial_charges: HashMap<String, f32>,
+    // todo: Partial charges here A/R. Removed here for now, since we get them from
+    // Mol2 etc files, so their state is associated that way.
+    // pub partial_charges: HashMap<String, f32>,
 }
 
 impl ForceFieldParamsKeyed {
@@ -328,6 +325,7 @@ impl ForceFieldParamsKeyed {
     pub fn get_dihedral(
         &self,
         ff_names: &(String, String, String, String),
+        proper: bool, // todo: Experimenting.
     ) -> Option<&DihedralData> {
         let (a, b, c, d) = (
             ff_names.0.clone(),
@@ -354,15 +352,18 @@ impl ForceFieldParamsKeyed {
         keys.push(("X".into(), c.clone(), b.clone(), "X".into()));
 
         // Proper
-        for k in &keys {
-            if let Some(data) = self.dihedral.get(k) {
-                return Some(data);
+        if proper {
+            for k in &keys {
+                if let Some(data) = self.dihedral.get(k) {
+                    return Some(data);
+                }
             }
-        }
-        // Improper
-        for k in &keys {
-            if let Some(data) = self.dihedral_improper.get(k) {
-                return Some(data);
+        } else {
+            // Improper
+            for k in &keys {
+                if let Some(data) = self.dihedral_improper.get(k) {
+                    return Some(data);
+                }
             }
         }
 
@@ -372,6 +373,7 @@ impl ForceFieldParamsKeyed {
 
 /// Helper to deal with spaces in the FF-type col, while still allowing col separation
 /// by whitespace.
+/// Note: it appears the whitespace is due to the spacing being padded to 2 chars each.
 pub(crate) fn get_ff_types(cols: &[&str]) -> (Vec<String>, usize) {
     let mut ff_types = cols[0].to_string();
     let mut col_1_i = 1;
