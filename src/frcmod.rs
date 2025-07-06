@@ -5,7 +5,9 @@ use std::{
     path::Path,
 };
 
-use crate::amber_params::{AngleData, BondData, DihedralData, ForceFieldParams, MassData};
+use crate::amber_params::{
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
+};
 
 #[derive(Debug, PartialEq)]
 enum Section {
@@ -67,19 +69,19 @@ impl ForceFieldParams {
                     result.remarks.push(line.to_owned());
                 }
                 Section::Mass => {
-                    result.mass.push(MassData::from_line(line)?);
+                    result.mass.push(MassParams::from_line(line)?);
                 }
                 Section::Bond => {
-                    result.bond.push(BondData::from_line(line)?);
+                    result.bond.push(BondStretchingParams::from_line(line)?);
                 }
                 Section::Angle => {
-                    result.angle.push(AngleData::from_line(line)?);
+                    result.angle.push(AngleBendingParams::from_line(line)?);
                 }
                 Section::Dihedral => {
-                    result.dihedral.push(DihedralData::from_line(line)?.0);
+                    result.dihedral.push(DihedralParams::from_line(line)?.0);
                 }
                 Section::Improper => {
-                    result.improper.push(DihedralData::from_line(line)?.0);
+                    result.improper.push(DihedralParams::from_line(line)?.0);
                 }
                 Section::Nonbond | Section::None => { /* skip or extend */ }
             }
@@ -109,9 +111,9 @@ impl ForceFieldParams {
         writeln!(f, "MASS")?;
         for m in &self.mass {
             if let Some(c) = &m.comment {
-                writeln!(f, "{} {:>10.4} ! {}", m.ff_type, m.mass, c)?;
+                writeln!(f, "{} {:>10.4} ! {}", m.atom_type, m.mass, c)?;
             } else {
-                writeln!(f, "{} {:>10.4}", m.ff_type, m.mass)?;
+                writeln!(f, "{} {:>10.4}", m.atom_type, m.mass)?;
             }
         }
         writeln!(f)?;
@@ -122,13 +124,13 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{}-{} {:>8.3} {:>8.3} {}",
-                    b.ff_types.0, b.ff_types.1, b.k, b.r_0, c
+                    b.atom_types.0, b.atom_types.1, b.k_b, b.r_0, c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{}-{} {:>8.3} {:>8.3}",
-                    b.ff_types.0, b.ff_types.1, b.k, b.r_0
+                    b.atom_types.0, b.atom_types.1, b.k_b, b.r_0
                 )?;
             }
         }
@@ -140,22 +142,22 @@ impl ForceFieldParams {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3} {}",
-                    a.ff_types.0,
-                    a.ff_types.1,
-                    a.ff_types.2,
+                    a.atom_types.0,
+                    a.atom_types.1,
+                    a.atom_types.2,
                     a.k,
-                    a.angle.to_degrees(),
+                    a.theta_0.to_degrees(),
                     c
                 )?;
             } else {
                 writeln!(
                     f,
                     "{}-{}-{} {:>8.3} {:>8.3}",
-                    a.ff_types.0,
-                    a.ff_types.1,
-                    a.ff_types.2,
+                    a.atom_types.0,
+                    a.atom_types.1,
+                    a.atom_types.2,
                     a.k,
-                    a.angle.to_degrees()
+                    a.theta_0.to_degrees()
                 )?;
             }
         }
@@ -165,13 +167,13 @@ impl ForceFieldParams {
         for d in &self.dihedral {
             let names = format!(
                 "{}-{}-{}-{}",
-                d.ff_types.0, d.ff_types.1, d.ff_types.2, d.ff_types.3
+                d.atom_types.0, d.atom_types.1, d.atom_types.2, d.atom_types.3
             );
             let mut line = format!(
                 "{} {:>3} {:>8.3} {:>8.3} {:>8.3}",
                 names,
-                d.integer_divisor,
-                d.barrier_height_vn,
+                d.divider,
+                d.barrier_height,
                 d.phase.to_degrees(),
                 d.periodicity
             );
@@ -186,14 +188,14 @@ impl ForceFieldParams {
         for imp in &self.improper {
             let names = format!(
                 "{}-{}-{}-{}",
-                imp.ff_types.0, imp.ff_types.1, imp.ff_types.2, imp.ff_types.3
+                imp.atom_types.0, imp.atom_types.1, imp.atom_types.2, imp.atom_types.3
             );
             if let Some(c) = &imp.comment {
                 writeln!(
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3} {}",
                     names,
-                    imp.barrier_height_vn,
+                    imp.barrier_height,
                     imp.phase.to_degrees(),
                     imp.periodicity,
                     c
@@ -203,7 +205,7 @@ impl ForceFieldParams {
                     f,
                     "{} {:>8.3} {:>8.3} {:>8.3}",
                     names,
-                    imp.barrier_height_vn,
+                    imp.barrier_height,
                     imp.phase.to_degrees(),
                     imp.periodicity
                 )?;

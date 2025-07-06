@@ -102,3 +102,7 @@ impl From<Sdf> for Molecule {
     }
 }
 ```
+
+
+### References
+- [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)

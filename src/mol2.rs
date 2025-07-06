@@ -408,7 +408,7 @@ impl Mol2 {
                 None => atom.element.to_letter(),
             };
 
-            let ff_atom_type = match &atom.force_field_atom_type {
+            let atom_type = match &atom.force_field_atom_type {
                 Some(f) => f.to_owned(),
                 None => atom.element.to_letter(),
             };
@@ -421,7 +421,7 @@ impl Mol2 {
                 atom.posit.x,
                 atom.posit.y,
                 atom.posit.z,
-                ff_atom_type,
+                atom_type,
                 0,
                 "UNL",
                 atom.partial_charge.unwrap_or_default()

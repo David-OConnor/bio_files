@@ -14,7 +14,8 @@ use std::{
 };
 
 use crate::amber_params::{
-    AngleData, BondData, DihedralData, ForceFieldParams, MassData, VdwData, get_ff_types,
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
+    VdwParams, get_atom_types,
 };
 
 impl ForceFieldParams {
@@ -58,27 +59,27 @@ impl ForceFieldParams {
             // 1. Break the line into whitespace‐split tokens.
             let cols: Vec<_> = line.split_whitespace().collect();
 
-            let (ff_types, _) = get_ff_types(&cols);
+            let (atom_types, _) = get_atom_types(&cols);
 
-            match ff_types.len() {
+            match atom_types.len() {
                 1 => {
                     if in_mod4 {
-                        result.van_der_waals.push(VdwData::from_line(line)?);
+                        result.van_der_waals.push(VdwParams::from_line(line)?);
                     } else {
-                        result.mass.push(MassData::from_line(line)?);
+                        result.mass.push(MassParams::from_line(line)?);
                     }
                 }
 
                 2 => {
-                    result.bond.push(BondData::from_line(line)?);
+                    result.bond.push(BondStretchingParams::from_line(line)?);
                 }
 
                 3 => {
-                    result.angle.push(AngleData::from_line(line)?);
+                    result.angle.push(AngleBendingParams::from_line(line)?);
                 }
 
                 4 => {
-                    let (dihedral, improper) = DihedralData::from_line(line)?;
+                    let (dihedral, improper) = DihedralParams::from_line(line)?;
 
                     if improper {
                         result.improper.push(dihedral);
@@ -91,8 +92,8 @@ impl ForceFieldParams {
                     // anything else
                     println!(
                         "Pushing a remark: ff len: {:?}, {}, {:?}",
-                        ff_types,
-                        ff_types.len(),
+                        atom_types,
+                        atom_types.len(),
                         line
                     );
                     result.remarks.push(line.to_string());
