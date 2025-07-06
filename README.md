@@ -82,9 +82,16 @@ pub fn save(&mut self, path: &Path) -> io::Result<()> {
 }
 ```
 
-The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Linear bond parameters,
-angle between 3 atoms, dihedral angles etc.) You may wish to parse these into a format that has faster lookups for your application.
-This might mean using a HashMap with the `atom_names` fields set as keys, etc.
+## Amber force fields
+
+Reference the [Amber reference manual](Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf) 
+for details on how we parse its files, and how to use the results. In some cases, we change the format from
+the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals 
+parameters. Structs and fields are documented with reference manual references.
+
+The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching parameters,
+angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups 
+for your application. 
 
 
 Note that the above examples expect that your application has a struct representing the molecule that has

@@ -250,7 +250,7 @@ pub struct VdwParams {
 impl VdwParams {
     /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
     pub fn from_line(line: &str) -> io::Result<Self> {
-        const TWO_POW_ONE_SIXTH: f32 = 1.122_462_048_309_373; // 2^(1/6)
+        const SIGMA_FACTOR: f32 = 1.122_462_048_309_373; // 2^(1/6)
 
         let cols: Vec<_> = line.trim().split_whitespace().collect();
 
@@ -265,7 +265,7 @@ impl VdwParams {
         let r_min = parse_float(cols[1])?;
         let eps = parse_float(cols[2])?;
 
-        let sigma = 2.0 * r_min / TWO_POW_ONE_SIXTH;
+        let sigma = 2.0 * r_min / SIGMA_FACTOR;
 
         Ok(Self {
             atom_type,
