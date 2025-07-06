@@ -236,13 +236,22 @@ impl DihedralParams {
 /// Amber RM, section 15.1.7
 pub struct VdwParams {
     pub atom_type: String,
-    pub r_star: f32,
+    /// σ. derived from Van der Waals radius, Å. Note that Amber parameter files use R_min,
+    /// vice σ. This value is σ, which we compute when parsing.
+    ///
+    /// R_min (i, j) = 0.5(R_min_i + R_min_j)
+    /// σ_min (i, j) = 0.5(σ_min_i + σ_min_j)
+    pub sigma: f32,
+    /// Energy, kcal/mol. (Represents depth of the potential well).
+    /// ε(i, j) = sqrt(ε_i * ε_j)
     pub eps: f32,
 }
 
 impl VdwParams {
     /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
     pub fn from_line(line: &str) -> io::Result<Self> {
+        const TWO_POW_ONE_SIXTH: f32 = 1.122_462_048_309_373; // 2^(1/6)
+
         let cols: Vec<_> = line.trim().split_whitespace().collect();
 
         if cols.len() < 3 {
@@ -253,13 +262,14 @@ impl VdwParams {
         }
 
         let atom_type = cols[0].to_string();
-
-        let r_star = parse_float(cols[1])?;
+        let r_min = parse_float(cols[1])?;
         let eps = parse_float(cols[2])?;
+
+        let sigma = 2.0 * r_min / TWO_POW_ONE_SIXTH;
 
         Ok(Self {
             atom_type,
-            r_star,
+            sigma,
             eps,
         })
     }
