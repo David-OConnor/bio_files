@@ -30,8 +30,8 @@ impl ForceFieldParams {
 
         let mut section = Section::Remark;
 
-        for raw in lines {
-            let line = raw.trim();
+        for line in lines {
+            let line = line.trim();
             if line.is_empty() {
                 continue;
             }
@@ -45,7 +45,7 @@ impl ForceFieldParams {
                     section = Section::Bond;
                     continue;
                 }
-                "ANGLE" => {
+                "ANGLE" | "ANGL" => {
                     section = Section::Angle;
                     continue;
                 }
@@ -53,11 +53,11 @@ impl ForceFieldParams {
                     section = Section::Dihedral;
                     continue;
                 }
-                "IMPROPER" => {
+                "IMPROPER" | "IMPR" => {
                     section = Section::Improper;
                     continue;
                 }
-                "NONBON" => {
+                "NONBON" | "NONB" => {
                     section = Section::Nonbond;
                     continue;
                 }

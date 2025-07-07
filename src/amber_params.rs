@@ -12,7 +12,10 @@
 use std::{
     collections::HashMap,
     io::{self, ErrorKind},
+    str::FromStr,
 };
+
+use na_seq::AminoAcid;
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
@@ -287,6 +290,41 @@ impl VdwParams {
     }
 }
 
+#[derive(Debug)]
+pub struct ChargeParams {
+    /// This is the identifier we use throughout this module, to associate with an atom.
+    pub atom_type: String,
+    /// I'm not sur what this is. "XC", "H1" etc.
+    pub atom_type_2: String,
+    pub charge: f32, // partial charge (q_i)
+}
+
+// impl ChargeParams {
+//     /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
+//     /// Note: This comes from a .lib file; not .dat or .frcmod. This differs
+//     /// from the other parsings inthis file.
+//     pub fn from_line(line: &str) -> io::Result<Self> {
+//         let cols: Vec<_> = line.trim().split_whitespace().collect();
+//
+//         if cols.len() < 3 {
+//             return Err(io::Error::new(
+//                 ErrorKind::InvalidData,
+//                 "Not enough cols (Charge).",
+//             ));
+//         }
+//
+//         let atom_type = cols[0].to_string();
+//         let r_min = parse_float(cols[1])?;
+//         let eps = parse_float(cols[2])?;
+//
+//         Ok(Self {
+//             atom_type,
+//             atom_type,
+//             charge
+//         })
+//     }
+// }
+
 /// Top-level dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
 /// for parsing flexibility.
 ///
@@ -434,4 +472,84 @@ pub(crate) fn get_atom_types(cols: &[&str]) -> (Vec<String>, usize) {
 fn parse_float(v: &str) -> io::Result<f32> {
     v.parse()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, format!("Invalid float: {v}")))
+}
+
+/// Load charge data from Amber's `amino19.lib`, `aminoct12.lib`, `aminont12.lib`, and similar.
+pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcid, Vec<ChargeParams>>> {
+    enum Mode {
+        Scan,                       // not inside an atoms table
+        InAtoms { res: AminoAcid }, // currently reading atom lines for this residue
+    }
+
+    let mut state = Mode::Scan;
+    let mut result: HashMap<AminoAcid, Vec<ChargeParams>> = HashMap::new();
+
+    let lines: Vec<&str> = text.lines().collect();
+
+    for line in lines {
+        let ltrim = line.trim_start();
+
+        // Section headers
+        if let Some(rest) = ltrim.strip_prefix("!entry.") {
+            state = Mode::Scan;
+
+            if let Some((tag, tail)) = rest.split_once('.') {
+                // We only care about "<RES>.unit.atoms table"
+                if tail.starts_with("unit.atoms table") {
+                    println!("TAG: {:?}", tag);
+                    // This currently fails on alternate variants like ASSH for ASP that's protonated.
+                    // other examples are LYS/LYN. todo: Impl if you need.
+                    let Ok(aa) = AminoAcid::from_str(tag) else {
+                        continue;
+                    };
+
+                    state = Mode::InAtoms { res: aa };
+
+                    result.entry(aa).or_default(); // make sure map key exists
+                }
+            }
+            continue;
+        }
+
+        // If inside atoms table, parse data line
+        if let Mode::InAtoms { ref res } = state {
+            // tables end when we hit an empty line or a comment
+            if ltrim.is_empty() || ltrim.starts_with('!') {
+                state = Mode::Scan;
+                continue;
+            }
+
+            let mut tokens = Vec::<&str>::new();
+            let mut in_quote = false;
+            let mut start = 0usize;
+            let bytes = ltrim.as_bytes();
+            for (i, &b) in bytes.iter().enumerate() {
+                match b {
+                    b'"' => in_quote = !in_quote,
+                    b' ' | b'\t' if !in_quote => {
+                        if start < i {
+                            tokens.push(&ltrim[start..i]);
+                        }
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            if start < ltrim.len() {
+                tokens.push(&ltrim[start..]);
+            }
+
+            let atom_name = tokens[0].trim_matches('"').to_string();
+            let atom_type = tokens[1].trim_matches('"').to_string();
+            let charge = parse_float(tokens.last().unwrap())?;
+
+            result.get_mut(res).unwrap().push(ChargeParams {
+                atom_type: atom_name,
+                atom_type_2: atom_type,
+                charge,
+            });
+        }
+    }
+
+    Ok(result)
 }

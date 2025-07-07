@@ -21,7 +21,7 @@ exclude = [".gitignore"]
 
 [dependencies]
 byteorder = "1.5.0"  # For use with some parsers.
-na_seq = "0.2.8"  # Element, atom etc primitives
+na_seq = "0.2.10"  # Element, atom etc primitives
 bio_apis = "0.1.4" # Loading data from RCSB etc.
 lin_alg = "1.2.0"
 
