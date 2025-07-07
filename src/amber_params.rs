@@ -18,8 +18,11 @@ use std::{
 #[derive(Debug, Clone)]
 pub struct MassParams {
     pub atom_type: String,
-    /// Daltons?
+    /// AMU
     pub mass: f32,
+    // /// ATPOL: Atomic polarizability (Å^3).
+    // /// Intended for Slater–Kirkwood or future polarizable models, and unused by Amber (?)
+    // pub polarizability: f32,
     pub comment: Option<String>,
 }
 
@@ -27,7 +30,8 @@ impl MassParams {
     pub fn from_line(line: &str) -> io::Result<Self> {
         let cols: Vec<_> = line.trim().split_whitespace().collect();
 
-        if cols.len() < 4 {
+        // Allow Skipping ATPOL which we don't currently use, and is sometimes missing.
+        if cols.len() < 2 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
                 "Not enough cols (Mass))",
@@ -35,18 +39,26 @@ impl MassParams {
         }
 
         let atom_type = cols[0].to_string();
-        let mass = cols[1]
-            .parse()
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid mass"))?;
+        let mass = parse_float(cols[1])?;
 
-        // todo: Skipping the col after mass for now.
+        // Skipping polarizability; in for historical reasons?
+        // // Note: This skips comments where this is a missing col[2].
+        // let mut polarizability = 0.0;
+        // if cols.len() >= 3 {
+        //     polarizability = parse_float(cols[2])?;
+        // }
 
-        let comment = cols[3..].join(" ");
+        // Note: This skips comments where this is a missing col[2].
+        let mut comment = None;
+        if cols.len() >= 4 {
+            comment = Some(cols[3..].join(" "));
+        }
 
         Ok(Self {
             atom_type,
             mass,
-            comment: Some(comment),
+            // polarizability,
+            comment,
         })
     }
 }

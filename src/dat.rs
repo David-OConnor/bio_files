@@ -37,7 +37,13 @@ impl ForceFieldParams {
 
             let line = line.trim();
 
-            if line.starts_with("hn  ho  hs") || line.starts_with("hw  ow") {
+            // todo: Find a better way to skip these than this hard coding.
+            if line.starts_with("hn  ho  hs")
+                || line.starts_with("hw  ow")
+                || line.starts_with("C   H   HO  N   NA  NB")
+                || line.starts_with("N   NA  N2  N*  NC")
+                || line.starts_with("C*  CA  CB  CC  CD")
+            {
                 continue; // Fragile.
             }
 
@@ -80,7 +86,6 @@ impl ForceFieldParams {
 
                 4 => {
                     let (dihedral, improper) = DihedralParams::from_line(line)?;
-
                     if improper {
                         result.improper.push(dihedral);
                     } else {
@@ -89,13 +94,6 @@ impl ForceFieldParams {
                 }
 
                 _ => {
-                    // anything else
-                    println!(
-                        "Pushing a remark: ff len: {:?}, {}, {:?}",
-                        atom_types,
-                        atom_types.len(),
-                        line
-                    );
                     result.remarks.push(line.to_string());
                 }
             }
