@@ -12,7 +12,7 @@ use std::{
     io::{ErrorKind, Read},
     path::Path,
 };
-
+use std::collections::HashMap;
 use crate::amber_params::{
     AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
     VdwParams, get_atom_types,
@@ -23,6 +23,10 @@ impl ForceFieldParams {
     pub fn from_dat(text: &str) -> io::Result<Self> {
         let mut result = Self::default();
 
+        // Handles the lines `N   NA  N2  N*  NC  NB  NT  NY` above vdw data. This, for example,
+        // maps NA, N2 etc to the same parameters as N.
+        let mut vdw_alias_map: HashMap<String, String> = HashMap::new();
+
         let mut in_mod4 = false;
 
         // These dat text-based files are tabular data, and don't have clear delineations bewteen sections.
@@ -31,46 +35,61 @@ impl ForceFieldParams {
         // Two, e.g. `ca-s6` is linear bond data. (e.g. springiness of the covalent bond). FOur names indicates
         // a dihedral (aka torsion) angle.
         for (i, line) in text.lines().enumerate() {
-            if i == 0 {
-                continue; // header line.
+            let line = line.trim();
+            // Header or blank – also resets the MOD4 block if we just left it.
+            if i == 0 || line.is_empty() {
+                in_mod4 = false;
+                continue;
             }
 
-            let line = line.trim();
-
-            // todo: Find a better way to skip these than this hard coding.
-            if line.starts_with("hn  ho  hs")
-                || line.starts_with("hw  ow")
-                || line.starts_with("C   H   HO  N   NA  NB")
-                || line.starts_with("N   NA  N2  N*  NC")
-                || line.starts_with("C*  CA  CB  CC  CD")
-            {
-                continue; // Fragile.
+            if line.starts_with("hw  ow  0") {
+                // gaff2.dat's fast-water line. Will cause a parsing error unless handled.
+                continue;
             }
 
             if line.starts_with("END") {
                 break;
             }
 
-            if line.is_empty() {
-                // blank line ends MOD4 block
-                in_mod4 = false;
-                continue;
-            }
+            let cols: Vec<&str> = line.split_whitespace().collect();
+
             // header that *starts* the block
             if line.starts_with("MOD4") {
                 in_mod4 = true;
                 continue; // nothing else to parse on this header line
             }
 
-            // 1. Break the line into whitespace‐split tokens.
-            let cols: Vec<_> = line.split_whitespace().collect();
+            // Handle alias lines
+            if !in_mod4
+                && cols.len() > 1
+                && cols.iter().all(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '*'))
+            {
+                let canonical = cols[0].to_string();
+                for alias in &cols {
+                    vdw_alias_map.insert((*alias).to_string(), canonical.clone());
+                }
+                continue; // don’t try to parse this line any further
+            }
 
             let (atom_types, _) = get_atom_types(&cols);
 
             match atom_types.len() {
                 1 => {
                     if in_mod4 {
-                        result.van_der_waals.push(VdwParams::from_line(line)?);
+                        let vdw = VdwParams::from_line(line)?;
+                        println!("LINE");
+
+                        // Produce copies for all matching the alias. (The alias line should
+                        // be above all individual VDW lines).
+                        result.van_der_waals.push(vdw.clone());
+
+                        for (alias, canonical) in vdw_alias_map.iter() {
+                            if canonical == &vdw.atom_type && alias != canonical {
+                                let mut alias_vdw = vdw.clone();
+                                alias_vdw.atom_type = alias.clone();
+                                result.van_der_waals.push(alias_vdw);
+                            }
+                        }
                     } else {
                         result.mass.push(MassParams::from_line(line)?);
                     }

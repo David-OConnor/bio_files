@@ -1,13 +1,10 @@
 //! Contains parameters used in Amber Forcefields. For details on these formats,
 //! see the [Amber Reference Manual](https://ambermd.org/doc12/Amber25.pdf), section
-//! 15: 15. Reading and modifying Amber parameter files.
+//! 15: Reading and modifying Amber parameter files.
 //!
 //! Called by both the `dat`, and `frcmod` modules. These formats share line formats, but
 //! arrange them in different ways.
-//!
-//! Note that this is a bit fragile, but there may not be a better way given the choice to A: In .dat
-//! files not divide into explicit sections, and B: Using a whitespace-separated col format, with white
-//! space in some of the cols.
+
 
 use std::{
     collections::HashMap,
@@ -496,7 +493,6 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcid, Vec<Char
             if let Some((tag, tail)) = rest.split_once('.') {
                 // We only care about "<RES>.unit.atoms table"
                 if tail.starts_with("unit.atoms table") {
-                    println!("TAG: {:?}", tag);
                     // This currently fails on alternate variants like ASSH for ASP that's protonated.
                     // other examples are LYS/LYN. todo: Impl if you need.
                     let Ok(aa) = AminoAcid::from_str(tag) else {
