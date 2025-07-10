@@ -77,7 +77,6 @@ impl ForceFieldParams {
                 1 => {
                     if in_mod4 {
                         let vdw = VdwParams::from_line(line)?;
-                        println!("LINE");
 
                         // Produce copies for all matching the alias. (The alias line should
                         // be above all individual VDW lines).

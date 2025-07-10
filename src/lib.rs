@@ -18,26 +18,27 @@ pub use ab1::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mol2::*;
-use na_seq::{AminoAcid, Element};
+use na_seq::{AminoAcid, Element, AtomTypeInRes};
 
 #[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
     pub serial_number: usize,
     pub posit: Vec3,
     pub element: Element,
-    /// e.g. "CG1", "CA", "O", "C" etc.
-    pub name: Option<String>,
-    // pub role: Option<AtomRole>,
-    // pub residue: Option<usize>,
-    pub occupancy: Option<f32>,
-    pub partial_charge: Option<f32>,
+    /// e.g. "CG1", "CA", "O", "C", "HA", "CD", "C9" etc.
+    pub type_in_res: Option<AtomTypeInRes>,
     /// E.g. "c6", "ca", "n3", "ha", "h0" etc, as seen in Mol2 files from AMBER.
     /// e.g.: "ha": hydrogen attached to an aromatic carbon.
     /// "ho": hydrogen on a hydroxyl oxygen
     /// "n3": sp³ nitrogen with three substituents
     /// "c6": 	sp² carbon in a pure six-membered aromatic ring (new in GAFF2; lets GAFF distinguish
     /// a benzene carbon from other aromatic caca carbons)
-    pub force_field_atom_type: Option<String>,
+    /// For proteins, this appears to be teh same as for `name`.
+    /// Internal term: "Type 3".
+    pub force_field_type: Option<String>,
+    pub occupancy: Option<f32>,
+    pub partial_charge: Option<f32>,
+
 }
 
 #[derive(Clone, Debug)]

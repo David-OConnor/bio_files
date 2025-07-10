@@ -21,7 +21,7 @@ exclude = [".gitignore"]
 
 [dependencies]
 byteorder = "1.5.0"  # For use with some parsers.
-na_seq = "0.2.10"  # Element, atom etc primitives
+na_seq = "0.2.12"  # Element, atom etc primitives
 bio_apis = "0.1.4" # Loading data from RCSB etc.
 lin_alg = "1.2.0"
 
@@ -29,6 +29,9 @@ lin_alg = "1.2.0"
 bio = "2.3.0"  # For FASTA parsing.
 
 bincode = { version = "2.0.1", optional = true }  # Optional [de]serializing
+
+[patch.crates-io]
+#na_seq = { path = "../na_seq"}
 
 
 [features]

@@ -4,6 +4,9 @@
 //!
 //! Called by both the `dat`, and `frcmod` modules. These formats share line formats, but
 //! arrange them in different ways.
+//!
+//! For ligands, `atom_type` is a "Type 3". For proteins/AAs, we are currently treating it
+//! as a type 1, but we're unclear on this.
 
 
 use std::{
@@ -12,7 +15,7 @@ use std::{
     str::FromStr,
 };
 
-use na_seq::AminoAcid;
+use na_seq::{AminoAcid, AtomTypeInRes};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
@@ -289,10 +292,15 @@ impl VdwParams {
 
 #[derive(Debug)]
 pub struct ChargeParams {
-    /// This is the identifier we use throughout this module, to associate with an atom.
-    pub atom_type: String,
-    /// I'm not sur what this is. "XC", "H1" etc.
-    pub atom_type_2: String,
+    /// The residue-specific ID. We use this value to map forcefield type
+    /// to atoms loaded from mmCIF etc; these will have this `type_in_res`, but not
+    /// an Amber ff type. We apply the charge here to the atom based on its `type_in_res` and AA type,
+    /// and apply its FF type.
+    ///
+    /// Once the FF type is applied here, we can map other params, e.g. Vdw, and bonded terms to it.
+    pub type_in_res: AtomTypeInRes,
+    /// "XC", "H1" etc.
+    pub ff_type: String,
     pub charge: f32, // partial charge (q_i)
 }
 
@@ -496,7 +504,10 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcid, Vec<Char
                     // This currently fails on alternate variants like ASSH for ASP that's protonated.
                     // other examples are LYS/LYN. todo: Impl if you need.
                     let Ok(aa) = AminoAcid::from_str(tag) else {
-                        continue;
+                        return Err(io::Error::new(
+                            ErrorKind::InvalidData,
+                            "Unable to parse AA from lib"),
+                        );
                     };
 
                     state = Mode::InAtoms { res: aa };
@@ -535,13 +546,13 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcid, Vec<Char
                 tokens.push(&ltrim[start..]);
             }
 
-            let atom_name = tokens[0].trim_matches('"').to_string();
-            let atom_type = tokens[1].trim_matches('"').to_string();
+            let type_in_res = tokens[0].trim_matches('"').to_string();
+            let ff_type = tokens[1].trim_matches('"').to_string();
             let charge = parse_float(tokens.last().unwrap())?;
 
             result.get_mut(res).unwrap().push(ChargeParams {
-                atom_type: atom_name,
-                atom_type_2: atom_type,
+                type_in_res: AtomTypeInRes::from_str(&type_in_res)?,
+                ff_type,
                 charge,
             });
         }

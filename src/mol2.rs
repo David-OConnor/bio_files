@@ -12,7 +12,7 @@ use std::{
 };
 
 use lin_alg::f64::Vec3;
-use na_seq::Element;
+use na_seq::{Element, AtomTypeInRes};
 
 use crate::{AtomGeneric, BondGeneric};
 
@@ -308,9 +308,11 @@ impl Mol2 {
 
                 // todo: More columns, including partial charge.
 
+                let type_in_res = AtomTypeInRes::from_str(&cols[1].to_owned()).ok();
+
                 atoms.push(AtomGeneric {
                     serial_number,
-                    name: Some(cols[1].to_owned()),
+                    type_in_res,
                     posit: Vec3 { x, y, z }, // or however you store coordinates
                     element,
                     // name: String::new(),
@@ -319,7 +321,7 @@ impl Mol2 {
                     // residue_type: ResidueType::Other(String::new()), // Not available in SDF.
                     occupancy: None,
                     partial_charge,
-                    force_field_atom_type: Some(cols[5].to_string()),
+                    force_field_type: Some(cols[5].to_string()),
                 });
             }
 
@@ -403,12 +405,12 @@ impl Mol2 {
 
         writeln!(file, "@<TRIPOS>ATOM")?;
         for (i, atom) in self.atoms.iter().enumerate() {
-            let atom_name = match &atom.name {
-                Some(n) => n.to_owned(),
+            let atom_name = match &atom.type_in_res {
+                Some(n) => n.to_string(),
                 None => atom.element.to_letter(),
             };
 
-            let atom_type = match &atom.force_field_atom_type {
+            let atom_type = match &atom.force_field_type {
                 Some(f) => f.to_owned(),
                 None => atom.element.to_letter(),
             };
