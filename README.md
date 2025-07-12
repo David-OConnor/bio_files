@@ -16,6 +16,7 @@ used by your application. The API docs, and examples below are sufficient to get
 - AB1 (Sequence tracing)
 - DAT (Amber force field data for small molecules)
 - FRCMOD (Amber force field patch data for small molecules)
+- Amber .lib files, e.g. with charge data for amino acids and proteins.
 
 ### Planned:
 - PDBQT (Exists in Daedalus; needs to be decoupled)

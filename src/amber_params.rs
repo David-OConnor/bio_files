@@ -15,7 +15,7 @@ use std::{
     str::FromStr,
 };
 
-use na_seq::{AminoAcid, AtomTypeInRes};
+use na_seq::{AminoAcid, AtomTypeInRes, AminoAcidGeneral};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
@@ -480,14 +480,18 @@ fn parse_float(v: &str) -> io::Result<f32> {
 }
 
 /// Load charge data from Amber's `amino19.lib`, `aminoct12.lib`, `aminont12.lib`, and similar.
-pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcid, Vec<ChargeParams>>> {
+/// This provides partial charges for all amino acids, as well as a mapping between atom type in residue,
+/// e.g. "C1", "NA" etc, to amber force field type, e.g. "XC".
+/// See [Amber RM](https://ambermd.org/doc12/Amber25.pdf), section 13.2: Residue naming conventions,
+/// for info on the protenation variants, and their 3-letter identifiers.
+pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParams>>> {
     enum Mode {
         Scan,                       // not inside an atoms table
-        InAtoms { res: AminoAcid }, // currently reading atom lines for this residue
+        InAtoms { res: AminoAcidGeneral }, // currently reading atom lines for this residue
     }
 
     let mut state = Mode::Scan;
-    let mut result: HashMap<AminoAcid, Vec<ChargeParams>> = HashMap::new();
+    let mut result: HashMap<AminoAcidGeneral, Vec<ChargeParams>> = HashMap::new();
 
     let lines: Vec<&str> = text.lines().collect();
 
@@ -503,7 +507,7 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcid, Vec<Char
                 if tail.starts_with("unit.atoms table") {
                     // This currently fails on alternate variants like ASSH for ASP that's protonated.
                     // other examples are LYS/LYN. todo: Impl if you need.
-                    let Ok(aa) = AminoAcid::from_str(tag) else {
+                    let Ok(aa) = AminoAcidGeneral::from_str(tag) else {
                         return Err(io::Error::new(
                             ErrorKind::InvalidData,
                             "Unable to parse AA from lib"),
