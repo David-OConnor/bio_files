@@ -8,14 +8,13 @@
 //! For ligands, `atom_type` is a "Type 3". For proteins/AAs, we are currently treating it
 //! as a type 1, but we're unclear on this.
 
-
 use std::{
     collections::HashMap,
     io::{self, ErrorKind},
     str::FromStr,
 };
 
-use na_seq::{AminoAcid, AtomTypeInRes, AminoAcidGeneral};
+use na_seq::{AminoAcid, AminoAcidGeneral, AtomTypeInRes};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
@@ -486,7 +485,7 @@ fn parse_float(v: &str) -> io::Result<f32> {
 /// for info on the protenation variants, and their 3-letter identifiers.
 pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParams>>> {
     enum Mode {
-        Scan,                       // not inside an atoms table
+        Scan,                              // not inside an atoms table
         InAtoms { res: AminoAcidGeneral }, // currently reading atom lines for this residue
     }
 
@@ -510,8 +509,8 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, V
                     let Ok(aa) = AminoAcidGeneral::from_str(tag) else {
                         return Err(io::Error::new(
                             ErrorKind::InvalidData,
-                            "Unable to parse AA from lib"),
-                        );
+                            "Unable to parse AA from lib",
+                        ));
                     };
 
                     state = Mode::InAtoms { res: aa };

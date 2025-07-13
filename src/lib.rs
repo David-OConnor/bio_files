@@ -18,7 +18,7 @@ pub use ab1::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mol2::*;
-use na_seq::{AminoAcid, Element, AtomTypeInRes};
+use na_seq::{AminoAcid, AtomTypeInRes, Element};
 
 #[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
@@ -38,7 +38,6 @@ pub struct AtomGeneric {
     pub force_field_type: Option<String>,
     pub occupancy: Option<f32>,
     pub partial_charge: Option<f32>,
-
 }
 
 #[derive(Clone, Debug)]

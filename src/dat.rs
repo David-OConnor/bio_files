@@ -7,12 +7,13 @@
 // todo: to export the main FF struct from
 
 use std::{
+    collections::HashMap,
     fs::File,
     io,
     io::{ErrorKind, Read},
     path::Path,
 };
-use std::collections::HashMap;
+
 use crate::amber_params::{
     AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
     VdwParams, get_atom_types,
@@ -62,7 +63,9 @@ impl ForceFieldParams {
             // Handle alias lines
             if !in_mod4
                 && cols.len() > 1
-                && cols.iter().all(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '*'))
+                && cols
+                    .iter()
+                    .all(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '*'))
             {
                 let canonical = cols[0].to_string();
                 for alias in &cols {

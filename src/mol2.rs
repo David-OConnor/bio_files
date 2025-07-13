@@ -12,7 +12,7 @@ use std::{
 };
 
 use lin_alg::f64::Vec3;
-use na_seq::{Element, AtomTypeInRes};
+use na_seq::{AtomTypeInRes, Element};
 
 use crate::{AtomGeneric, BondGeneric};
 
