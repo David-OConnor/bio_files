@@ -12,16 +12,15 @@ use std::{
 use lin_alg::f64::Vec3;
 use na_seq::Element;
 
-use crate::{AtomGeneric, BondGeneric, Chain, ResidueGeneric, ResidueType};
+use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric, ResidueType};
 
 pub struct Sdf {
     /// These fields aren't universal to the format.
     pub ident: String,
-    // pub mol_type: MolType,
     pub metadata: HashMap<String, String>,
     pub atoms: Vec<AtomGeneric>,
     pub bonds: Vec<BondGeneric>,
-    pub chains: Vec<Chain>,
+    pub chains: Vec<ChainGeneric>,
     pub residues: Vec<ResidueGeneric>,
     pub pubchem_cid: Option<u32>,
     pub drugbank_id: Option<String>,
@@ -29,8 +28,8 @@ pub struct Sdf {
 
 impl Sdf {
     /// From a string of an SDF text file.
-    pub fn new(sdf_text: &str) -> io::Result<Self> {
-        let lines: Vec<&str> = sdf_text.lines().collect();
+    pub fn new(text: &str) -> io::Result<Self> {
+        let lines: Vec<&str> = text.lines().collect();
 
         // SDF files typically have at least 4 lines before the atom block:
         //   1) A title or identifier
@@ -120,7 +119,8 @@ impl Sdf {
             let element = cols[3];
 
             atoms.push(AtomGeneric {
-                serial_number: i - first_atom_line + 1,
+                // SDF doesn't explicitly include incices.
+                serial_number: (i - first_atom_line) as u32 + 1,
                 type_in_res: None,
                 posit: Vec3 { x, y, z }, // or however you store coordinates
                 element: Element::from_letter(element)?,
@@ -196,20 +196,19 @@ impl Sdf {
         let mut chains = Vec::new();
         let mut residues = Vec::new();
 
-        let atom_indices: Vec<usize> = (0..atoms.len()).collect();
+        // let atom_indices: Vec<usize> = (0..atoms.len()).collect();
+        let atom_sns: Vec<_> = atoms.iter().map(|a| a.serial_number).collect();
 
         residues.push(ResidueGeneric {
             serial_number: 0,
             res_type: ResidueType::Other("Unknown".to_string()),
-            atoms: atom_indices.clone(),
+            atom_sns: atom_sns.clone(),
         });
 
-        chains.push(Chain {
-            // todo: Fix this.
+        chains.push(ChainGeneric {
             id: "A".to_string(),
-            residues: vec![0],
-            atoms: atom_indices,
-            visible: true,
+            residue_sns: vec![0],
+            atom_sns,
         });
 
         Ok(Self {

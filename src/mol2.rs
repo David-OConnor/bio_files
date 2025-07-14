@@ -182,11 +182,11 @@ pub struct Mol2 {
 
 impl Mol2 {
     /// From a string of a Mol2 text file.
-    pub fn new(sdf_text: &str) -> io::Result<Self> {
+    pub fn new(text: &str) -> io::Result<Self> {
         // todo: For these `new` methods in general that take a &str param: Should we use
         // todo R: Reed + Seek instead, and pass a Cursor or File object? Probably doesn't matter.
         // todo Either way, we should keep it consistent between the files.
-        let lines: Vec<&str> = sdf_text.lines().collect();
+        let lines: Vec<&str> = text.lines().collect();
 
         // Example Mol2 header:
         // "
@@ -265,7 +265,7 @@ impl Mol2 {
             if in_atom_section {
                 let cols: Vec<&str> = line.split_whitespace().collect();
 
-                let serial_number = cols[0].parse::<usize>().map_err(|_| {
+                let serial_number = cols[0].parse::<u32>().map_err(|_| {
                     io::Error::new(ErrorKind::InvalidData, "Could not parse serial number")
                 })?;
 
@@ -315,10 +315,6 @@ impl Mol2 {
                     type_in_res,
                     posit: Vec3 { x, y, z }, // or however you store coordinates
                     element,
-                    // name: String::new(),
-                    // role: None,
-                    // residue: None,
-                    // residue_type: ResidueType::Other(String::new()), // Not available in SDF.
                     occupancy: None,
                     partial_charge,
                     force_field_type: Some(cols[5].to_string()),

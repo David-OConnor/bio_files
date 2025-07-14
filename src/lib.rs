@@ -1,5 +1,5 @@
-//! The `generic` label in names in this module are to differentiate from more specific
-//! ones used in e.g. Daedalus.
+//! The `generic` label in names in this module are to differentiate from ones used in more specific
+//! applications.
 
 pub mod ab1;
 pub mod map;
@@ -11,6 +11,7 @@ mod cif_sf;
 pub mod dat;
 pub mod frcmod;
 mod mtz;
+mod mmcif;
 
 use std::str::FromStr;
 
@@ -18,11 +19,13 @@ pub use ab1::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mol2::*;
+pub use mmcif::*;
+pub use sdf::*;
 use na_seq::{AminoAcid, AtomTypeInRes, Element};
 
 #[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
-    pub serial_number: usize,
+    pub serial_number: u32,
     pub posit: Vec3,
     pub element: Element,
     /// e.g. "CG1", "CA", "O", "C", "HA", "CD", "C9" etc.
@@ -78,18 +81,18 @@ impl ResidueType {
 pub struct ResidueGeneric {
     /// We use serial number of display, search etc, and array index to select. Residue serial number is not
     /// unique in the molecule; only in the chain.
-    pub serial_number: isize, // pdbtbx uses isize. Negative allowed?
+    pub serial_number: u32,
     pub res_type: ResidueType,
-    pub atoms: Vec<usize>, // Atom index
+    /// Serial number
+    pub atom_sns: Vec<u32>,
 }
 
 #[derive(Debug, Clone)]
-pub struct Chain {
+pub struct ChainGeneric {
     pub id: String,
     // todo: Do we want both residues and atoms stored here? It's an overconstraint.
-    pub residues: Vec<usize>,
-    /// Indexes
-    pub atoms: Vec<usize>,
-    // todo: Perhaps vis would make more sense in a separate UI-related place.
-    pub visible: bool,
+    /// Serial number
+    pub residue_sns: Vec<u32>,
+    /// Serial number
+    pub atom_sns: Vec<u32>,
 }

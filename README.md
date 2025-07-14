@@ -10,6 +10,7 @@ used by your application. The API docs, and examples below are sufficient to get
 
 
 ### Currently supported formats:
+- mmCIF (Protein atom coordinates and related data)
 - Mol2 (Small molecules, e.g. ligands)
 - SDF (Small molecules, e.g. ligands)
 - Map (Electron density, e.g. from crystallography, Cryo EM)
@@ -25,9 +26,8 @@ used by your application. The API docs, and examples below are sufficient to get
 - CIF structure formats (2fo-fc etc) (Exists in Daedalus; needs to be decoupled)
 
 
-For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/). For atom coordinate mmCIF
-and PDB, we recommend [Pdbtbx](https://docs.rs/pdbtbx/latest/pdbtbx/). We do not plan to support
-these formats, due to the existence of these high-quality libraries.
+For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do not plan to support
+this format, due to this high quality library.
 
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
@@ -35,6 +35,12 @@ It operates using structs with public fields, which you can explore
 using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`, 
 `save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and `load()` accept `&Path`.
 The Force Field formats instead use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
+
+## Serial numbers
+Serial numbers for atoms, residues, and chains are generally pulled directly from atom data files
+(mmCIF, Mol2 etc). Residue lists are stored as `Vec<u32>`, with the `u32` being the serial number.
+In your application, you may wish to adapt these generic types to custom ones that use index lookups
+instead of serial numbers. We use SNs here because they're more robust; add optimizations downstream.
 
 Example use:
 
