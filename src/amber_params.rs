@@ -14,7 +14,7 @@ use std::{
     str::FromStr,
 };
 
-use na_seq::{AminoAcid, AminoAcidGeneral, AtomTypeInRes};
+use na_seq::{AminoAcidGeneral, AtomTypeInRes};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]

@@ -5,15 +5,22 @@
 //! be inferred from computations. (Send in a Github issue or PR if you want bond support, and
 //! include an example mmCIF that has them.).
 
-use std::collections::HashMap;
-use std::fs::File;
-use std::io;
-use std::io::{ErrorKind, Read};
-use std::path::Path;
-use std::str::FromStr;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io,
+    io::{Cursor, ErrorKind, Read},
+    path::Path,
+    str::FromStr,
+};
+
 use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
-use crate::{AtomGeneric, ChainGeneric, ResidueGeneric, ResidueType};
+
+use crate::{
+    AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueGeneric, ResidueType,
+    mmcif_aux::load_ss_method,
+};
 
 pub struct MmCif {
     pub ident: String,
@@ -22,8 +29,9 @@ pub struct MmCif {
     // pub bonds: Vec<BondGeneric>,
     pub chains: Vec<ChainGeneric>,
     pub residues: Vec<ResidueGeneric>,
+    pub secondary_structure: Vec<BackboneSS>,
+    pub experimental_method: Option<ExperimentalMethod>,
 }
-
 
 #[derive(Clone, Copy, PartialEq)]
 enum Section {
@@ -34,29 +42,13 @@ enum Section {
 
 impl MmCif {
     pub fn new(text: &str) -> io::Result<Self> {
+        println!("Loading mmCIF data...");
         // todo: For these `new` methods in general that take a &str param: Should we use
         // todo R: Reed + Seek instead, and pass a Cursor or File object? Probably doesn't matter.
         // todo Either way, we should keep it consistent between the files.
-        // let lines: Vec<&str> = text.lines().collect();
-        //
-        // let mut atoms = Vec::new();
-        // let mut chains = Vec::new();
-        // let mut residues = Vec::new();
-        //
-        // let mut section = Section::None;
-        //
-        // for line in lines {
-        //
-        // }
-        //
-        // match section {
-        //     Section::None => (),
-        //     Section::Atoms => {
-        //
-        //     },
-        //     _ => (), // todo later
-        // }
-        /* ---------- local buffers / state -------------------------------- */
+
+        // todo: This is far too slow.
+
         let mut metadata = HashMap::<String, String>::new();
         let mut atoms = Vec::<AtomGeneric>::new();
         let mut residues = Vec::<ResidueGeneric>::new();
@@ -64,7 +56,6 @@ impl MmCif {
         let mut res_idx = HashMap::<(String, u32), usize>::new();
         let mut chain_idx = HashMap::<String, usize>::new();
 
-        /* ---------- walk line-by-line without peekable ------------------- */
         let lines: Vec<&str> = text.lines().collect();
         let mut i = 0;
         let n = lines.len();
@@ -77,9 +68,6 @@ impl MmCif {
             }
 
             if line == "loop_" {
-                /* =========================== */
-                /*   COLLECT HEADERS           */
-                /* =========================== */
                 i += 1;
                 let mut headers = Vec::<&str>::new();
                 while i < n {
@@ -102,22 +90,15 @@ impl MmCif {
                         if line == "#" || line == "loop_" || line.starts_with('_') {
                             break;
                         }
-                        i += 1; // discard row
+                        i += 1;
                     }
                     continue;
                 }
 
-                /* ========== map column names → indices ========== */
                 let col = |tag: &str| -> io::Result<usize> {
-                    headers
-                        .iter()
-                        .position(|h| *h == tag)
-                        .ok_or_else(|| {
-                            io::Error::new(
-                                ErrorKind::InvalidData,
-                                format!("mmCIF missing {}", tag),
-                            )
-                        })
+                    headers.iter().position(|h| *h == tag).ok_or_else(|| {
+                        io::Error::new(ErrorKind::InvalidData, format!("mmCIF missing {}", tag))
+                    })
                 };
                 let c_id = col("_atom_site.id")?;
                 let c_x = col("_atom_site.Cartn_x")?;
@@ -130,26 +111,24 @@ impl MmCif {
                 let c_res_sn = col("_atom_site.label_seq_id")?;
                 let c_occ = col("_atom_site.occupancy")?;
 
-                /* ========== read data rows ========== */
                 while i < n {
                     line = lines[i].trim();
                     if line.is_empty() || line == "#" || line == "loop_" || line.starts_with('_') {
-                        break; // next block
+                        break;
                     }
                     let fields: Vec<&str> = line.split_whitespace().collect();
                     if fields.len() < headers.len() {
                         i += 1;
-                        continue; // malformed
+                        continue;
                     }
 
-                    // --------- AtomGeneric ---------------------------
-                    let sn = fields[c_id].parse::<u32>().unwrap_or(0);
+                    // Atom lines.
+                    let serial_number = fields[c_id].parse::<u32>().unwrap_or(0);
                     let x = fields[c_x].parse::<f64>().unwrap_or(0.0);
                     let y = fields[c_y].parse::<f64>().unwrap_or(0.0);
                     let z = fields[c_z].parse::<f64>().unwrap_or(0.0);
 
-                    let elem =
-                        Element::from_letter(fields[c_el])?;
+                    let element = Element::from_letter(fields[c_el])?;
                     let atom_name = fields[c_name];
                     let type_in_res = AtomTypeInRes::from_str(atom_name).ok();
                     let occ = match fields[c_occ] {
@@ -158,9 +137,9 @@ impl MmCif {
                     };
 
                     atoms.push(AtomGeneric {
-                        serial_number: sn,
+                        serial_number,
                         posit: Vec3::new(x, y, z),
-                        element: elem,
+                        element,
                         type_in_res,
                         force_field_type: None,
                         occupancy: occ,
@@ -172,7 +151,7 @@ impl MmCif {
                     let chain_id = fields[c_chain];
                     let res_key = (chain_id.to_string(), res_sn);
 
-                    // residue
+                    // Residues
                     let r_i = *res_idx.entry(res_key.clone()).or_insert_with(|| {
                         let idx = residues.len();
                         residues.push(ResidueGeneric {
@@ -182,9 +161,9 @@ impl MmCif {
                         });
                         idx
                     });
-                    residues[r_i].atom_sns.push(sn);
+                    residues[r_i].atom_sns.push(serial_number);
 
-                    // chain
+                    // Chains
                     let c_i = *chain_idx.entry(chain_id.to_string()).or_insert_with(|| {
                         let idx = chains.len();
                         chains.push(ChainGeneric {
@@ -194,7 +173,7 @@ impl MmCif {
                         });
                         idx
                     });
-                    chains[c_i].atom_sns.push(sn);
+                    chains[c_i].atom_sns.push(serial_number);
                     if !chains[c_i].residue_sns.contains(&res_sn) {
                         chains[c_i].residue_sns.push(res_sn);
                     }
@@ -204,7 +183,6 @@ impl MmCif {
                 continue; // outer while will handle terminator line
             }
 
-            /* -------- single-line tag ----------------------------- */
             if line.starts_with('_') {
                 if let Some((tag, val)) = line.split_once(char::is_whitespace) {
                     metadata.insert(tag.to_string(), val.trim_matches('\'').to_string());
@@ -222,12 +200,21 @@ impl MmCif {
             .cloned()
             .unwrap_or_else(|| "UNKNOWN".to_string());
 
+        let mut cursor = Cursor::new(text);
+
+        // todo: Integraet this so it's not taking a second line loop through the whole file.
+        // todo: It'll be faster this way.
+        let (secondary_structure, experimental_method) = load_ss_method(&mut cursor)?;
+
+        println!("CIF load complete");
         Ok(Self {
             ident,
             metadata,
             atoms,
             chains,
             residues,
+            secondary_structure,
+            experimental_method,
         })
     }
 

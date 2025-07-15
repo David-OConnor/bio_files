@@ -82,11 +82,11 @@ struct Dir {
     pub tag_name: String, // 4 bytes
     pub tag_number: u32,
     pub elem_code: u16,
-    pub a: u16, // placeholder
+    // pub a: u16, // placeholder
     pub num_elements: usize,
     pub data_size: usize,
     pub data_offset: usize,
-    pub b: u32, // placeholder
+    // pub b: u32, // placeholder
     pub tag_offset: usize,
     // todo: Tag offset??
 }
@@ -97,11 +97,11 @@ impl Dir {
             tag_name: std::str::from_utf8(&bytes[..4]).unwrap().to_owned(), // todo: Handle
             tag_number: u32::from_be_bytes(bytes[4..8].try_into().unwrap()),
             elem_code: u16::from_be_bytes(bytes[8..10].try_into().unwrap()),
-            a: u16::from_be_bytes(bytes[10..12].try_into().unwrap()),
+            // a: u16::from_be_bytes(bytes[10..12].try_into().unwrap()),
             num_elements: u32::from_be_bytes(bytes[12..16].try_into().unwrap()) as usize,
             data_size: u32::from_be_bytes(bytes[16..20].try_into().unwrap()) as usize,
             data_offset: u32::from_be_bytes(bytes[20..24].try_into().unwrap()) as usize,
-            b: u32::from_be_bytes(bytes[24..28].try_into().unwrap()),
+            // b: u32::from_be_bytes(bytes[24..28].try_into().unwrap()),
             tag_offset,
         })
     }
@@ -110,12 +110,11 @@ impl Dir {
 #[derive(Debug)]
 struct AbiIterator<R: Read + Seek> {
     stream: R,
-    trim: bool,
 }
 
 impl<R: Read + Seek> AbiIterator<R> {
-    pub fn new(mut stream: R, trim: bool) -> io::Result<Self> {
-        let mut marker = [0u8; 4];
+    pub fn new(mut stream: R) -> io::Result<Self> {
+        let mut marker = [0; 4];
         stream.read_exact(&mut marker)?;
         if &marker != b"ABIF" {
             return Err(io::Error::new(
@@ -123,7 +122,7 @@ impl<R: Read + Seek> AbiIterator<R> {
                 "Invalid AB1 file start marker",
             ));
         }
-        Ok(Self { stream, trim })
+        Ok(Self { stream })
     }
 
     pub fn next(&mut self) -> io::Result<Option<SeqRecordAb1>> {
@@ -439,7 +438,7 @@ fn read_string<R: Read>(reader: &mut R, length: usize) -> io::Result<String> {
 /// [Rust docs ref of fields](https://docs.rs/gb-io/latest/gb_io/seq/struct.Seq.html)
 pub fn import_ab1(path: &Path) -> io::Result<Vec<SeqRecordAb1>> {
     let file = File::open(path)?;
-    let mut iterator = AbiIterator::new(file, false)?;
+    let mut iterator = AbiIterator::new(file)?;
 
     let mut results = Vec::new();
 

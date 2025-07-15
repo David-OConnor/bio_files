@@ -111,9 +111,9 @@ fn read_map_header<R: Read + Seek>(mut r: R) -> io::Result<MapHeader> {
     r.seek(SeekFrom::Start(49 * 4))?;
 
     // words 50-52 = XORIGIN, YORIGIN, ZORIGIN   (MRC-2014)
-    let mut xorigin_ = r.read_f32::<LittleEndian>()?;
-    let mut yorigin_ = r.read_f32::<LittleEndian>()?;
-    let mut zorigin_ = r.read_f32::<LittleEndian>()?;
+    let xorigin_ = r.read_f32::<LittleEndian>()?;
+    let yorigin_ = r.read_f32::<LittleEndian>()?;
+    let zorigin_ = r.read_f32::<LittleEndian>()?;
 
     let mut xorigin = None;
     let mut yorigin = None;

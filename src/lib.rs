@@ -1,3 +1,6 @@
+#![allow(confusable_idents)]
+#![allow(mixed_script_confusables)]
+
 //! The `generic` label in names in this module are to differentiate from ones used in more specific
 //! applications.
 
@@ -10,18 +13,20 @@ pub mod amber_params;
 mod cif_sf;
 pub mod dat;
 pub mod frcmod;
-mod mtz;
 mod mmcif;
+mod mmcif_aux;
+mod mtz;
 
 use std::str::FromStr;
 
 pub use ab1::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
-pub use mol2::*;
 pub use mmcif::*;
-pub use sdf::*;
+pub use mmcif_aux::ExperimentalMethod;
+pub use mol2::*;
 use na_seq::{AminoAcid, AtomTypeInRes, Element};
+pub use sdf::*;
 
 #[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
@@ -46,6 +51,7 @@ pub struct AtomGeneric {
 #[derive(Clone, Debug)]
 pub struct BondGeneric {
     pub bond_type: String, // todo: Enum
+    /// Indices
     pub atom_0: usize,
     pub atom_1: usize,
 }
@@ -95,4 +101,21 @@ pub struct ChainGeneric {
     pub residue_sns: Vec<u32>,
     /// Serial number
     pub atom_sns: Vec<u32>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SecondaryStructure {
+    Helix,
+    Sheet,
+    Coil,
+}
+
+#[derive(Clone, Debug)]
+/// See note elsewhere regarding serial numbers vs indices: In your downstream applications, you may
+/// wish to convert sns to indices, for faster operations.
+pub struct BackboneSS {
+    /// Atom serial numbers.
+    pub start_sn: u32,
+    pub end_sn: u32,
+    pub sec_struct: SecondaryStructure,
 }

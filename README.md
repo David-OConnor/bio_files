@@ -37,10 +37,12 @@ using the [API docs](https://docs.rs/bio_files), or your IDE. These structs gene
 The Force Field formats instead use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
 
 ## Serial numbers
-Serial numbers for atoms, residues, and chains are generally pulled directly from atom data files
-(mmCIF, Mol2 etc). Residue lists are stored as `Vec<u32>`, with the `u32` being the serial number.
+Serial numbers for atoms, residues, secondary structure, and chains are generally pulled directly from atom data files
+(mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as `Vec<u32>`, with the `u32` being the serial number.
 In your application, you may wish to adapt these generic types to custom ones that use index lookups
-instead of serial numbers. We use SNs here because they're more robust; add optimizations downstream.
+instead of serial numbers. We use SNs here because they're more robust, and match the input files directly;
+add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of a the residue
+an atom's in, in your derived Atom struct).
 
 Example use:
 
