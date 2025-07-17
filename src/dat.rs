@@ -146,13 +146,6 @@ impl ForceFieldParams {
         Ok(result)
     }
 
-    /// Write to file
-    pub fn save_dat(&self, path: &Path) -> io::Result<()> {
-        let mut f = File::create(path)?;
-
-        Ok(())
-    }
-
     /// todo: Sort out the syntax for loading from different sources.
     pub fn load_dat(path: &Path) -> io::Result<Self> {
         let mut file = File::open(path)?;

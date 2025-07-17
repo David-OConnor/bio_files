@@ -2,82 +2,12 @@
 
 use std::{
     collections::HashMap,
-    fmt,
-    fmt::{Display, Formatter},
-    io::{self, BufRead, BufReader, ErrorKind, Read, Seek, SeekFrom},
-    str::FromStr,
+    io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
 };
 
-use regex::Regex;
-
-use crate::{
-    BackboneSS, SecondaryStructure,
-};
+use crate::{BackboneSS, SecondaryStructure};
 
 // todo: Save SS to CIF.
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-/// The method used to find a given molecular structure. This data is present in mmCIF files
-/// as the `_exptl.method` field.
-pub enum ExperimentalMethod {
-    XRayDiffraction,
-    ElectronDiffraction,
-    NeutronDiffraction,
-    /// i.e. Cryo-EM
-    ElectronMicroscopy,
-    SolutionNmr,
-}
-
-impl ExperimentalMethod {
-    /// E.g. for displaying in the space-constrained UI.
-    pub fn to_str_short(&self) -> String {
-        match self {
-            Self::XRayDiffraction => "X-ray",
-            Self::NeutronDiffraction => "ND",
-            Self::ElectronDiffraction => "ED",
-            Self::ElectronMicroscopy => "EM",
-            Self::SolutionNmr => "NMR",
-        }
-        .to_owned()
-    }
-}
-
-impl Display for ExperimentalMethod {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let val = match self {
-            Self::XRayDiffraction => "X-Ray diffraction",
-            Self::NeutronDiffraction => "Neutron diffraction",
-            Self::ElectronDiffraction => "Electron diffraction",
-            Self::ElectronMicroscopy => "Electron microscopy",
-            Self::SolutionNmr => "Solution NMR",
-        };
-        write!(f, "{val}")
-    }
-}
-
-impl FromStr for ExperimentalMethod {
-    type Err = io::Error;
-
-    /// Parse an mmCIF‐style method string into an ExperimentalMethod.
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let normalized = s.to_lowercase();
-        let s = normalized.trim();
-        let method = match s {
-            "x-ray diffraction" => ExperimentalMethod::XRayDiffraction,
-            "neutron diffraction" => ExperimentalMethod::NeutronDiffraction,
-            "electron diffraction" => ExperimentalMethod::ElectronDiffraction,
-            "electron microscopy" => ExperimentalMethod::ElectronMicroscopy,
-            "solution nmr" => ExperimentalMethod::SolutionNmr,
-            other => {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Error parsing experimental method: {other}"),
-                ));
-            }
-        };
-        Ok(method)
-    }
-}
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum LoopKind {
@@ -87,9 +17,7 @@ enum LoopKind {
     SheetRange,
 }
 
-pub fn load_ss_method<R: Read + Seek>(
-    mut data: R,
-) -> io::Result<(Vec<BackboneSS>, Option<ExperimentalMethod>)> {
+pub fn load_ss<R: Read + Seek>(mut data: R) -> io::Result<Vec<BackboneSS>> {
     data.seek(SeekFrom::Start(0))?;
     let rdr = BufReader::new(data);
 
@@ -104,22 +32,11 @@ pub fn load_ss_method<R: Read + Seek>(
     // atom-site column indices (filled on first row)
     let mut a_idx = (None, None, None, None, None, None, None); // asym, seq, atom, x,y,z, id
 
-    let mut method = None;
-
     for line in rdr.lines() {
         let line = line?;
         let t = line.trim();
         if t.is_empty() {
             continue;
-        }
-
-        let method_re = Regex::new(r#"^_exptl\.method\s+['"]([^'"]+)['"]\s*$"#).unwrap();
-        if let Some(caps) = method_re.captures(t) {
-            // caps[1] is whatever matched inside the ([A-Za-z]+) group
-
-            if let Ok(m) = caps[1].to_string().parse() {
-                method = Some(m);
-            }
         }
 
         if t == "loop_" {
@@ -190,7 +107,7 @@ pub fn load_ss_method<R: Read + Seek>(
                     }
                 }
 
-                let (ia, isq, iat, ix, iy, iz, id) = match a_idx {
+                let (ia, isq, iat, _ix, _iy, iz, id) = match a_idx {
                     (Some(a), Some(s), Some(at), Some(x), Some(y), Some(z), Some(id)) => {
                         (a, s, at, x, y, z, id)
                     }
@@ -205,7 +122,6 @@ pub fn load_ss_method<R: Read + Seek>(
                 if let (Ok(seq), Ok(serial)) = (c[isq].parse::<i32>(), c[id].parse::<u32>()) {
                     ca_xyz.insert((c[ia].to_owned(), seq), serial);
                 }
-
             }
         }
     }
@@ -290,5 +206,5 @@ pub fn load_ss_method<R: Read + Seek>(
         });
     }
 
-    Ok((ss, method))
+    Ok(ss)
 }

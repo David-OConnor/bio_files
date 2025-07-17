@@ -17,13 +17,18 @@ mod mmcif;
 mod mmcif_aux;
 mod mtz;
 
-use std::str::FromStr;
+use std::{
+    fmt,
+    fmt::{Display, Formatter},
+    io,
+    io::ErrorKind,
+    str::FromStr,
+};
 
 pub use ab1::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mmcif::*;
-pub use mmcif_aux::ExperimentalMethod;
 pub use mol2::*;
 use na_seq::{AminoAcid, AtomTypeInRes, Element};
 pub use sdf::*;
@@ -39,13 +44,14 @@ pub struct AtomGeneric {
     /// e.g.: "ha": hydrogen attached to an aromatic carbon.
     /// "ho": hydrogen on a hydroxyl oxygen
     /// "n3": sp³ nitrogen with three substituents
-    /// "c6": 	sp² carbon in a pure six-membered aromatic ring (new in GAFF2; lets GAFF distinguish
+    /// "c6": sp² carbon in a pure six-membered aromatic ring (new in GAFF2; lets GAFF distinguish
     /// a benzene carbon from other aromatic caca carbons)
     /// For proteins, this appears to be teh same as for `name`.
     /// Internal term: "Type 3".
     pub force_field_type: Option<String>,
     pub occupancy: Option<f32>,
     pub partial_charge: Option<f32>,
+    pub hetero: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -118,4 +124,67 @@ pub struct BackboneSS {
     pub start_sn: u32,
     pub end_sn: u32,
     pub sec_struct: SecondaryStructure,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+/// The method used to find a given molecular structure. This data is present in mmCIF files
+/// as the `_exptl.method` field.
+pub enum ExperimentalMethod {
+    XRayDiffraction,
+    ElectronDiffraction,
+    NeutronDiffraction,
+    /// i.e. Cryo-EM
+    ElectronMicroscopy,
+    SolutionNmr,
+}
+
+impl ExperimentalMethod {
+    /// E.g. for displaying in the space-constrained UI.
+    pub fn to_str_short(&self) -> String {
+        match self {
+            Self::XRayDiffraction => "X-ray",
+            Self::NeutronDiffraction => "ND",
+            Self::ElectronDiffraction => "ED",
+            Self::ElectronMicroscopy => "EM",
+            Self::SolutionNmr => "NMR",
+        }
+        .to_owned()
+    }
+}
+
+impl Display for ExperimentalMethod {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let val = match self {
+            Self::XRayDiffraction => "X-Ray diffraction",
+            Self::NeutronDiffraction => "Neutron diffraction",
+            Self::ElectronDiffraction => "Electron diffraction",
+            Self::ElectronMicroscopy => "Electron microscopy",
+            Self::SolutionNmr => "Solution NMR",
+        };
+        write!(f, "{val}")
+    }
+}
+
+impl FromStr for ExperimentalMethod {
+    type Err = io::Error;
+
+    /// Parse an mmCIF‐style method string into an ExperimentalMethod.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let normalized = s.to_lowercase();
+        let s = normalized.trim();
+        let method = match s {
+            "x-ray diffraction" => ExperimentalMethod::XRayDiffraction,
+            "neutron diffraction" => ExperimentalMethod::NeutronDiffraction,
+            "electron diffraction" => ExperimentalMethod::ElectronDiffraction,
+            "electron microscopy" => ExperimentalMethod::ElectronMicroscopy,
+            "solution nmr" => ExperimentalMethod::SolutionNmr,
+            other => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("Error parsing experimental method: {other}"),
+                ));
+            }
+        };
+        Ok(method)
+    }
 }

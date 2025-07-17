@@ -30,7 +30,7 @@ pub struct MassParams {
 
 impl MassParams {
     pub fn from_line(line: &str) -> io::Result<Self> {
-        let cols: Vec<_> = line.trim().split_whitespace().collect();
+        let cols: Vec<_> = line.split_whitespace().collect();
 
         // Allow Skipping ATPOL which we don't currently use, and is sometimes missing.
         if cols.len() < 2 {
@@ -79,7 +79,7 @@ pub struct BondStretchingParams {
 
 impl BondStretchingParams {
     pub fn from_line(line: &str) -> io::Result<Self> {
-        let cols: Vec<_> = line.trim().split_whitespace().collect();
+        let cols: Vec<_> = line.split_whitespace().collect();
 
         if cols.len() < 3 {
             return Err(io::Error::new(
@@ -126,7 +126,7 @@ pub struct AngleBendingParams {
 impl AngleBendingParams {
     /// Parse a single valence-angle record from a GAFF/Amber `.dat` or `.frcmod` file.
     pub fn from_line(line: &str) -> io::Result<Self> {
-        let cols: Vec<_> = line.trim().split_whitespace().collect();
+        let cols: Vec<_> = line.split_whitespace().collect();
 
         if cols.len() < 3 {
             return Err(io::Error::new(
@@ -192,7 +192,7 @@ pub struct DihedralParams {
 impl DihedralParams {
     /// For both FRCMOD, and Dat. For both proper, and improper. Returns `true` if improper.
     pub fn from_line(line: &str) -> io::Result<(Self, bool)> {
-        let cols: Vec<_> = line.trim().split_whitespace().collect();
+        let cols: Vec<_> = line.split_whitespace().collect();
 
         if cols.len() < 4 {
             return Err(io::Error::new(
@@ -266,7 +266,7 @@ impl VdwParams {
     pub fn from_line(line: &str) -> io::Result<Self> {
         const SIGMA_FACTOR: f32 = 1.122_462_048_309_373; // 2^(1/6)
 
-        let cols: Vec<_> = line.trim().split_whitespace().collect();
+        let cols: Vec<_> = line.split_whitespace().collect();
 
         if cols.len() < 3 {
             return Err(io::Error::new(
@@ -308,7 +308,7 @@ pub struct ChargeParams {
 //     /// Note: This comes from a .lib file; not .dat or .frcmod. This differs
 //     /// from the other parsings inthis file.
 //     pub fn from_line(line: &str) -> io::Result<Self> {
-//         let cols: Vec<_> = line.trim().split_whitespace().collect();
+//         let cols: Vec<_> = line.split_whitespace().collect();
 //
 //         if cols.len() < 3 {
 //             return Err(io::Error::new(

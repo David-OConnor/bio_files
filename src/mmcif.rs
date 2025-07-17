@@ -9,17 +9,18 @@ use std::{
     collections::HashMap,
     fs::File,
     io,
-    io::{Cursor, ErrorKind, Read},
+    io::{ErrorKind, Read},
     path::Path,
     str::FromStr,
+    time::Instant,
 };
 
 use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
+use regex::Regex;
 
 use crate::{
     AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueGeneric, ResidueType,
-    mmcif_aux::load_ss_method,
 };
 
 pub struct MmCif {
@@ -31,13 +32,6 @@ pub struct MmCif {
     pub residues: Vec<ResidueGeneric>,
     pub secondary_structure: Vec<BackboneSS>,
     pub experimental_method: Option<ExperimentalMethod>,
-}
-
-#[derive(Clone, Copy, PartialEq)]
-enum Section {
-    None,
-    Atoms,
-    Helix, // todo etc
 }
 
 impl MmCif {
@@ -60,11 +54,21 @@ impl MmCif {
         let mut i = 0;
         let n = lines.len();
 
+        let mut experimental_method: Option<ExperimentalMethod> = None;
+
+        let method_re = Regex::new(r#"^_exptl\.method\s+['"]([^'"]+)['"]\s*$"#).unwrap();
+
         while i < n {
             let mut line = lines[i].trim();
             if line.is_empty() {
                 i += 1;
                 continue;
+            }
+
+            if let Some(caps) = method_re.captures(line) {
+                if let Ok(m) = caps[1].to_string().parse() {
+                    experimental_method = Some(m);
+                }
             }
 
             if line == "loop_" {
@@ -80,10 +84,10 @@ impl MmCif {
                     }
                 }
 
-                // Not an atom loop? → skip its rows.
+                // If not an atom loops, skip first rows.
                 if !headers
                     .first()
-                    .map_or(false, |h| h.starts_with("_atom_site."))
+                    .is_some_and(|h| h.starts_with("_atom_site."))
                 {
                     while i < n {
                         line = lines[i].trim();
@@ -97,9 +101,10 @@ impl MmCif {
 
                 let col = |tag: &str| -> io::Result<usize> {
                     headers.iter().position(|h| *h == tag).ok_or_else(|| {
-                        io::Error::new(ErrorKind::InvalidData, format!("mmCIF missing {}", tag))
+                        io::Error::new(ErrorKind::InvalidData, format!("mmCIF missing {tag}"))
                     })
                 };
+                let het = col("_atom_site.group_PDB")?;
                 let c_id = col("_atom_site.id")?;
                 let c_x = col("_atom_site.Cartn_x")?;
                 let c_y = col("_atom_site.Cartn_y")?;
@@ -123,6 +128,10 @@ impl MmCif {
                     }
 
                     // Atom lines.
+                    let hetero = fields[het].trim() == "HETATM";
+
+                    println!("HET: {:?}", hetero);
+
                     let serial_number = fields[c_id].parse::<u32>().unwrap_or(0);
                     let x = fields[c_x].parse::<f64>().unwrap_or(0.0);
                     let y = fields[c_y].parse::<f64>().unwrap_or(0.0);
@@ -144,6 +153,7 @@ impl MmCif {
                         force_field_type: None,
                         occupancy: occ,
                         partial_charge: None,
+                        hetero,
                     });
 
                     // --------- Residue / Chain bookkeeping -----------
@@ -198,13 +208,29 @@ impl MmCif {
             .get("_struct.entry_id")
             .or_else(|| metadata.get("_entry.id"))
             .cloned()
-            .unwrap_or_else(|| "UNKNOWN".to_string());
+            .unwrap_or_else(|| "UNKNOWN".to_string())
+            .trim()
+            .to_owned();
 
-        let mut cursor = Cursor::new(text);
+        // let mut cursor = Cursor::new(text);
 
+        let ss_load = Instant::now();
         // todo: Integraet this so it's not taking a second line loop through the whole file.
         // todo: It'll be faster this way.
-        let (secondary_structure, experimental_method) = load_ss_method(&mut cursor)?;
+        // todo: Regardless of that, this SS loading is going very slowly. Fix it.
+        // let (secondary_structure, experimental_method) = load_ss_method(&mut cursor)?;
+
+        let ss_load_time = ss_load.elapsed();
+        let secondary_structure = Vec::new();
+
+        let mut i = 0;
+        for res in &residues {
+            i += 1;
+            if i > 20 {
+                break;
+            }
+            println!("Loaded res: {res:?}");
+        }
 
         println!("CIF load complete");
         Ok(Self {
@@ -218,22 +244,23 @@ impl MmCif {
         })
     }
 
-    pub fn save(&self, path: &Path) -> io::Result<()> {
-        //todo: Fix this so it outputs mol2 instead of sdf.
-        let mut file = File::create(path)?;
-
-        // todo: Implement this once loading works.
-        //
-        // // There is a subtlety here. Add that to your parser as well. There are two values
-        // // todo in the files we have; this top ident is not the DB id.
-        // writeln!(file, "@<TRIPOS>MOLECULE")?;
-        // writeln!(file, "{}", self.ident)?;
-        // writeln!(file, "{} {}", self.atoms.len(), self.bonds.len())?;
-        // writeln!(file, "{}", self.mol_type.to_str())?;
-        // writeln!(file, "{}", self.charge_type)?;
-
-        Ok(())
-    }
+    // todo: Impl `save`.
+    // pub fn save(&self, path: &Path) -> io::Result<()> {
+    //     //todo: Fix this so it outputs mol2 instead of sdf.
+    //     let mut file = File::create(path)?;
+    //
+    //     // todo: Implement this once loading works.
+    //     //
+    //     // // There is a subtlety here. Add that to your parser as well. There are two values
+    //     // // todo in the files we have; this top ident is not the DB id.
+    //     // writeln!(file, "@<TRIPOS>MOLECULE")?;
+    //     // writeln!(file, "{}", self.ident)?;
+    //     // writeln!(file, "{} {}", self.atoms.len(), self.bonds.len())?;
+    //     // writeln!(file, "{}", self.mol_type.to_str())?;
+    //     // writeln!(file, "{}", self.charge_type)?;
+    //
+    //     Ok(())
+    // }
 
     pub fn load(path: &Path) -> io::Result<Self> {
         let mut file = File::open(path)?;

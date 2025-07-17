@@ -8,7 +8,7 @@
 use std::{
     fs,
     fs::File,
-    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
+    io::{self, ErrorKind, Read, Seek, SeekFrom},
     path::Path,
     process::Command,
 };

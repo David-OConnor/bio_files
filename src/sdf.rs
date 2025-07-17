@@ -103,7 +103,7 @@ impl Sdf {
             if cols.len() < 4 {
                 return Err(io::Error::new(
                     ErrorKind::InvalidData,
-                    format!("Atom line {} does not have enough columns", i),
+                    format!("Atom line {i} does not have enough columns"),
                 ));
             }
 
@@ -127,6 +127,7 @@ impl Sdf {
                 occupancy: None,
                 partial_charge: None,
                 force_field_type: None,
+                hetero: true,
             });
         }
 
@@ -138,7 +139,7 @@ impl Sdf {
             if cols.len() < 3 {
                 return Err(io::Error::new(
                     ErrorKind::InvalidData,
-                    format!("Bond line {} does not have enough columns", i),
+                    format!("Bond line {i} does not have enough columns"),
                 ));
             }
 
@@ -283,12 +284,12 @@ impl Sdf {
         // Metadata
         if let Some(cid) = self.pubchem_cid {
             writeln!(file, "> <PUBCHEM_COMPOUND_CID>")?;
-            writeln!(file, "{}", cid)?;
+            writeln!(file, "{cid}")?;
             writeln!(file)?; // blank line
         }
         if let Some(ref dbid) = self.drugbank_id {
             writeln!(file, "> <DATABASE_ID>")?;
-            writeln!(file, "{}", dbid)?;
+            writeln!(file, "{dbid}")?;
             writeln!(file)?; // blank line
             writeln!(file, "> <DATABASE_NAME>")?;
             writeln!(file, "drugbank")?;

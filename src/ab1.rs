@@ -134,9 +134,8 @@ impl<R: Read + Seek> AbiIterator<R> {
         }
 
         let header = Header::from_bytes(header_data)?;
-        println!("Header: {:?}", header);
 
-        for i in 0..header.num_elements as usize {
+        for i in 0..header.num_elements {
             // todo: QC data_offset; coming out much too high.
             // Note: Element size should always be DIR_SIZE.
             let start = header.data_offset as usize + i * header.element_size as usize;
@@ -292,8 +291,8 @@ impl<R: Read + Seek> AbiIterator<R> {
                 },
                 _ => {
                     // todo: Implement others A/R.
-                    eprintln!("Invalid key in AB1 file: {:?}", key);
-                    eprintln!("Tag data for this key: {:?}", tag_data);
+                    eprintln!("Invalid key in AB1 file: {key:?}");
+                    eprintln!("Tag data for this key: {tag_data:?}");
                 }
             }
         }
@@ -309,7 +308,7 @@ fn parse_abi_tag(data: &[u8]) -> io::Result<(String, String)> {
     let tag_number = u32::from_be_bytes(
         data[4..8]
             .try_into()
-            .map_err(|err| io::Error::new(io::ErrorKind::InvalidData, err))?,
+            .map_err(|err| io::Error::new(ErrorKind::InvalidData, err))?,
     );
     Ok((tag_name, tag_number.to_string()))
 }
@@ -375,7 +374,7 @@ enum TagData {
     Str(String),
 }
 
-fn parse_tag_data(elem_code: u16, elem_num: usize, data: &[u8]) -> io::Result<TagData> {
+fn parse_tag_data(elem_code: u16, _elem_num: usize, data: &[u8]) -> io::Result<TagData> {
     //     1: "b",  # byte
     //     2: "s",  # char
     //     3: "H",  # word

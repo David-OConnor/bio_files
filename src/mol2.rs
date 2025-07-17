@@ -113,7 +113,7 @@ impl FromStr for ChargeType {
             "MMFF94_CHARGES" => Ok(ChargeType::MmFf94),
             "USER_CHARGES" => Ok(ChargeType::User),
             "ABCG2" => Ok(ChargeType::Amber),
-            "AMBER ff14SB" => Ok(ChargeType::Amber),
+            "AMBER FF14SB" => Ok(ChargeType::Amber),
             _ => Ok(ChargeType::Other(s.to_owned())),
         }
     }
@@ -318,6 +318,7 @@ impl Mol2 {
                     occupancy: None,
                     partial_charge,
                     force_field_type: Some(cols[5].to_string()),
+                    hetero: true,
                 });
             }
 

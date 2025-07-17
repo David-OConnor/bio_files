@@ -1,4 +1,4 @@
-///! For operating on frcmod files, which describe Amber force fields for small molecules.
+//! For operating on frcmod files, which describe Amber force fields for small molecules.
 use std::{
     fs::File,
     io::{self, ErrorKind, Read, Write},
@@ -18,7 +18,6 @@ enum Section {
     Dihedral,
     Improper,
     Nonbond,
-    None,
 }
 
 impl ForceFieldParams {
@@ -83,7 +82,7 @@ impl ForceFieldParams {
                 Section::Improper => {
                     result.improper.push(DihedralParams::from_line(line)?.0);
                 }
-                Section::Nonbond | Section::None => { /* skip or extend */ }
+                Section::Nonbond => { /* skip or extend */ }
             }
         }
 
@@ -103,7 +102,7 @@ impl ForceFieldParams {
         let mut f = File::create(path)?;
 
         for r in &self.remarks {
-            writeln!(f, "{}", r)?;
+            writeln!(f, "{r}")?;
         }
 
         writeln!(f)?;
@@ -178,9 +177,9 @@ impl ForceFieldParams {
                 d.periodicity
             );
             if let Some(n) = &d.comment {
-                line.push_str(&format!("  {}", n));
+                line.push_str(&format!("  {n}"));
             }
-            writeln!(f, "{}", line)?;
+            writeln!(f, "{line}")?;
         }
         writeln!(f)?;
 
