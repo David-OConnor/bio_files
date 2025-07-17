@@ -36,7 +36,6 @@ pub struct MmCif {
 
 impl MmCif {
     pub fn new(text: &str) -> io::Result<Self> {
-        println!("Loading mmCIF data...");
         // todo: For these `new` methods in general that take a &str param: Should we use
         // todo R: Reed + Seek instead, and pass a Cursor or File object? Probably doesn't matter.
         // todo Either way, we should keep it consistent between the files.
@@ -129,8 +128,6 @@ impl MmCif {
 
                     // Atom lines.
                     let hetero = fields[het].trim() == "HETATM";
-
-                    println!("HET: {:?}", hetero);
 
                     let serial_number = fields[c_id].parse::<u32>().unwrap_or(0);
                     let x = fields[c_x].parse::<f64>().unwrap_or(0.0);
@@ -229,10 +226,8 @@ impl MmCif {
             if i > 20 {
                 break;
             }
-            println!("Loaded res: {res:?}");
         }
 
-        println!("CIF load complete");
         Ok(Self {
             ident,
             metadata,
