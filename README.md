@@ -10,7 +10,7 @@ used by your application. The API docs, and examples below are sufficient to get
 
 
 ### Currently supported formats:
-- mmCIF (Protein atom coordinates and related data)
+- mmCIF (Protein atom, residue, chain, and related data like secondary structure)
 - Mol2 (Small molecules, e.g. ligands)
 - SDF (Small molecules, e.g. ligands)
 - Map (Electron density, e.g. from crystallography, Cryo EM)
@@ -26,22 +26,22 @@ used by your application. The API docs, and examples below are sufficient to get
 - CIF structure formats (2fo-fc etc) (Exists in Daedalus; needs to be decoupled)
 
 
-For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do not plan to support
-this format, due to this high quality library.
+For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do not plan to support this format, due to this high quality library.
 
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
 It operates using structs with public fields, which you can explore
 using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`, 
-`save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and `load()` accept `&Path`.
-The Force Field formats instead use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
+`save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and
+`load()` accept `&Path`.
+The Force Field formats use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
 
 ## Serial numbers
 Serial numbers for atoms, residues, secondary structure, and chains are generally pulled directly from atom data files
 (mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as `Vec<u32>`, with the `u32` being the serial number.
 In your application, you may wish to adapt these generic types to custom ones that use index lookups
 instead of serial numbers. We use SNs here because they're more robust, and match the input files directly;
-add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of a the residue
+add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the residue
 an atom's in, in your derived Atom struct).
 
 Example use:
@@ -115,6 +115,59 @@ impl From<Sdf> for Molecule {
         let residues = m.residues.iter().map(|r| r.into()).collect();
 
         Self::new(m.ident, atoms, m.chains.clone(), residues, None, None);
+    }
+}
+```
+
+A practical example of parsing a molecule from a `mmCIF` as parsed from `bio_files` into an application-specific format:
+```rust
+fn load() {
+    let cif_data = mmcif::load("./1htm.cif");
+    let mol: Molecule = cif_data.try_into().unwrap();
+}
+
+impl TryFrom<MmCif> for Molecule {
+    type Error = io::Error;
+
+    fn try_from(m: MmCif) -> Result<Self, Self::Error> {
+        let mut atoms: Vec<_> = m.atoms.iter().map(|a| a.into()).collect();
+
+        let mut residues = Vec::with_capacity(m.residues.len());
+        for res in &m.residues {
+            residues.push(Residue::from_generic(res, &atoms)?);
+        }
+
+        let mut chains = Vec::with_capacity(m.chains.len());
+        for c in &m.chains {
+            chains.push(Chain::from_generic(c, &atoms, &residues)?);
+        }
+
+        // Now that chains and residues are loaded, update atoms with their back-ref index.
+        for atom in &mut atoms {
+            for (i, res) in residues.iter().enumerate() {
+                if res.atom_sns.contains(&atom.serial_number) {
+                    atom.residue = Some(i);
+                    break;
+                }
+            }
+
+            for (i, chain) in chains.iter().enumerate() {
+                if chain.atom_sns.contains(&atom.serial_number) {
+                    atom.chain = Some(i);
+                    break;
+                }
+            }
+        }
+
+        let mut result = Self::new(m.ident.clone(), atoms, chains, residues, None, None);
+
+        result.experimental_method = m.experimental_method.clone();
+        result.secondary_structure = m.secondary_structure.clone();
+
+        result.bonds_hydrogen = Vec::new();
+        result.adjacency_list = result.build_adjacency_list();
+
+        Ok(result)
     }
 }
 ```
