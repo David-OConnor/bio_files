@@ -59,17 +59,14 @@ pub struct MapHeader {
 }
 
 fn read_map_header<R: Read + Seek>(mut r: R) -> io::Result<MapHeader> {
-    // ensure we are at the start
     r.seek(SeekFrom::Start(0))?;
 
-    // Classic part of the header.
     let nx = r.read_i32::<LittleEndian>()?;
     let ny = r.read_i32::<LittleEndian>()?;
     let nz = r.read_i32::<LittleEndian>()?;
 
     let mode = r.read_i32::<LittleEndian>()?;
 
-    // Word 5
     let nxstart = r.read_i32::<LittleEndian>()?;
     let nystart = r.read_i32::<LittleEndian>()?;
     let nzstart = r.read_i32::<LittleEndian>()?;
