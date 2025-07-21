@@ -325,14 +325,14 @@ impl Mol2 {
             if in_bond_section {
                 let cols: Vec<&str> = line.split_whitespace().collect();
 
-                let atom_0 = cols[1].parse::<usize>().map_err(|_| {
+                let atom_0_sn = cols[1].parse::<u32>().map_err(|_| {
                     io::Error::new(
                         ErrorKind::InvalidData,
                         format!("Could not parse atom 0 in bond: {}", cols[1]),
                     )
                 })?;
 
-                let atom_1 = cols[2].parse::<usize>().map_err(|_| {
+                let atom_1_sn = cols[2].parse::<u32>().map_err(|_| {
                     io::Error::new(
                         ErrorKind::InvalidData,
                         format!("Could not parse atom 1 in bond: {}", cols[2]),
@@ -349,8 +349,8 @@ impl Mol2 {
                 // nc = not connected
                 bonds.push(BondGeneric {
                     bond_type: cols[3].to_owned(),
-                    atom_0,
-                    atom_1,
+                    atom_0_sn,
+                    atom_1_sn,
                 });
             }
         }
@@ -429,15 +429,12 @@ impl Mol2 {
 
         writeln!(file, "@<TRIPOS>BOND")?;
         for (i, bond) in self.bonds.iter().enumerate() {
-            let start_idx = bond.atom_0;
-            let end_idx = bond.atom_1;
-
             writeln!(
                 file,
                 "{:>5}{:>6}{:>6}{:>3}",
                 i + 1,
-                start_idx,
-                end_idx,
+                bond.atom_0_sn,
+                bond.atom_1_sn,
                 bond.bond_type,
             )?;
         }

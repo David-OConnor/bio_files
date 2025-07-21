@@ -143,17 +143,17 @@ impl Sdf {
                 ));
             }
 
-            let atom_0 = cols[0].parse::<usize>().map_err(|_| {
+            let atom_0_sn = cols[0].parse::<u32>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 0")
             })?;
-            let atom_1 = cols[1].parse::<usize>().map_err(|_| {
+            let atom_1_sn = cols[1].parse::<u32>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1")
             })?;
             let bond_type = cols[2].to_owned();
 
             bonds.push(BondGeneric {
-                atom_0,
-                atom_1,
+                atom_0_sn,
+                atom_1_sn,
                 bond_type,
             })
         }
@@ -264,8 +264,6 @@ impl Sdf {
         }
 
         for bond in &self.bonds {
-            let start_idx = bond.atom_0 + 1; // 1-based in SDF
-            let end_idx = bond.atom_1 + 1;
             // let bond_count = match bond.bond_type {
             //     BondType::Covalent { count } => count.value() as u8,
             //     _ => 0,
@@ -275,7 +273,7 @@ impl Sdf {
             writeln!(
                 file,
                 "{:>3}{:>3}{:>3}  0  0  0  0",
-                start_idx, end_idx, &bond.bond_type
+                bond.atom_0_sn, bond.atom_1_sn, &bond.bond_type
             )?;
         }
 

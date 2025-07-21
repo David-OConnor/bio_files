@@ -57,9 +57,8 @@ pub struct AtomGeneric {
 #[derive(Clone, Debug)]
 pub struct BondGeneric {
     pub bond_type: String, // todo: Enum
-    /// Indices
-    pub atom_0: usize,
-    pub atom_1: usize,
+    pub atom_0_sn: u32,
+    pub atom_1_sn: u32,
 }
 
 #[derive(Debug, Clone)]
