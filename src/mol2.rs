@@ -34,7 +34,7 @@ impl MolType {
             Self::NucleicAcid => "NUCLEIC_ACID",
             Self::Saccharide => "SACCHARIDE",
         }
-        .to_owned()
+            .to_owned()
     }
 }
 
@@ -145,7 +145,7 @@ impl BondType {
             Self::Unknown => "un",
             Self::NotConnected => "nc",
         }
-        .to_owned()
+            .to_owned()
     }
 }
 
@@ -306,9 +306,11 @@ impl Mol2 {
                     Some(charge)
                 };
 
-                // todo: More columns, including partial charge.
-
-                let type_in_res = AtomTypeInRes::from_str(&cols[1].to_owned()).ok();
+                let type_in_res =  if !atom_name.is_empty() {
+                    Some(AtomTypeInRes::Hetero(atom_name.to_string()))
+                } else {
+                    None
+                };
 
                 atoms.push(AtomGeneric {
                     serial_number,

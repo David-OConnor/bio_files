@@ -136,7 +136,17 @@ impl MmCif {
 
                     let element = Element::from_letter(fields[c_el])?;
                     let atom_name = fields[c_name];
-                    let type_in_res = AtomTypeInRes::from_str(atom_name).ok();
+
+                    let type_in_res = if hetero {
+                        if !atom_name.is_empty() {
+                            Some(AtomTypeInRes::Hetero(atom_name.to_string()))
+                        } else {
+                            None
+                        }
+                    } else {
+                        AtomTypeInRes::from_str(atom_name).ok()
+                    };
+
                     let occ = match fields[c_occ] {
                         "?" | "." => None,
                         v => v.parse().ok(),
