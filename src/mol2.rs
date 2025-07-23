@@ -379,7 +379,6 @@ impl Mol2 {
         })
     }
 
-    // pub fn save_mol2(&self, path: &Path) -> io::Result<()> {
     pub fn save(&self, path: &Path) -> io::Result<()> {
         //todo: Fix this so it outputs mol2 instead of sdf.
         let mut file = File::create(path)?;
@@ -407,32 +406,31 @@ impl Mol2 {
 
         writeln!(file, "@<TRIPOS>ATOM")?;
         for (i, atom) in self.atoms.iter().enumerate() {
-            let atom_name = match &atom.type_in_res {
+            let type_in_res = match &atom.type_in_res {
                 Some(n) => n.to_string(),
                 None => atom.element.to_letter(),
             };
 
-            let atom_type = match &atom.force_field_type {
+            let ff_type = match &atom.force_field_type {
                 Some(f) => f.to_owned(),
                 None => atom.element.to_letter(),
             };
 
-            let type_in_res = match &atom.type_in_res {
-                Some(t) => t.to_string(),
-                None => String::new(),
-            };
+            // todo: A/R
+            // let res_name = String::new();
+            // for res in &self.
 
             writeln!(
                 file,
-                "{:>5} {:<2} {:>12.3} {:>8.3} {:>8.3} {:<2} {:>6} {:<3} {:>6.3}",
-                i + 1,
-                atom_name,
+                "{:>7} {:<8} {:>10.4} {:>10.4} {:>10.4} {:<6} {:>5} {:<8} {:>9.6}",
+                atom.serial_number,
+                type_in_res,
                 atom.posit.x,
                 atom.posit.y,
                 atom.posit.z,
-                atom_type,
+                ff_type,
                 "1", // Assumes 1 residue.
-                type_in_res,
+                self.ident, // todo: This should really be the residue information.
                 atom.partial_charge.unwrap_or_default()
             )?;
         }
@@ -441,7 +439,7 @@ impl Mol2 {
         for (i, bond) in self.bonds.iter().enumerate() {
             writeln!(
                 file,
-                "{:>5}{:>6}{:>6}{:>3}",
+                "{:>6}{:>6}{:>6}{:<3}",
                 i + 1,
                 bond.atom_0_sn,
                 bond.atom_1_sn,
