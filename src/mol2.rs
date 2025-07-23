@@ -392,15 +392,18 @@ impl Mol2 {
         writeln!(file, "{}", self.mol_type.to_str())?;
         writeln!(file, "{}", self.charge_type)?;
 
-        // todo: Multi-line comments are supported by Mol2
-        let comment = match &self.comment {
-            Some(c) => &c,
-            None => "****",
-        };
+        // //  todo: Multi-line comments are supported by Mol2
+        // let comment = match &self.comment {
+        //     Some(c) => &c,
+        //     None => "****",
+        // };
 
         // **** Means a non-optional field is empty.
-        writeln!(file, "{comment}")?;
+        // writeln!(file, "{comment}")?;
         // Optional line (comments, molecule weight, etc.)
+
+        writeln!(file, "")?;
+        writeln!(file, "")?;
 
         writeln!(file, "@<TRIPOS>ATOM")?;
         for (i, atom) in self.atoms.iter().enumerate() {
@@ -414,6 +417,11 @@ impl Mol2 {
                 None => atom.element.to_letter(),
             };
 
+            let type_in_res = match &atom.type_in_res {
+                Some(t) => t.to_string(),
+                None => String::new(),
+            };
+
             writeln!(
                 file,
                 "{:>5} {:<2} {:>12.3} {:>8.3} {:>8.3} {:<2} {:>6} {:<3} {:>6.3}",
@@ -423,8 +431,8 @@ impl Mol2 {
                 atom.posit.y,
                 atom.posit.z,
                 atom_type,
-                0,
-                "UNL",
+                "1", // Assumes 1 residue.
+                type_in_res,
                 atom.partial_charge.unwrap_or_default()
             )?;
         }

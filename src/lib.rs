@@ -68,6 +68,18 @@ pub enum ResidueType {
     Other(String),
 }
 
+impl fmt::Display for ResidueType {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let name = match &self {
+            ResidueType::Other(n) => n.clone(),
+            ResidueType::Water => "Water".to_string(),
+            ResidueType::AminoAcid(aa) => aa.to_string(),
+        };
+
+        write!(f, "{name}")
+    }
+}
+
 impl Default for ResidueType {
     fn default() -> Self {
         Self::Other(String::new())
@@ -87,6 +99,7 @@ impl ResidueType {
         }
     }
 }
+
 
 #[derive(Debug, Clone)]
 pub struct ResidueGeneric {
