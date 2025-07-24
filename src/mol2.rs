@@ -436,14 +436,20 @@ impl Mol2 {
         }
 
         writeln!(file, "@<TRIPOS>BOND")?;
+
         for (i, bond) in self.bonds.iter().enumerate() {
+            let bond_type = match bond.bond_type {
+                Some(b) => b,
+                None => "1",
+            };
+
             writeln!(
                 file,
                 "{:>6}{:>6}{:>6}{:<3}",
                 i + 1,
                 bond.atom_0_sn,
                 bond.atom_1_sn,
-                bond.bond_type,
+                bond_type,
             )?;
         }
 
