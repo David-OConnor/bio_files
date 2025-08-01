@@ -67,6 +67,7 @@ impl MassParams {
 
 /// Amber RM 2025, 15.1.6
 /// Data for a BOND entry: e.g. "CT-CT  310.0    1.526" with optional comment
+/// Length between 2 covalently bonded atoms.
 #[derive(Debug, Clone)]
 pub struct BondStretchingParams {
     pub atom_types: (String, String),
@@ -113,6 +114,7 @@ impl BondStretchingParams {
 
 /// Amber RM 2025, 15.1.6
 /// Data for an ANGLE entry: e.g. "CT-CT-CT  63.0    109.5" with optional comment
+/// Angle between 3 linear covalently-bonded atoms (2 bonds)
 #[derive(Debug, Clone)]
 pub struct AngleBendingParams {
     pub atom_types: (String, String, String),
@@ -163,6 +165,10 @@ impl AngleBendingParams {
 }
 
 /// Also known as Torsion. Data for both proper, and improper dihedral data.
+///
+/// Angle between 4 linear covalently-bonded atoms ("dihedral"), or 3 atoms in a hub-and-spoke
+/// configuration, with atom 3 as the hub ("improper"). In either case, this is the angle between the planes of
+/// atoms 1-2-3, and 2-3-4. (Rotation around the 2-3 bond)
 #[derive(Debug, Clone, Default)]
 pub struct DihedralParams {
     /// "ca", "n", "cd", "sh" etc.
@@ -337,9 +343,16 @@ pub struct ChargeParams {
 #[derive(Debug, Default)]
 pub struct ForceFieldParams {
     pub mass: Vec<MassParams>,
+    /// Length between 2 covalently bonded atoms.
     pub bond: Vec<BondStretchingParams>,
+    /// Angle between 3 linear covalently-bonded atoms (2 bonds)
     pub angle: Vec<AngleBendingParams>,
+    /// Angle between 4 linear covalently-bonded atoms (3 bonds). This is
+    /// the angle between the planes of atoms 1-2-3, and 2-3-4. (Rotation around the 2-3 bond)
     pub dihedral: Vec<DihedralParams>,
+    /// Angle between 4 covalently-bonded atoms (3 bonds), in a hub-and-spoke
+    /// arrangement. The third atom is the hub. This is the angle between the planes of
+    /// atoms 1-2-3, and 2-3-4.
     pub improper: Vec<DihedralParams>,
     pub van_der_waals: Vec<VdwParams>,
     pub remarks: Vec<String>,
@@ -405,46 +418,40 @@ impl ForceFieldParamsKeyed {
         atom_types: &(String, String, String, String),
         proper: bool, // todo: Experimenting.
     ) -> Option<&DihedralParams> {
-        let (a, b, c, d) = (
-            atom_types.0.clone(),
-            atom_types.1.clone(),
-            atom_types.2.clone(),
-            atom_types.3.clone(),
-        );
+        let a = atom_types.0.as_str();
+        let b = atom_types.1.as_str();
+        let c = atom_types.2.as_str();
+        let d = atom_types.3.as_str();
 
-        // Candidate keys ordered from most-specific to most-generic.
-        let mut keys: Vec<(String, String, String, String)> = Vec::with_capacity(8);
+        const X: &str = "X";
+        let candidates = [
+            // Exact
+            (a, b, c, d),
+            (d, c, b, a),
+            // X on one side
+            (X, b, c, d),
+            (X, c, b, a),
+            (a, b, c, X),
+            (d, c, b, X),
+            // Xs on both sides.
+            (X, b, c, X),
+            (X, c, b, X),
+        ];
 
-        // Exact
-        keys.push((a.clone(), b.clone(), c.clone(), d.clone()));
-        keys.push((d.clone(), c.clone(), b.clone(), a.clone()));
+        for &(k0, k1, k2, k3) in &candidates {
+            // Build a temporary `String` tuple only for the actual lookup
+            let key = (k0.to_owned(), k1.to_owned(), k2.to_owned(), k3.to_owned());
 
-        // One X
-        keys.push(("X".into(), b.clone(), c.clone(), d.clone()));
-        keys.push(("X".into(), c.clone(), b.clone(), a.clone()));
-        keys.push((a.clone(), b.clone(), c.clone(), "X".into()));
-        keys.push((d.clone(), c.clone(), b.clone(), "X".into()));
+            let hit = if proper {
+                self.dihedral.get(&key)
+            } else {
+                self.dihedral_improper.get(&key)
+            };
 
-        // Xs on both ends
-        keys.push(("X".into(), b.clone(), c.clone(), "X".into()));
-        keys.push(("X".into(), c.clone(), b.clone(), "X".into()));
-
-        // Proper
-        if proper {
-            for k in &keys {
-                if let Some(data) = self.dihedral.get(k) {
-                    return Some(data);
-                }
-            }
-        } else {
-            // Improper
-            for k in &keys {
-                if let Some(data) = self.dihedral_improper.get(k) {
-                    return Some(data);
-                }
+            if hit.is_some() {
+                return hit;
             }
         }
-
         None
     }
 }

@@ -189,9 +189,7 @@ impl Sdf {
         // We observe that on at least some DrugBank files, this line
         // is the PubChem ID, even if the PUBCHEM_COMPOUND_CID line is omitted.
         match lines[0].parse::<u32>() {
-            Ok(v) => {
-                pubchem_cid = Some(v)
-            },
+            Ok(v) => pubchem_cid = Some(v),
             Err(_) => (),
         }
 
