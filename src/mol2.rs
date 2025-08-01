@@ -34,7 +34,7 @@ impl MolType {
             Self::NucleicAcid => "NUCLEIC_ACID",
             Self::Saccharide => "SACCHARIDE",
         }
-            .to_owned()
+        .to_owned()
     }
 }
 
@@ -145,7 +145,7 @@ impl BondType {
             Self::Unknown => "un",
             Self::NotConnected => "nc",
         }
-            .to_owned()
+        .to_owned()
     }
 }
 
@@ -170,6 +170,7 @@ impl FromStr for BondType {
     }
 }
 
+#[derive(Debug)]
 pub struct Mol2 {
     pub ident: String,
     pub mol_type: MolType,
@@ -265,6 +266,13 @@ impl Mol2 {
             if in_atom_section {
                 let cols: Vec<&str> = line.split_whitespace().collect();
 
+                if cols.len() < 5 {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        "Not enough columns.",
+                    ));
+                }
+
                 let serial_number = cols[0].parse::<u32>().map_err(|_| {
                     io::Error::new(ErrorKind::InvalidData, "Could not parse serial number")
                 })?;
@@ -297,7 +305,11 @@ impl Mol2 {
                     io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate")
                 })?;
 
-                let charge = cols[8].parse::<f32>().unwrap_or_default();
+                let charge = if cols.len() >= 9 {
+                    cols[8].parse::<f32>().unwrap_or_default()
+                } else {
+                    0.
+                };
 
                 // todo: ALso, parse the charge type at line 4.
                 let partial_charge = if charge.abs() < 0.000001 {
@@ -306,7 +318,7 @@ impl Mol2 {
                     Some(charge)
                 };
 
-                let type_in_res =  if !atom_name.is_empty() {
+                let type_in_res = if !atom_name.is_empty() {
                     Some(AtomTypeInRes::Hetero(atom_name.to_string()))
                 } else {
                     None
@@ -326,6 +338,13 @@ impl Mol2 {
 
             if in_bond_section {
                 let cols: Vec<&str> = line.split_whitespace().collect();
+
+                if cols.len() < 4 {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        "Not enough columns when parsing Mol2 bonds.",
+                    ));
+                }
 
                 let atom_0_sn = cols[1].parse::<u32>().map_err(|_| {
                     io::Error::new(
@@ -413,7 +432,8 @@ impl Mol2 {
 
             let ff_type = match &atom.force_field_type {
                 Some(f) => f.to_owned(),
-                None => atom.element.to_letter(),
+                // Not ideal, but will do as a placeholder.
+                None => atom.element.to_letter().to_lowercase(),
             };
 
             // todo: A/R
@@ -429,7 +449,7 @@ impl Mol2 {
                 atom.posit.y,
                 atom.posit.z,
                 ff_type,
-                "1", // Assumes 1 residue.
+                "1",        // Assumes 1 residue.
                 self.ident, // todo: This should really be the residue information.
                 atom.partial_charge.unwrap_or_default()
             )?;
@@ -438,14 +458,15 @@ impl Mol2 {
         writeln!(file, "@<TRIPOS>BOND")?;
 
         for (i, bond) in self.bonds.iter().enumerate() {
-            let bond_type = match bond.bond_type {
-                Some(b) => b,
-                None => "1",
+            let bond_type = if bond.bond_type.is_empty() {
+                "1"
+            } else {
+                &bond.bond_type
             };
 
             writeln!(
                 file,
-                "{:>6}{:>6}{:>6}{:<3}",
+                "{:>6}{:>6}{:>6} {:<3}",
                 i + 1,
                 bond.atom_0_sn,
                 bond.atom_1_sn,

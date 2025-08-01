@@ -341,7 +341,6 @@ pub struct ForceFieldParams {
     pub angle: Vec<AngleBendingParams>,
     pub dihedral: Vec<DihedralParams>,
     pub improper: Vec<DihedralParams>,
-    // pub partial_charge: Vec<PartialChargeData>,
     pub van_der_waals: Vec<VdwParams>,
     pub remarks: Vec<String>,
 }
@@ -359,12 +358,11 @@ pub struct ForceFieldParamsKeyed {
     pub dihedral: HashMap<(String, String, String, String), DihedralParams>,
     pub dihedral_improper: HashMap<(String, String, String, String), DihedralParams>,
     pub van_der_waals: HashMap<String, VdwParams>,
-    // todo: Partial charges here A/R. Removed here for now, since we get them from
-    // Mol2 etc files, so their state is associated that way.
-    // pub partial_charges: HashMap<String, f32>,
 }
 
 impl ForceFieldParamsKeyed {
+    /// Restructures params so the `atom_type` fields are arranged as HashMap keys, for faster
+    /// lookup.
     pub fn new(params: &ForceFieldParams) -> Self {
         let mut result = Self::default();
 

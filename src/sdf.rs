@@ -14,6 +14,7 @@ use na_seq::Element;
 
 use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric, ResidueType};
 
+#[derive(Debug)]
 pub struct Sdf {
     /// These fields aren't universal to the format.
     pub ident: String,
@@ -185,6 +186,14 @@ impl Sdf {
         }
 
         let ident = lines[0].trim().to_string();
+        // We observe that on at least some DrugBank files, this line
+        // is the PubChem ID, even if the PUBCHEM_COMPOUND_CID line is omitted.
+        match lines[0].parse::<u32>() {
+            Ok(v) => {
+                pubchem_cid = Some(v)
+            },
+            Err(_) => (),
+        }
 
         // We could now skip over the bond lines if we want:
         //   let first_bond_line = last_atom_ line;

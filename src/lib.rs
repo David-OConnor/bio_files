@@ -100,7 +100,6 @@ impl ResidueType {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct ResidueGeneric {
     /// We use serial number of display, search etc, and array index to select. Residue serial number is not
