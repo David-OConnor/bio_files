@@ -352,7 +352,8 @@ pub struct ForceFieldParams {
     pub dihedral: Vec<DihedralParams>,
     /// Angle between 4 covalently-bonded atoms (3 bonds), in a hub-and-spoke
     /// arrangement. The third atom is the hub. This is the angle between the planes of
-    /// atoms 1-2-3, and 2-3-4.
+    /// atoms 1-2-3, and 2-3-4. Note that these are generally only included for planar configurations,
+    /// and always hold a planar dihedral shape. (e.g. τ/2 with symmetry 2)
     pub improper: Vec<DihedralParams>,
     pub van_der_waals: Vec<VdwParams>,
     pub remarks: Vec<String>,
