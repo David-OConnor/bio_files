@@ -215,6 +215,10 @@ impl Mol2 {
         let mut in_bond_section = false;
 
         for line in &lines {
+            if line.trim().is_empty() {
+                continue;
+            }
+
             let upper = line.to_uppercase();
             if upper.contains("<TRIPOS>ATOM") {
                 in_atom_section = true;
@@ -269,7 +273,7 @@ impl Mol2 {
                 if cols.len() < 5 {
                     return Err(io::Error::new(
                         ErrorKind::InvalidData,
-                        "Not enough columns.",
+                        "Not enough columns on Mol2 atom row",
                     ));
                 }
 

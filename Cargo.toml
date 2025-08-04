@@ -1,6 +1,6 @@
 [package]
 name = "bio_files"
-version = "0.2.3"
+version = "0.2.4"
 edition = "2024"
 authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Save and load common biology file formats."
@@ -23,7 +23,7 @@ exclude = [".gitignore"]
 byteorder = "1.5.0"  # For use with some parsers.
 na_seq = "0.3.1"  # Element, atom etc primitives
 bio_apis = "0.1.4" # Loading data from RCSB etc.
-lin_alg = "1.2.3"
+lin_alg = "1.2.5"
 regex = "1.11.1"
 
 # todo: Ditch `bio` for your own FASTA parser.
