@@ -50,6 +50,7 @@ pub struct AtomGeneric {
     /// Internal term: "Type 3".
     pub force_field_type: Option<String>,
     pub occupancy: Option<f32>,
+    /// Elementary charge. (Charge of a proton)
     pub partial_charge: Option<f32>,
     pub hetero: bool,
 }
