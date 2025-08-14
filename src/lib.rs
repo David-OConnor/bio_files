@@ -62,7 +62,7 @@ pub struct BondGeneric {
     pub atom_1_sn: u32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum ResidueType {
     AminoAcid(AminoAcid),
     Water,
