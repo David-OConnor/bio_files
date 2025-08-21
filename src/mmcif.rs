@@ -64,10 +64,10 @@ impl MmCif {
                 continue;
             }
 
-            if let Some(caps) = method_re.captures(line) {
-                if let Ok(m) = caps[1].to_string().parse() {
-                    experimental_method = Some(m);
-                }
+            if let Some(caps) = method_re.captures(line)
+                && let Ok(m) = caps[1].to_string().parse()
+            {
+                experimental_method = Some(m);
             }
 
             if line == "loop_" {

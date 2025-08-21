@@ -7,12 +7,13 @@ use std::{
     io,
     io::{ErrorKind, Read, Write},
     path::Path,
+    str::FromStr,
 };
 
 use lin_alg::f64::Vec3;
 use na_seq::Element;
 
-use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric, ResidueType};
+use crate::{AtomGeneric, BondGeneric, BondType, ChainGeneric, ResidueGeneric, ResidueType};
 
 #[derive(Debug)]
 pub struct Sdf {
@@ -150,7 +151,8 @@ impl Sdf {
             let atom_1_sn = cols[1].parse::<u32>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1")
             })?;
-            let bond_type = cols[2].to_owned();
+
+            let bond_type = BondType::from_str(cols[2])?;
 
             bonds.push(BondGeneric {
                 atom_0_sn,
@@ -167,12 +169,12 @@ impl Sdf {
         // todo: Handle more metadata?
 
         for (i, line) in lines.iter().enumerate() {
-            if line.contains("> <PUBCHEM_COMPOUND_CID>") {
-                if let Some(value_line) = lines.get(i + 1) {
-                    let value = value_line.trim();
-                    if let Ok(v) = value.parse::<u32>() {
-                        pubchem_cid = Some(v);
-                    }
+            if line.contains("> <PUBCHEM_COMPOUND_CID>")
+                && let Some(value_line) = lines.get(i + 1)
+            {
+                let value = value_line.trim();
+                if let Ok(v) = value.parse::<u32>() {
+                    pubchem_cid = Some(v);
                 }
             }
             if line.contains("> <DATABASE_ID>") {
@@ -188,9 +190,8 @@ impl Sdf {
         let ident = lines[0].trim().to_string();
         // We observe that on at least some DrugBank files, this line
         // is the PubChem ID, even if the PUBCHEM_COMPOUND_CID line is omitted.
-        match lines[0].parse::<u32>() {
-            Ok(v) => pubchem_cid = Some(v),
-            Err(_) => (),
+        if let Ok(v) = lines[0].parse::<u32>() {
+            pubchem_cid = Some(v);
         }
 
         // We could now skip over the bond lines if we want:
@@ -271,12 +272,6 @@ impl Sdf {
         }
 
         for bond in &self.bonds {
-            // let bond_count = match bond.bond_type {
-            //     BondType::Covalent { count } => count.value() as u8,
-            //     _ => 0,
-            // };
-            //
-
             writeln!(
                 file,
                 "{:>3}{:>3}{:>3}  0  0  0  0",

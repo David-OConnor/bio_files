@@ -55,9 +55,75 @@ pub struct AtomGeneric {
     pub hetero: bool,
 }
 
+/// These are the Mol2 standard types, unless otherwise noted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum BondType {
+    Single,
+    Double,
+    Triple,
+    Aromatic,
+    Amide,
+    Dummy,
+    Unknown,
+    NotConnected,
+    /// mmCIF, rare
+    Quadruple,
+    /// mmCIF. Distinct from aromatic; doesn't need to be a classic ring.
+    Delocalized,
+    /// mmCif; mostly for macromolecular components
+    PolymericLink,
+}
+
+impl fmt::Display for BondType {
+    /// Return the exact MOL2 bond-type token as an owned `String`.
+    /// (Use `&'static str` if you never need it allocated.)
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Single => "1",
+            Self::Double => "2",
+            Self::Triple => "3",
+            Self::Aromatic => "ar",
+            Self::Amide => "am",
+            Self::Dummy => "du",
+            Self::Unknown => "un",
+            Self::NotConnected => "nc",
+            Self::Quadruple => "quad",
+            Self::Delocalized => "delo",
+            Self::PolymericLink => "poly",
+        };
+
+        write!(f, "{name}")
+    }
+}
+
+impl FromStr for BondType {
+    type Err = io::Error;
+
+    /// Can ingest from mol2, SDF, and mmCIF formats.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "1" | "sing" => Ok(BondType::Single),
+            "2" | "doub" => Ok(BondType::Double),
+            "3" | "trip" => Ok(BondType::Triple),
+            "4" | "ar" | "arom" => Ok(BondType::Aromatic),
+            "am" => Ok(BondType::Amide),
+            "du" => Ok(BondType::Dummy),
+            "un" => Ok(BondType::Unknown),
+            "nc" => Ok(BondType::NotConnected),
+            "quad" => Ok(BondType::Quadruple),
+            "delo" => Ok(BondType::Delocalized),
+            "poly" => Ok(BondType::PolymericLink),
+            _ => Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid BondType: {s}"),
+            )),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct BondGeneric {
-    pub bond_type: String, // todo: Enum
+    pub bond_type: BondType,
     pub atom_0_sn: u32,
     pub atom_1_sn: u32,
 }

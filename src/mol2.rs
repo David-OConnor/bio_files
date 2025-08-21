@@ -14,7 +14,7 @@ use std::{
 use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 
-use crate::{AtomGeneric, BondGeneric};
+use crate::{AtomGeneric, BondGeneric, BondType};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MolType {
@@ -115,57 +115,6 @@ impl FromStr for ChargeType {
             "ABCG2" => Ok(ChargeType::Amber),
             "AMBER FF14SB" => Ok(ChargeType::Amber),
             _ => Ok(ChargeType::Other(s.to_owned())),
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum BondType {
-    Single,
-    Double,
-    Triple,
-    Aromatic,
-    Amide,
-    Dummy,
-    Unknown,
-    NotConnected,
-}
-
-impl BondType {
-    /// Return the exact MOL2 bond-type token as an owned `String`.
-    /// (Use `&'static str` if you never need it allocated.)
-    pub fn to_str(self) -> String {
-        match self {
-            Self::Single => "1",
-            Self::Double => "2",
-            Self::Triple => "3",
-            Self::Aromatic => "ar",
-            Self::Amide => "am",
-            Self::Dummy => "du",
-            Self::Unknown => "un",
-            Self::NotConnected => "nc",
-        }
-        .to_owned()
-    }
-}
-
-impl FromStr for BondType {
-    type Err = io::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "1" => Ok(BondType::Single),
-            "2" => Ok(BondType::Double),
-            "3" => Ok(BondType::Triple),
-            "ar" => Ok(BondType::Aromatic),
-            "am" => Ok(BondType::Amide),
-            "du" => Ok(BondType::Dummy),
-            "un" => Ok(BondType::Unknown),
-            "nc" => Ok(BondType::NotConnected),
-            _ => Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("Invalid BondType: {s}"),
-            )),
         }
     }
 }
@@ -364,6 +313,8 @@ impl Mol2 {
                     )
                 })?;
 
+                let bond_type = BondType::from_str(cols[3])?;
+
                 // 1 = single
                 // 2 = double
                 // 3 = triple
@@ -373,7 +324,7 @@ impl Mol2 {
                 // un = unknown (cannot be determined from the parameter tables)
                 // nc = not connected
                 bonds.push(BondGeneric {
-                    bond_type: cols[3].to_owned(),
+                    bond_type,
                     atom_0_sn,
                     atom_1_sn,
                 });
@@ -424,11 +375,11 @@ impl Mol2 {
         // writeln!(file, "{comment}")?;
         // Optional line (comments, molecule weight, etc.)
 
-        writeln!(file, "")?;
-        writeln!(file, "")?;
+        writeln!(file)?;
+        writeln!(file)?;
 
         writeln!(file, "@<TRIPOS>ATOM")?;
-        for (i, atom) in self.atoms.iter().enumerate() {
+        for atom in &self.atoms {
             let type_in_res = match &atom.type_in_res {
                 Some(n) => n.to_string(),
                 None => atom.element.to_letter(),
@@ -462,19 +413,13 @@ impl Mol2 {
         writeln!(file, "@<TRIPOS>BOND")?;
 
         for (i, bond) in self.bonds.iter().enumerate() {
-            let bond_type = if bond.bond_type.is_empty() {
-                "1"
-            } else {
-                &bond.bond_type
-            };
-
             writeln!(
                 file,
                 "{:>6}{:>6}{:>6} {:<3}",
                 i + 1,
                 bond.atom_0_sn,
                 bond.atom_1_sn,
-                bond_type,
+                bond.bond_type.to_string(),
             )?;
         }
 
