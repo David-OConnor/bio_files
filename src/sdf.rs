@@ -275,7 +275,9 @@ impl Sdf {
             writeln!(
                 file,
                 "{:>3}{:>3}{:>3}  0  0  0  0",
-                bond.atom_0_sn, bond.atom_1_sn, &bond.bond_type
+                bond.atom_0_sn,
+                bond.atom_1_sn,
+                bond.bond_type.to_str_sdf()
             )?;
         }
 

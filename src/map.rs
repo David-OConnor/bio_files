@@ -8,13 +8,13 @@
 use std::{
     fs,
     fs::File,
-    io::{self, ErrorKind, Read, Seek, SeekFrom},
+    io::{self, ErrorKind, Read, Seek, SeekFrom, Write},
     path::Path,
     process::Command,
 };
 
 use bio_apis::rcsb;
-use byteorder::{LittleEndian, ReadBytesExt};
+use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use lin_alg::f64::{Mat3, Vec3};
 
 const HEADER_SIZE: u64 = 1_024;
@@ -23,7 +23,7 @@ const HEADER_SIZE: u64 = 1_024;
 #[allow(unused)]
 #[derive(Clone, Debug)]
 pub struct MapHeader {
-    /// Numbemr of grid points along each axis. nx × ny × nz is the number of voxels.
+    /// Number of grid points along each axis. nx × ny × nz is the number of voxels.
     pub nx: i32,
     pub ny: i32,
     pub nz: i32,
@@ -99,10 +99,6 @@ fn read_map_header<R: Read + Seek>(mut r: R) -> io::Result<MapHeader> {
 
     // offset notes:
     // nystart / my * cell_b. e.g. 4/60 * 85.142 = 5.6
-
-    // let mut test_str = String::with_capacity(4);
-    // r.read_to_string(&mut test_str)?;
-    // println!("TEST STR: {:?}", test_str);
 
     // Words 25-49 are “extra”; skip straight to word 50 (49 × 4 bytes)
     r.seek(SeekFrom::Start(49 * 4))?;
@@ -273,11 +269,11 @@ fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
 pub struct DensityMap {
     pub hdr: MapHeader,
     pub cell: UnitCell,
-    /// header origin, already converted to fractional
+    /// Header origin, already converted to fractional
     pub origin_frac: Vec3,
-    /// file-axis → cryst-axis (from MAPC/MAPR/MAPS)
+    /// A map from file axis to crystal axis
     pub perm_f2c: [usize; 3],
-    /// cryst-axis → file-axis (inverse permutation)
+    /// A map from crystal axis to file axis. (Reverse of `perm_f2c`)
     pub perm_c2f: [usize; 3],
     pub data: Vec<f32>,
     /// In case the header mean is rounded or otherwise incorrect.
@@ -454,13 +450,132 @@ impl DensityMap {
         Self::new(&mut file)
     }
 
-    // todo: Implement
-    // pub fn save(&self, path: &Path) -> io::Result<()> {
-    //
-    // }
+    /// Save the density map to a file.
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        let len_expected = (self.hdr.nx as usize)
+            .saturating_mul(self.hdr.ny as usize)
+            .saturating_mul(self.hdr.nz as usize);
+
+        if self.data.len() != len_expected {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "data length ({}) does not match nx*ny*nz ({}).",
+                    self.data.len(),
+                    len_expected
+                ),
+            ));
+        }
+
+        // Recompute stats
+        let n = self.data.len() as f32;
+        let (mut dmin, mut dmax) = (f32::INFINITY, f32::NEG_INFINITY);
+        let mut sum = 0.0f32;
+        for &v in &self.data {
+            if v < dmin {
+                dmin = v;
+            }
+            if v > dmax {
+                dmax = v;
+            }
+            sum += v;
+        }
+        let dmean = if n > 0.0 { sum / n } else { 0.0 };
+        let mut var = 0.0f32;
+        for &v in &self.data {
+            let dv = v - dmean;
+            var += dv * dv;
+        }
+        let rms = if n > 0.0 { (var / n).sqrt() } else { 0.0 };
+
+        // Build the 1024-byte header
+        let mut hdr_buf = Vec::with_capacity(HEADER_SIZE as usize);
+        {
+            // Words 1..24
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.nx)?; // 1 NX
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.ny)?; // 2 NY
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.nz)?; // 3 NZ
+            hdr_buf.write_i32::<LittleEndian>(2)?; // 4 MODE = 2 (float32)
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.nxstart)?; // 5
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.nystart)?; // 6
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.nzstart)?; // 7
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.mx)?; // 8
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.my)?; // 9
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.mz)?; // 10
+
+            for &c in &self.hdr.cell {
+                // 11..16 cell a,b,c,α,β,γ
+                hdr_buf.write_f32::<LittleEndian>(c)?;
+            }
+
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.mapc)?; // 17 MAPC
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.mapr)?; // 18 MAPR
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.maps)?; // 19 MAPS
+            hdr_buf.write_f32::<LittleEndian>(dmin)?; // 20 DMIN
+            hdr_buf.write_f32::<LittleEndian>(dmax)?; // 21 DMAX
+            hdr_buf.write_f32::<LittleEndian>(dmean)?; // 22 DMEAN
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.ispg)?; // 23 ISPG
+
+            // We'll write no symmetry block.
+            let nsymbt: i32 = 0;
+            hdr_buf.write_i32::<LittleEndian>(nsymbt)?; // 24 NSYMBT
+
+            // Words 25..49 (extra). Put version at word 28 like your reader expects; rest zeros.
+            // word index (1-based)
+            for w in 25..=49 {
+                if w == 28 {
+                    hdr_buf.write_i32::<LittleEndian>(if self.hdr.version != 0 {
+                        self.hdr.version
+                    } else {
+                        20140
+                    })?;
+                } else {
+                    hdr_buf.write_i32::<LittleEndian>(0)?;
+                }
+            }
+
+            // Words 50..52: ORIGIN (MRC2014)
+            let xorig = self.hdr.xorigin.unwrap_or(0.0);
+            let yorig = self.hdr.yorigin.unwrap_or(0.0);
+            let zorig = self.hdr.zorigin.unwrap_or(0.0);
+
+            hdr_buf.write_f32::<LittleEndian>(xorig)?; // 50 XORIGIN
+            hdr_buf.write_f32::<LittleEndian>(yorig)?; // 51 YORIGIN
+            hdr_buf.write_f32::<LittleEndian>(zorig)?; // 52 ZORIGIN
+
+            // Word 53: "MAP "
+            hdr_buf.extend_from_slice(b"MAP ");
+
+            // Word 54: machine stamp (little-endian IEEE): 0x44 0x41 0x00 0x00
+            hdr_buf.extend_from_slice(&[0x44, 0x41, 0x00, 0x00]);
+
+            // Word 55: RMS (often σ)
+            hdr_buf.write_f32::<LittleEndian>(rms)?;
+
+            // Word 56: NLABL
+            let nlabel: i32 = 0;
+            hdr_buf.write_i32::<LittleEndian>(nlabel)?;
+
+            // Words 57..256: 10 × 80-char labels (we'll leave empty)
+            // = 800 bytes
+            hdr_buf.resize(HEADER_SIZE as usize, 0);
+        }
+
+        let mut f = File::create(path)?;
+        f.write_all(&hdr_buf)?;
+
+        // No symmetry block (NSYMBT == 0)
+
+        for &v in &self.data {
+            f.write_f32::<LittleEndian>(v)?;
+        }
+
+        Ok(())
+    }
 }
 
 /// Assumes `gemmi` is available on the path.
+/// Returns both the raw bytes, and our parsed Map.
 pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
     let _status = Command::new("gemmi")
         .args(["sf2map", cif_path, "temp_map.map"])
@@ -474,7 +589,11 @@ pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
     Ok(map)
 }
 
+/// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
+/// loads the Map to string, then deletes both files.
+///
 /// Assumes `gemmi` is available on the path.
+/// Returns both the raw bytes, and our parsed Map.
 pub fn density_from_2fo_fc_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
     println!("Downloading Map data for {ident}...");
 
@@ -483,16 +602,7 @@ pub fn density_from_2fo_fc_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
 
     fs::write("temp_map.cif", map_2fo_fc)?;
 
-    let _status = Command::new("gemmi")
-        .args(["sf2map", "temp_map.cif", "temp_map.map"])
-        .status()?;
-
-    let map = DensityMap::load(Path::new("temp_map.map"))?;
-
-    fs::remove_file(Path::new("temp_map.cif"))?;
-    fs::remove_file(Path::new("temp_map.map"))?;
-
-    Ok(map)
+    gemmi_cif_to_map("temp_map.cif")
 }
 
 /// Positive modulus that always lands in 0..n-1

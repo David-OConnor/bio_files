@@ -74,7 +74,7 @@ pub enum BondType {
     PolymericLink,
 }
 
-impl fmt::Display for BondType {
+impl Display for BondType {
     /// Return the exact MOL2 bond-type token as an owned `String`.
     /// (Use `&'static str` if you never need it allocated.)
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -93,6 +93,18 @@ impl fmt::Display for BondType {
         };
 
         write!(f, "{name}")
+    }
+}
+
+impl BondType {
+    /// SDF format uses a truncated set, and does things like mark every other
+    /// aromatic bond as double.
+    pub fn to_str_sdf(&self) -> String {
+        match self {
+            Self::Single | Self::Double | Self::Triple => *self,
+            _ => Self::Single,
+        }
+        .to_string()
     }
 }
 
@@ -135,7 +147,7 @@ pub enum ResidueType {
     Other(String),
 }
 
-impl fmt::Display for ResidueType {
+impl Display for ResidueType {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name = match &self {
             ResidueType::Other(n) => n.clone(),
