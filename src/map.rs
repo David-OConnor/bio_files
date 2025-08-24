@@ -4,6 +4,8 @@
 //! This [source file from Gemmi](https://github.com/project-gemmi/gemmi/blob/master/include/gemmi/ccp4.hpp)
 //! is a decent ref of the spec. See, for example, the `prepare_ccp4_header_except_mode_and_stats` function
 //! for header fields.
+//!
+//! We currently run Gemmi direclty, to load 2fo-fo and MTZ files.
 
 use std::{
     fs,
@@ -16,8 +18,6 @@ use std::{
 use bio_apis::rcsb;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use lin_alg::f64::{Mat3, Vec3};
-
-use crate::map_loading;
 
 const HEADER_SIZE: u64 = 1_024;
 
@@ -576,15 +576,35 @@ impl DensityMap {
     }
 }
 
-/// Assumes `gemmi` is available on the path.
-pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
-    let _status = Command::new("gemmi")
-        .args(["sf2map", cif_path, "temp_map.map"])
-        .status()?;
+/// Converts electron density data in 2fo-fc or MTZ formats to our Density Map, via
+/// a map file intermediate.
+/// If `gemmi_path` i s None, `gemmi` must be available on the PATH env var.
+pub fn gemmi_sf_to_map(cif_path: &Path, gemmi_path: Option<&Path>) -> io::Result<DensityMap> {
+    let program = match gemmi_path {
+        Some(p) => p.join("gemmi").to_str().unwrap().to_string(),
+        None => "gemmi".to_string(),
+    };
 
+    println!("Running Gemmi..."); // todo: A/R
+
+    let out = Command::new(program)
+        .args(["sf2map", cif_path.to_str().unwrap(), "temp_map.map"])
+        .output()?;
+    println!("Complete");
+
+    if !out.status.success() {
+        let stderr_str = String::from_utf8_lossy(&out.stderr);
+        return Err(io::Error::new(
+            ErrorKind::Other,
+            format!("Problem parsing SF file: {}", stderr_str),
+        ));
+    }
+
+    println!("Loading map file..."); // todo A/R
     let map = DensityMap::load(Path::new("temp_map.map"))?;
+    println!("Complete");
 
-    fs::remove_file(Path::new(cif_path))?;
+    fs::remove_file(cif_path)?;
     fs::remove_file(Path::new("temp_map.map"))?;
 
     Ok(map)
@@ -593,30 +613,35 @@ pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
 /// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
 /// loads the Map to string, then deletes both files.
 ///
-/// Assumes `gemmi` is available on the path.
-/// Returns both the raw bytes, and our parsed Map.
-pub fn density_from_2fo_fc_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
+/// If `gemmi_path` i s None, `gemmi` must be available on the PATH env var.
+pub fn density_from_2fo_fc_rcsb_gemmi(
+    ident: &str,
+    gemmi_path: Option<&Path>,
+) -> io::Result<DensityMap> {
     println!("Downloading Map data for {ident}...");
 
     let map_2fo_fc = rcsb::load_validation_2fo_fc_cif(ident)
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Problem loading 2fo-fc from RCSB"))?;
 
-    fs::write("temp_map.cif", map_2fo_fc)?;
+    let path = Path::new("temp_map.cif");
 
-    gemmi_cif_to_map("temp_map.cif")
+    fs::write(path, map_2fo_fc)?;
+    gemmi_sf_to_map(path, gemmi_path)
 }
 
 /// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
 /// loads the Map to string, then deletes both files.
 ///
 /// Returns both the raw bytes, and our parsed Map.
-pub fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
+// pub fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
+fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
     println!("Downloading Map data for {ident}...");
 
     let map_2fo_fc = rcsb::load_validation_2fo_fc_cif(ident)
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Problem loading 2fo-fc from RCSB"))?;
 
-    map_loading::sf_cif_to_map(map_2fo_fc.as_str())
+    unimplemented!()
+    // map_loading::sf_cif_to_map(map_2fo_fc.as_str())
 }
 
 /// Positive modulus that always lands in 0..n-1
