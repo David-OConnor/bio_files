@@ -2,7 +2,7 @@
 //! from reflection data, using a fourier transform.
 //!
 //! This [source file from Gemmi](https://github.com/project-gemmi/gemmi/blob/master/include/gemmi/ccp4.hpp)
-//! is a decent ref of the spec. See for example, the `prepare_ccp4_header_except_mode_and_stats` function
+//! is a decent ref of the spec. See, for example, the `prepare_ccp4_header_except_mode_and_stats` function
 //! for header fields.
 
 use std::{
@@ -16,6 +16,8 @@ use std::{
 use bio_apis::rcsb;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use lin_alg::f64::{Mat3, Vec3};
+
+use crate::map_loading;
 
 const HEADER_SIZE: u64 = 1_024;
 
@@ -251,7 +253,7 @@ fn read_header_dens<R: Read + Seek>(data: &mut R) -> io::Result<(MapHeader, Vec<
     Ok((hdr, dens))
 }
 
-fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
+pub(crate) fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
     if let (Some(ox), Some(oy), Some(oz)) = (hdr.xorigin, hdr.yorigin, hdr.zorigin) {
         cell.cartesian_to_fractional(Vec3::new(ox as f64, oy as f64, oz as f64))
     } else {
@@ -277,9 +279,9 @@ pub struct DensityMap {
     pub perm_c2f: [usize; 3],
     pub data: Vec<f32>,
     /// In case the header mean is rounded or otherwise incorrect.
-    mean: f32,
+    pub(crate) mean: f32,
     /// Sigma; used for normalizing data, e.g. prior to display.
-    inv_sigma: f32,
+    pub(crate) inv_sigma: f32,
 }
 
 impl DensityMap {
@@ -575,7 +577,6 @@ impl DensityMap {
 }
 
 /// Assumes `gemmi` is available on the path.
-/// Returns both the raw bytes, and our parsed Map.
 pub fn gemmi_cif_to_map(cif_path: &str) -> io::Result<DensityMap> {
     let _status = Command::new("gemmi")
         .args(["sf2map", cif_path, "temp_map.map"])
@@ -603,6 +604,19 @@ pub fn density_from_2fo_fc_rcsb_gemmi(ident: &str) -> io::Result<DensityMap> {
     fs::write("temp_map.cif", map_2fo_fc)?;
 
     gemmi_cif_to_map("temp_map.cif")
+}
+
+/// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
+/// loads the Map to string, then deletes both files.
+///
+/// Returns both the raw bytes, and our parsed Map.
+pub fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
+    println!("Downloading Map data for {ident}...");
+
+    let map_2fo_fc = rcsb::load_validation_2fo_fc_cif(ident)
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Problem loading 2fo-fc from RCSB"))?;
+
+    map_loading::sf_cif_to_map(map_2fo_fc.as_str())
 }
 
 /// Positive modulus that always lands in 0..n-1

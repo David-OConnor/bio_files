@@ -13,6 +13,7 @@ pub mod amber_params;
 mod cif_sf;
 pub mod dat;
 pub mod frcmod;
+mod map_loading;
 mod mmcif;
 mod mmcif_aux;
 mod mtz;
