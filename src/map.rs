@@ -44,11 +44,16 @@ pub struct MapHeader {
     /// Unit cell dimensions. [XYZ] length. Then α: Angle between Y and Z, β: Angle
     /// between X and Z, and γ: ANgle between X and Y. Distances are in Å, and angles are in degrees.
     pub cell: [f32; 6], // cell dimensions: a, b, c, alpha, beta, gamma
-    pub mapc: i32,  // which axis is fast (1=X, 2=Y, 3=Z)
-    pub mapr: i32,  // which axis is medium
-    pub maps: i32,  // which axis is slow
-    pub dmin: f32,  // minimum density value
-    pub dmax: f32,  // maximum density value
+    /// Which axis is fast (1=X, 2=Y, 3=Z)
+    pub mapc: i32,
+    /// Which axis is medium speed
+    pub mapr: i32,
+    /// Which axis is slow
+    pub maps: i32,
+    /// Minimum density value
+    pub dmin: f32,
+    /// Maximum density value
+    pub dmax: f32,
     pub dmean: f32, // mean density
     pub ispg: i32,  // space group number
     /// Number of bytes used by the symmetry block. (Usually 0 for cry-EM, and 80xn for crystallography.)
@@ -217,13 +222,11 @@ impl UnitCell {
         }
     }
 
-    #[inline]
     pub fn fractional_to_cartesian(&self, f: Vec3) -> Vec3 {
         // todo: Don't clone!
         self.ortho.clone() * f
     }
 
-    #[inline]
     pub fn cartesian_to_fractional(&self, c: Vec3) -> Vec3 {
         // todo: Don't clone!
         self.ortho_inv.clone() * c
@@ -267,7 +270,8 @@ pub(crate) fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
 
 #[derive(Clone, Debug)]
 /// Represents electron density data. Set up in a flexible way that can be overlayed over
-/// atom coordinates, with symmetry considerations taken into account.
+/// atom coordinates, with symmetry considerations taken into account. This corresponds closely
+/// to CCP4's map structure.
 pub struct DensityMap {
     pub hdr: MapHeader,
     pub cell: UnitCell,
@@ -370,11 +374,11 @@ impl DensityMap {
 
     /// Electron-density value at a Cartesian point, using periodic trilinear
     /// interpolation.  Returned value is still in whatever scale `self.data`
-    /// is stored (e·Å⁻³ or σ-units after your normalisation pass).
+    /// is stored (e·Å⁻³ or σ-units after your normalization pass).
     ///
     /// This produces smoother visuals than the nearest-neighbor approach.
     pub fn density_at_point_trilinear(&self, cart: Vec3) -> f32 {
-        // ---- 1. Cartesian → fractional, wrap into [0,1)  ------------------
+        // 1. Cartesian → fractional, wrap into [0,1]
         let mut frac = self.cell.cartesian_to_fractional(cart);
 
         // shift by the map origin if you want strict CCP4 compliance:
@@ -385,7 +389,7 @@ impl DensityMap {
         frac.z -= frac.z.floor();
 
         // Crystallographic fractional → cryst grid coordinates
-        // grid coordinate in *float* space;  (0 … mx−1) etc.
+        // grid coordinate in *float* space; (0 … mx−1) etc.
         let gx = frac.x * self.hdr.mx as f64 - 0.5;
         let gy = frac.y * self.hdr.my as f64 - 0.5;
         let gz = frac.z * self.hdr.mz as f64 - 0.5;
@@ -403,12 +407,13 @@ impl DensityMap {
         let wy = [1.0 - dy, dy];
         let wz = [1.0 - dz, dz];
 
-        // 3. Accumulate weighted density from the 8 surrounding voxels
-        let mut rho = 0.0_f32;
+        // Accumulate weighted density from the 8 surrounding voxels
+        let mut rho = 0.;
 
         for (cz, w_z) in [iz0, iz0 + 1].iter().zip(wz) {
-            // convert cryst-Z to file-Z
+            // Convert Cryst-Z to file-Z
             let fz = pmod(*cz, self.hdr.nz as usize);
+
             for (cy, w_y) in [iy0, iy0 + 1].iter().zip(wy) {
                 let fy = pmod(*cy, self.hdr.ny as usize);
                 for (cx, w_x) in [ix0, ix0 + 1].iter().zip(wx) {
