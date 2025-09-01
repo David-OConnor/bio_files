@@ -26,10 +26,11 @@ jobs:
         platform:
           - runner: ubuntu-22.04
             target: x86_64
-          - runner: ubuntu-22.04
-            target: aarch64
-          - runner: ubuntu-22.04
-            target: armv7
+            # todo: Temp removed Arm on musl due to a bug in the Ring dep.
+#          - runner: ubuntu-22.04
+#            target: aarch64
+#          - runner: ubuntu-22.04
+#            target: armv7
           - runner: ubuntu-22.04
             target: s390x
           - runner: ubuntu-22.04
