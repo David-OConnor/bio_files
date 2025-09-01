@@ -9,6 +9,7 @@ This Rust and Python library contains functionality to load and save data in com
 on data structures that are specific to each file format; you will need to convert to and from the structures
 used by your application. The API docs, and examples below are sufficient to get started.
 
+Note: Install the pip version with `pip install biology-files` due to a name conflict.
 
 ### Supported formats:
 - mmCIF (Protein atom, residue, chain, and related data like secondary structure)
