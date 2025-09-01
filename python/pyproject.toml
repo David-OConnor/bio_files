@@ -9,13 +9,21 @@ requires-python = ">=3.10"
 authors = [{ name = "David O'Connor", email = "the_alchemist@fastmail.com" }]
 readme = "PYPI_README.md"
 license = { file = "PYPI_LICENSE" }
+keywords = ["mol2", "sdf", "mmcif", "amber", "biology"]
 dynamic = ["version"]
 
 classifiers = [
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Biology",
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
+
+[project.urls]
+homepage = "https://github.com/David-OConnor/bio_files"
+repository = "https://github.com/David-OConnor/bio_files"
+documentation = "https://docs.rs/bio_files"
 
 [tool.maturin]
 # Using ABI3 allows for this to work on any Python version > 3.10; not just 3.10.
