@@ -119,7 +119,7 @@ impl FromStr for ChargeType {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Mol2 {
     pub ident: String,
     pub mol_type: MolType,

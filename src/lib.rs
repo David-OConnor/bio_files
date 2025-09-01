@@ -7,6 +7,7 @@
 pub mod ab1;
 pub mod map;
 pub mod mol2;
+pub mod pdbqt;
 pub mod sdf;
 
 pub mod amber_params;
@@ -29,6 +30,7 @@ pub use map::*;
 pub use mmcif::*;
 pub use mol2::*;
 use na_seq::{AminoAcid, AtomTypeInRes, Element};
+pub use pdbqt::Pdbqt;
 pub use sdf::*;
 
 #[derive(Clone, Debug, Default)]

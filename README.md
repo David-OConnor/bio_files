@@ -2,17 +2,19 @@
 
 [![Crate](https://img.shields.io/crates/v/bio_files.svg)](https://crates.io/crates/bio_files)
 [![Docs](https://docs.rs/bio_files/badge.svg)](https://docs.rs/bio_files)
+[![PyPI](https://img.shields.io/pypi/v/bio-files.svg)](https://pypi.org/project/bio-files)
 
 
-This library contains functionality to load and save data in common biology file formats. It operates
+This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
 on data structures that are specific to each file format; you will need to convert to and from the structures
 used by your application. The API docs, and examples below are sufficient to get started.
 
 
-### Currently supported formats:
+### Supported formats:
 - mmCIF (Protein atom, residue, chain, and related data like secondary structure)
 - Mol2 (Small molecules, e.g. ligands)
 - SDF (Small molecules, e.g. ligands)
+- PDBQT (Small molecules, e.g. ligands. Includes docking-specific fields.)
 - Map (Electron density, e.g. from crystallography, Cryo EM)
 - AB1 (Sequence tracing)
 - DAT (Amber force field data for small molecules)
@@ -20,7 +22,6 @@ used by your application. The API docs, and examples below are sufficient to get
 - Amber .lib files, e.g. with charge data for amino acids and proteins.
 
 ### Planned:
-- PDBQT (Exists in Daedalus; needs to be decoupled)
 - MTZ (Exists in Daedalus; needs to be decoupled)
 - DNA (Exists in PlasCAD; needs to be decoupled)
 - CIF structure formats (2fo-fc etc) (Exists in Daedalus; needs to be decoupled)
@@ -44,7 +45,7 @@ instead of serial numbers. We use SNs here because they're more robust, and matc
 add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the residue
 an atom's in, in your derived Atom struct).
 
-Example use:
+Example use. (The Python version uses an equivalent API)
 
 ```rust
 pub fn open_molecule(&mut self, path: &Path) -> io::Result<()> {
@@ -171,6 +172,8 @@ impl TryFrom<MmCif> for Molecule {
     }
 }
 ```
+
+Note: The Python version is currently missing support for some formats.
 
 
 ### References

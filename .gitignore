@@ -2,6 +2,7 @@
 
 /target
 Cargo.lock
+/python/target/
 
 
 # Molecular formats

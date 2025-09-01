@@ -23,10 +23,13 @@ use crate::{
     AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueGeneric, ResidueType,
 };
 
+#[derive(Clone, Debug)]
 pub struct MmCif {
     pub ident: String,
     pub metadata: HashMap<String, String>,
     pub atoms: Vec<AtomGeneric>,
+    // This is sometimes included in mmCIF files, although seems to be absent
+    // from most (all?) on RCSB PDB.
     // pub bonds: Vec<BondGeneric>,
     pub chains: Vec<ChainGeneric>,
     pub residues: Vec<ResidueGeneric>,
