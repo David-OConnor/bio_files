@@ -2,7 +2,7 @@
 
 [![Crate](https://img.shields.io/crates/v/bio_files.svg)](https://crates.io/crates/bio_files)
 [![Docs](https://docs.rs/bio_files/badge.svg)](https://docs.rs/bio_files)
-[![PyPI](https://img.shields.io/pypi/v/bio-files.svg)](https://pypi.org/project/bio-files)
+[![PyPI](https://img.shields.io/pypi/v/biology-files.svg)](https://pypi.org/project/biology-files)
 
 
 This Rust and Python library contains functionality to load and save data in common biology file formats. It operates

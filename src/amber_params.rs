@@ -281,6 +281,7 @@ impl VdwParams {
             ));
         }
 
+
         let atom_type = cols[0].to_string();
         let r_min = parse_float(cols[1])?;
         let eps = parse_float(cols[2])?;
