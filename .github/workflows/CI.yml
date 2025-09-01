@@ -39,11 +39,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
-      - name: Stage README/License for packaging
-        shell: bash
-        run: |
-          cp -f README.md python/PYPI_README.md
-          cp -f LICENSE python/PYPI_LICENSE
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -74,11 +69,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
-      - name: Stage README/License for packaging
-        shell: bash
-        run: |
-          cp -f README.md python/PYPI_README.md
-          cp -f LICENSE python/PYPI_LICENSE
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -106,11 +96,6 @@ jobs:
         with:
           python-version: 3.x
           architecture: ${{ matrix.platform.target }}
-      - name: Stage README/License for packaging
-        shell: bash
-        run: |
-          cp -f README.md python/PYPI_README.md
-          cp -f LICENSE python/PYPI_LICENSE
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -138,11 +123,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: 3.x
-      - name: Stage README/License for packaging
-        shell: bash
-        run: |
-          cp -f README.md python/PYPI_README.md
-          cp -f LICENSE python/PYPI_LICENSE
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -160,11 +140,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Stage README/License for packaging
-        shell: bash
-        run: |
-          cp -f README.md python/PYPI_README.md
-          cp -f LICENSE python/PYPI_LICENSE
       - name: Build sdist
         uses: PyO3/maturin-action@v1
         with:
@@ -196,7 +171,6 @@ jobs:
           pattern: wheels-*           # matches wheels-linux-*, wheels-macos-*, wheels-sdist, etc.
           merge-multiple: true        # puts everything into a single dir
           path: dist                  # final folder containing all files
-
       - name: Generate artifact attestation
         uses: actions/attest-build-provenance@v2
         with:
