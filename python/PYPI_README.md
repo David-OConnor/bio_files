@@ -2,13 +2,14 @@
 
 [![Crate](https://img.shields.io/crates/v/bio_files.svg)](https://crates.io/crates/bio_files)
 [![Docs](https://docs.rs/bio_files/badge.svg)](https://docs.rs/bio_files)
-[![PyPI](https://img.shields.io/pypi/v/bio-files.svg)](https://pypi.org/project/bio-files)
+[![PyPI](https://img.shields.io/pypi/v/biology-files.svg)](https://pypi.org/project/biology-files)
 
 
 This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
 on data structures that are specific to each file format; you will need to convert to and from the structures
 used by your application. The API docs, and examples below are sufficient to get started.
 
+Note: Install the pip version with `pip install biology-files` due to a name conflict.
 
 ### Supported formats:
 - mmCIF (Protein atom, residue, chain, and related data like secondary structure)
@@ -32,7 +33,7 @@ For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do n
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
 It operates using structs with public fields, which you can explore
-using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`, 
+using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`,
 `save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and
 `load()` accept `&Path`.
 The Force Field formats use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
@@ -61,10 +62,10 @@ pub fn open_molecule(&mut self, path: &Path) -> io::Result<()> {
 
 pub fn open_map(&mut self, path: &Path) -> io::Result<()> {
     let dm = DensityMap::load(path)?;
-    
+
     // Call dm.density_at_point_trilinear(coord) to get density
     // Run `density_to_sig` to get sigma-normalized density, for uniform display.
-    
+
     self.load_density(dm);
 
     Ok(())
@@ -94,14 +95,14 @@ pub fn save(&mut self, path: &Path) -> io::Result<()> {
 
 ## Amber force fields
 
-Reference the [Amber reference manual](Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf) 
+Reference the [Amber reference manual](Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)
 for details on how we parse its files, and how to use the results. In some cases, we change the format from
-the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals 
+the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals
 parameters. Structs and fields are documented with reference manual references.
 
 The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching parameters,
-angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups 
-for your application. 
+angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups
+for your application.
 
 
 Note that the above examples expect that your application has a struct representing the molecule that has
