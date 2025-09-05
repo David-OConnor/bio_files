@@ -8,9 +8,34 @@ mod mol2;
 mod pdbqt;
 mod sdf;
 
-fn map_io<T>(r: std::io::Result<T>) -> PyResult<T> {
-    r.map_err(|e| PyValueError::new_err(e.to_string()))
+/// Candidate for standalone helper lib.
+#[macro_export]
+macro_rules! make_enum {
+    ($Py:ident, $Native:path, $( $Var:ident ),+ $(,)?) => {
+        #[pyclass]
+        #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+        pub enum $Py { $( $Var ),+ }
+
+        impl ::core::convert::From<$Py> for $Native {
+            fn from(v: $Py) -> Self { match v { $( $Py::$Var => <$Native>::$Var ),+ } }
+        }
+
+        impl ::core::convert::From<$Native> for $Py {
+            fn from(v: $Native) -> Self { match v { $( <$Native>::$Var => $Py::$Var ),+ } }
+        }
+
+        impl $Py {
+            pub fn to_native(self) -> $Native {
+                self.into()
+            }
+
+            pub fn from_native(native: $Native) -> Self {
+               native.into()
+            }
+        }
+    };
 }
+
 
 #[pyclass]
 struct AtomGeneric {
@@ -61,29 +86,35 @@ impl AtomGeneric {
     }
 }
 
-#[pyclass]
-struct BondType {
-    // todo: Sort out enum variants.
-    inner: bio_files_rs::BondType,
-}
+make_enum!(BondType, bio_files_rs::BondType,
+    Single,
+    Double,
+    Triple,
+    Aromatic,
+    Amide,
+    Dummy,
+    Unknown,
+    NotConnected,
+    Quadruple,
+    Delocalized,
+    PolymericLink
+);
 
 #[pymethods]
 impl BondType {
     fn to_str_sdf(&self) -> String {
-        self.inner.to_str_sdf()
+        self.to_native().to_str_sdf()
     }
 
     #[classmethod]
     fn from_str(_cls: &Bound<'_, PyType>, str: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: map_io(bio_files_rs::BondType::from_str(str))?,
-        })
+        Ok(bio_files_rs::BondType::from_str(str)?.into())
     }
     fn __str__(&self) -> String {
-        self.inner.to_string()
+        self.to_native().to_string()
     }
     fn __repr__(&self) -> String {
-        format!("{:?}", self.inner)
+        format!("{:?}", self.to_native())
     }
 }
 
@@ -95,13 +126,8 @@ struct BondGeneric {
 #[pymethods]
 impl BondGeneric {
     #[getter]
-    fn bond_type<'py>(&self, py: Python<'py>) -> PyResult<Py<BondType>> {
-        Py::new(
-            py,
-            BondType {
-                inner: self.inner.bond_type,
-            },
-        )
+    fn bond_type(&self) -> BondType {
+        self.bond_type().into()
     }
 
     #[getter]
@@ -173,6 +199,20 @@ impl ResidueGeneric {
     }
 }
 
+make_enum!(ResidueEnd, crate::bio_files_rs::ResidueEnd,
+    Internal,
+    NTerminus,
+    CTerminus,
+    Hetero
+);
+
+#[pymethods]
+impl ResidueEnd {
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.to_native())
+    }
+}
+
 #[pyclass]
 struct ChainGeneric {
     inner: bio_files_rs::ChainGeneric,
@@ -200,16 +240,16 @@ impl ChainGeneric {
     }
 }
 
-#[pyclass]
-struct SecondaryStructure {
-    // todo: Enum variants
-    inner: bio_files_rs::SecondaryStructure,
-}
+make_enum!(SecondaryStructure, bio_files_rs::SecondaryStructure,
+    Helix,
+    Sheet,
+    Coil
+);
 
 #[pymethods]
 impl SecondaryStructure {
     fn __repr__(&self) -> String {
-        format!("{:?}", self.inner)
+        format!("{:?}", self.to_native())
     }
 }
 
@@ -225,33 +265,34 @@ impl BackboneSS {
     }
 }
 
-#[pyclass]
-struct ExperimentalMethod {
-    // todo: Enum variants
-    inner: bio_files_rs::ExperimentalMethod,
-}
+make_enum!(ExperimentalMethod, bio_files_rs::ExperimentalMethod,
+    XRayDiffraction,
+    ElectronDiffraction,
+    NeutronDiffraction,
+    ElectronMicroscopy,
+    SolutionNmr
+);
 
 #[pymethods]
 impl ExperimentalMethod {
     fn to_str_short(&self) -> String {
-        self.inner.to_str_short()
+        self.to_native().to_str_short()
     }
+
     #[classmethod]
     fn from_str(_cls: &Bound<'_, PyType>, str: &str) -> PyResult<Self> {
-        Ok(Self {
-            inner: bio_files_rs::ExperimentalMethod::from_str(str)?,
-        })
-    }
-    fn __str__(&self) -> String {
-        self.inner.to_string()
+        Ok(bio_files_rs::ExperimentalMethod::from_str(str)?.into())
     }
     fn __repr__(&self) -> String {
-        format!("{:?}", self.inner)
+        format!("{:?}", self.to_native())
+    }
+    fn __str__(&self) -> String {
+        self.to_native().to_string()
     }
 }
 
 #[pymodule]
-fn bio_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // General
     m.add_class::<AtomGeneric>()?;
     m.add_class::<BondType>()?;
@@ -263,13 +304,15 @@ fn bio_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<BackboneSS>()?;
     m.add_class::<ExperimentalMethod>()?;
 
+    m.add_class::<ResidueEnd>()?;
+
     // Small molecules
     m.add_class::<mmcif::MmCif>()?;
     m.add_class::<mol2::Mol2>()?;
     m.add_class::<sdf::Sdf>()?;
     m.add_class::<pdbqt::Pdbqt>()?;
 
-    // m.add_class::<mol2::MolType>()?;
+    m.add_class::<mol2::MolType>()?;
 
     Ok(())
 }

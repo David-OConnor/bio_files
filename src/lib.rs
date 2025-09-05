@@ -55,6 +55,35 @@ pub struct AtomGeneric {
     pub hetero: bool,
 }
 
+impl Display for AtomGeneric {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let ff_type = match &self.force_field_type {
+            Some(f) => f,
+            None => "None",
+        };
+
+        let q = match &self.partial_charge {
+            Some(q_) => format!("{q_:.3}"),
+            None => "None".to_string(),
+        };
+
+        write!(
+            f,
+            "Atom {}: {}, {}. {:?}, ff: {ff_type}, q: {q}",
+            self.serial_number,
+            self.element.to_letter(),
+            self.posit,
+            self.type_in_res,
+        )?;
+
+        if self.hetero {
+            write!(f, ", Het")?;
+        }
+
+        Ok(())
+    }
+}
+
 /// These are the Mol2 standard types, unless otherwise noted.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum BondType {
@@ -187,6 +216,15 @@ pub struct ResidueGeneric {
     pub res_type: ResidueType,
     /// Serial number
     pub atom_sns: Vec<u32>,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum ResidueEnd {
+    Internal,
+    NTerminus,
+    CTerminus,
+    /// Not part of a protein/polypeptide.
+    Hetero,
 }
 
 #[derive(Debug, Clone)]

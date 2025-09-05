@@ -3,16 +3,25 @@ use std::path::PathBuf;
 use bio_files_rs;
 use pyo3::{prelude::*, types::PyType};
 
-use crate::{AtomGeneric, BondGeneric, map_io};
+use crate::{AtomGeneric, BondGeneric, make_enum};
 
-// #[pyclass]
-// enum MolType {
-//     Small,
-//     Bipolymer,
-//     Protein,
-//     NucleicAcid,
-//     Saccharide,
-// }
+make_enum!(MolType, bio_files_rs::mol2::MolType,
+    Small,
+    Bipolymer,
+    Protein,
+    NucleicAcid,
+    Saccharide,
+);
+
+#[pymethods]
+impl MolType {
+    fn __repr__(&self) -> String {
+        format!("{:?}", self.to_native())
+    }
+}
+
+
+// todo: ChargeType as well.
 
 #[pyclass(module = "bio_files")]
 pub struct Mol2 {
@@ -26,11 +35,9 @@ impl Mol2 {
         &self.inner.ident
     }
 
-    // todo: str for now
     #[getter]
-    // fn mol_type(&self) -> &MolType {
-    fn mol_type(&self) -> String {
-        format!("{:?}", self.inner.mol_type)
+    fn mol_type(&self) -> MolType {
+        MolType::from_native(self.inner.mol_type)
     }
 
     // todo: str for now
@@ -67,18 +74,18 @@ impl Mol2 {
     #[new]
     fn new(text: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: map_io(bio_files_rs::Mol2::new(text))?,
+            inner: bio_files_rs::Mol2::new(text)?,
         })
     }
 
     fn save(&self, path: PathBuf) -> PyResult<()> {
-        map_io(self.inner.save(&path))
+        Ok(self.inner.save(&path)?)
     }
 
     #[classmethod]
     fn load(_cls: &Bound<'_, PyType>, path: PathBuf) -> PyResult<Self> {
         Ok(Self {
-            inner: map_io(bio_files_rs::Mol2::load(&path))?,
+            inner: bio_files_rs::Mol2::load(&path)?,
         })
     }
 

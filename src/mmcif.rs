@@ -230,16 +230,8 @@ impl MmCif {
         // todo: Regardless of that, this SS loading is going very slowly. Fix it.
         // let (secondary_structure, experimental_method) = load_ss_method(&mut cursor)?;
 
-        let ss_load_time = ss_load.elapsed();
+        // let ss_load_time = ss_load.elapsed();
         let secondary_structure = Vec::new();
-
-        let mut i = 0;
-        for res in &residues {
-            i += 1;
-            if i > 20 {
-                break;
-            }
-        }
 
         Ok(Self {
             ident,

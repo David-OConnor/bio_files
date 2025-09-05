@@ -93,6 +93,22 @@ pub fn save(&mut self, path: &Path) -> io::Result<()> {
 }
 ```
 
+Python
+```python
+from biology_files import Sdf
+
+sdf_data = Sdf.load("./molecules/DB03496.sdf")
+
+sdf_data.atoms[0]
+#AtomGeneric { serial_number: 1, posit: Vec3 { x: 2.3974, y: 1.1259, z: 2.5289 }, element: Chlorine, 
+type_in_res: None, force_field_type: None, occupancy: None, partial_charge: None, hetero: true }
+
+>>> sdf_data.atoms[0].posit
+# [2.3974, 1.1259, 2.5289]
+
+sdf_data.save("test.sdf")
+```
+
 ## Amber force fields
 
 Reference the [Amber reference manual](Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf) 

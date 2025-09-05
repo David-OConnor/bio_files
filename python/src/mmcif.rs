@@ -4,7 +4,7 @@ use bio_files_rs;
 use pyo3::{prelude::*, types::PyType};
 
 use crate::{
-    AtomGeneric, BackboneSS, BondGeneric, ChainGeneric, ExperimentalMethod, ResidueGeneric, map_io,
+    AtomGeneric, BackboneSS, BondGeneric, ChainGeneric, ExperimentalMethod, ResidueGeneric,
 };
 
 #[pyclass(module = "bio_files")]
@@ -83,19 +83,19 @@ impl MmCif {
     #[new]
     fn new(text: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: map_io(bio_files_rs::MmCif::new(text))?,
+            inner: bio_files_rs::MmCif::new(text)?,
         })
     }
 
     // todo: When implemented in rust.
     // fn save(&self, path: PathBuf) -> PyResult<()> {
-    //     map_io(self.inner.save(&path))
+    //     self.inner.save(&path)
     // }
 
     #[classmethod]
     fn load(_cls: &Bound<'_, PyType>, path: PathBuf) -> PyResult<Self> {
         Ok(Self {
-            inner: map_io(bio_files_rs::MmCif::load(&path))?,
+            inner: bio_files_rs::MmCif::load(&path)?,
         })
     }
 

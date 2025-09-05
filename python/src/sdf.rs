@@ -3,7 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use bio_files_rs;
 use pyo3::{prelude::*, types::PyType};
 
-use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric, map_io};
+use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric};
 
 #[pyclass(module = "bio_files")]
 pub struct Sdf {
@@ -73,18 +73,18 @@ impl Sdf {
     #[new]
     fn new(text: &str) -> PyResult<Self> {
         Ok(Self {
-            inner: map_io(bio_files_rs::Sdf::new(text))?,
+            inner: bio_files_rs::Sdf::new(text)?,
         })
     }
 
     fn save(&self, path: PathBuf) -> PyResult<()> {
-        map_io(self.inner.save(&path))
+        Ok(self.inner.save(&path)?)
     }
 
     #[classmethod]
     fn load(_cls: &Bound<'_, PyType>, path: PathBuf) -> PyResult<Self> {
         Ok(Self {
-            inner: map_io(bio_files_rs::Sdf::load(&path))?,
+            inner: bio_files_rs::Sdf::load(&path)?,
         })
     }
 

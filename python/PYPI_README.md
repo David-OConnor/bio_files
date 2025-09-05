@@ -62,10 +62,10 @@ pub fn open_molecule(&mut self, path: &Path) -> io::Result<()> {
 
 pub fn open_map(&mut self, path: &Path) -> io::Result<()> {
     let dm = DensityMap::load(path)?;
-
+    
     // Call dm.density_at_point_trilinear(coord) to get density
     // Run `density_to_sig` to get sigma-normalized density, for uniform display.
-
+    
     self.load_density(dm);
 
     Ok(())
@@ -91,6 +91,22 @@ pub fn save(&mut self, path: &Path) -> io::Result<()> {
         }
     }
 }
+```
+
+Python
+```python
+from biology_files import Sdf
+
+sdf_data = Sdf.load("./molecules/DB03496.sdf")
+
+sdf_data.atoms[0]
+#AtomGeneric { serial_number: 1, posit: Vec3 { x: 2.3974, y: 1.1259, z: 2.5289 }, element: Chlorine, 
+type_in_res: None, force_field_type: None, occupancy: None, partial_charge: None, hetero: true }
+
+>>> sdf_data.atoms[0].posit
+# [2.3974, 1.1259, 2.5289]
+
+sdf_data.save("test.sdf")
 ```
 
 ## Amber force fields

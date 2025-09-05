@@ -634,9 +634,7 @@ pub fn density_from_2fo_fc_rcsb_gemmi(
     gemmi_sf_to_map(path, gemmi_path)
 }
 
-/// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
-/// loads the Map to string, then deletes both files.
-///
+/// Downloads a 2fo_fc file from RCSB, saves it to disk.
 /// Returns both the raw bytes, and our parsed Map.
 // pub fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
 fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
