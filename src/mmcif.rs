@@ -19,7 +19,10 @@ use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 use regex::Regex;
 
-use crate::{AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueEnd, ResidueGeneric, ResidueType};
+use crate::{
+    AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueEnd, ResidueGeneric,
+    ResidueType,
+};
 
 #[derive(Clone, Debug)]
 pub struct MmCif {

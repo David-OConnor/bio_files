@@ -6,6 +6,7 @@
 
 pub mod ab1;
 pub mod map;
+pub mod mmcif;
 pub mod mol2;
 pub mod pdbqt;
 pub mod sdf;
@@ -13,7 +14,7 @@ pub mod sdf;
 pub mod amber_params;
 pub mod dat;
 pub mod frcmod;
-mod mmcif;
+
 mod mmcif_aux;
 
 use std::{

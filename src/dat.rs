@@ -15,8 +15,8 @@ use std::{
 };
 
 use crate::amber_params::{
-    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
-    LjParams, get_atom_types,
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, LjParams,
+    MassParams, get_atom_types,
 };
 
 impl ForceFieldParams {

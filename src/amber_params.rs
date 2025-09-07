@@ -10,12 +10,12 @@
 
 use std::{
     collections::HashMap,
-    io::{self, ErrorKind},
+    fs::File,
+    io::{self, ErrorKind, Read},
+    path::Path,
     str::FromStr,
 };
-use std::fs::File;
-use std::io::Read;
-use std::path::Path;
+
 use na_seq::{AminoAcidGeneral, AtomTypeInRes};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
@@ -400,9 +400,7 @@ impl ForceFieldParamsKeyed {
         }
 
         for val in &params.improper {
-            result
-                .improper
-                .insert(val.atom_types.clone(), val.clone());
+            result.improper.insert(val.atom_types.clone(), val.clone());
         }
 
         for val in &params.lennard_jones {
@@ -579,7 +577,7 @@ pub fn load_amino_charges(path: &Path) -> io::Result<HashMap<AminoAcidGeneral, V
     file.read_to_end(&mut buffer)?;
 
     let data_str: String = String::from_utf8(buffer)
-    .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
     parse_amino_charges(&data_str)
 }

@@ -14,7 +14,10 @@ use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 use regex::Regex;
 
-use crate::{AtomGeneric, BondGeneric, ChainGeneric, ChargeType, MolType, ResidueEnd, ResidueGeneric, ResidueType};
+use crate::{
+    AtomGeneric, BondGeneric, ChainGeneric, ChargeType, MolType, ResidueEnd, ResidueGeneric,
+    ResidueType,
+};
 
 /// Helpers for parsing
 fn parse_usize(s: &str) -> io::Result<usize> {

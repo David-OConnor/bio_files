@@ -13,7 +13,9 @@ use std::{
 use lin_alg::f64::Vec3;
 use na_seq::Element;
 
-use crate::{AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType};
+use crate::{
+    AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType,
+};
 
 // todo: Combine this and Mol2 into one struct?
 #[derive(Clone, Debug)]
@@ -219,7 +221,6 @@ impl Sdf {
 
         // Load metadata. We use a separate pass for simplicity, although this is a bit slower.
         let metadata = {
-
             let mut md: HashMap<String, String> = HashMap::new();
 
             let mut idx = if let Some(m_end) = lines.iter().position(|l| l.trim() == "M  END") {
@@ -242,7 +243,10 @@ impl Sdf {
                             while idx < lines.len() {
                                 let v = lines[idx];
                                 let v_trim = v.trim_end();
-                                if v_trim.is_empty() || v_trim == "$$$$" || v_trim.starts_with("> <") {
+                                if v_trim.is_empty()
+                                    || v_trim == "$$$$"
+                                    || v_trim.starts_with("> <")
+                                {
                                     break;
                                 }
                                 vals.push(v_trim);
@@ -345,7 +349,8 @@ impl Sdf {
         }
 
         if all_partial_charges_present {
-            let charges_formated: Vec<_> = partial_charges.iter().map(|q| format!("{q:.8}")).collect();
+            let charges_formated: Vec<_> =
+                partial_charges.iter().map(|q| format!("{q:.8}")).collect();
             let charge_str = charges_formated.join(" ");
             write_metadata("atom.dprop.PartialCharge", &charge_str, &mut file)?;
         }
@@ -381,7 +386,6 @@ impl From<Mol2> for Sdf {
         }
     }
 }
-
 
 fn write_metadata(key: &str, val: &str, file: &mut File) -> io::Result<()> {
     writeln!(file, "> <{key}>")?;

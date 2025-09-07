@@ -3,6 +3,7 @@
 //! descripts the format.
 
 use std::{
+    collections::HashMap,
     fmt,
     fs::File,
     io,
@@ -10,7 +11,7 @@ use std::{
     path::Path,
     str::FromStr,
 };
-use std::collections::HashMap;
+
 use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 
