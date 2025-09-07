@@ -3,9 +3,7 @@ use std::{collections::HashMap, path::PathBuf};
 use bio_files_rs;
 use pyo3::{prelude::*, types::PyType};
 
-use crate::{
-    AtomGeneric, BackboneSS, BondGeneric, ChainGeneric, ExperimentalMethod, ResidueGeneric,
-};
+use crate::{AtomGeneric, ChainGeneric, ResidueGeneric};
 
 #[pyclass(module = "bio_files")]
 pub struct MmCif {
@@ -20,10 +18,18 @@ impl MmCif {
     fn ident(&self) -> &str {
         &self.inner.ident
     }
+    #[setter(ident)]
+    fn ident_set(&mut self, val: String) {
+        self.inner.ident = val;
+    }
 
     #[getter]
     fn metadata(&self) -> &HashMap<String, String> {
         &self.inner.metadata
+    }
+    #[setter(metadata)]
+    fn metadata_set(&mut self, val: HashMap<String, String>) {
+        self.inner.metadata = val;
     }
 
     #[getter]
@@ -34,8 +40,13 @@ impl MmCif {
             .map(|a| AtomGeneric { inner: a.clone() })
             .collect()
     }
+    #[setter(atoms)]
+    fn atoms_set(&mut self, val: Vec<PyRef<'_, AtomGeneric>>) {
+        let atoms = val.iter().map(|a| a.inner.clone()).collect();
 
-    // todo: If implemented in rust.
+        self.inner.atoms = atoms;
+    }
+
     // #[getter]
     // fn bonds(&self) -> Vec<BondGeneric> {
     //     self.inner
@@ -44,6 +55,12 @@ impl MmCif {
     //         .cloned()
     //         .map(|b| BondGeneric { inner: b.clone() })
     //         .collect()
+    // }
+    // #[setter(bonds)]
+    // fn bonds_set(&mut self, val: Vec<PyRef<'_, BondGeneric>>) {
+    //     let bonds = val.iter().map(|a| a.inner.clone()).collect();
+    //
+    //     self.inner.bonds = bonds;
     // }
 
     #[getter]
@@ -68,7 +85,11 @@ impl MmCif {
     // todo: String for now
     #[getter]
     fn secondary_structure(&self) -> Vec<String> {
-        self.inner.secondary_structure.iter().map(|s| format!("{s:?}")).collect()
+        self.inner
+            .secondary_structure
+            .iter()
+            .map(|s| format!("{s:?}"))
+            .collect()
     }
 
     // todo: String for now

@@ -36,6 +36,24 @@ macro_rules! make_enum {
     };
 }
 
+// todo: Blocked due to a restriction in PYO3
+/// Candidate for standalone helper lib.
+#[macro_export]
+macro_rules! field {
+    ($name:ident, $ty:ty) => {
+        #[getter]
+        fn $name(&self) -> $ty {
+            self.inner.$name.into()
+        }
+
+        // #[setter($name)]
+        // // todo: Do we need to use paste! here?
+        // fn $name##_set(&mut self, val: $ty) -> $ty {
+        //     self.inner.$name = val.into();
+        //     val
+        // }
+    };
+}
 
 #[pyclass]
 struct AtomGeneric {
@@ -86,7 +104,9 @@ impl AtomGeneric {
     }
 }
 
-make_enum!(BondType, bio_files_rs::BondType,
+make_enum!(
+    BondType,
+    bio_files_rs::BondType,
     Single,
     Double,
     Triple,
@@ -129,15 +149,27 @@ impl BondGeneric {
     fn bond_type(&self) -> BondType {
         self.bond_type().into()
     }
+    #[setter(bond_type)]
+    fn bond_type_set(&mut self, val: BondType) {
+        self.inner.bond_type = val.into();
+    }
 
     #[getter]
     fn atom_0_sn(&self) -> u32 {
         self.inner.atom_0_sn
     }
+    #[setter(atom_0_sn)]
+    fn atom_0_sn_set(&mut self, val: u32) {
+        self.inner.atom_0_sn = val;
+    }
 
     #[getter]
     fn atom_1_sn(&self) -> u32 {
         self.inner.atom_1_sn
+    }
+    #[setter(atom_1_sn)]
+    fn atom_1_sn_set(&mut self, val: u32) {
+        self.inner.atom_1_sn = val;
     }
 
     fn __repr__(&self) -> String {
@@ -178,6 +210,10 @@ impl ResidueGeneric {
     fn serial_number(&self) -> u32 {
         self.inner.serial_number
     }
+    #[setter(serial_number)]
+    fn serial_number_set(&mut self, val: u32) {
+        self.inner.serial_number = val;
+    }
 
     #[getter]
     fn res_type<'py>(&self, py: Python<'py>) -> PyResult<Py<ResidueType>> {
@@ -190,6 +226,15 @@ impl ResidueGeneric {
     }
 
     #[getter]
+    fn end(&self) -> ResidueEnd {
+        self.inner.end.into()
+    }
+    #[setter(end)]
+    fn end_set(&mut self, val: ResidueEnd) {
+        self.inner.end = val.into();
+    }
+
+    #[getter]
     fn atom_sns(&self) -> Vec<u32> {
         self.inner.atom_sns.clone()
     }
@@ -199,7 +244,9 @@ impl ResidueGeneric {
     }
 }
 
-make_enum!(ResidueEnd, crate::bio_files_rs::ResidueEnd,
+make_enum!(
+    ResidueEnd,
+    crate::bio_files_rs::ResidueEnd,
     Internal,
     NTerminus,
     CTerminus,
@@ -240,7 +287,9 @@ impl ChainGeneric {
     }
 }
 
-make_enum!(SecondaryStructure, bio_files_rs::SecondaryStructure,
+make_enum!(
+    SecondaryStructure,
+    bio_files_rs::SecondaryStructure,
     Helix,
     Sheet,
     Coil
@@ -265,7 +314,9 @@ impl BackboneSS {
     }
 }
 
-make_enum!(ExperimentalMethod, bio_files_rs::ExperimentalMethod,
+make_enum!(
+    ExperimentalMethod,
+    bio_files_rs::ExperimentalMethod,
     XRayDiffraction,
     ElectronDiffraction,
     NeutronDiffraction,

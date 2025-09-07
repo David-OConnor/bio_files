@@ -13,7 +13,9 @@ use std::{
     io::{self, ErrorKind},
     str::FromStr,
 };
-
+use std::fs::File;
+use std::io::Read;
+use std::path::Path;
 use na_seq::{AminoAcidGeneral, AtomTypeInRes};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
@@ -254,7 +256,7 @@ impl DihedralParams {
 
 #[derive(Debug, Clone)]
 /// Amber RM, section 15.1.7
-pub struct VdwParams {
+pub struct LjParams {
     pub atom_type: String,
     /// σ. derived from Van der Waals radius, Å. Note that Amber parameter files use R_min,
     /// vice σ. This value is σ, which we compute when parsing.
@@ -267,7 +269,7 @@ pub struct VdwParams {
     pub eps: f32,
 }
 
-impl VdwParams {
+impl LjParams {
     /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
     pub fn from_line(line: &str) -> io::Result<Self> {
         const SIGMA_FACTOR: f32 = 1.122_462_048_309_373; // 2^(1/6)
@@ -335,7 +337,7 @@ pub struct ChargeParams {
 //     }
 // }
 
-/// Top-level dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
+/// Top-level lib, dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
 /// for parsing flexibility.
 ///
 /// Note that we don't include partial charges here, as they come from Mol2 files; this struct
@@ -355,12 +357,13 @@ pub struct ForceFieldParams {
     /// atoms 1-2-3, and 2-3-4. Note that these are generally only included for planar configurations,
     /// and always hold a planar dihedral shape. (e.g. τ/2 with symmetry 2)
     pub improper: Vec<DihedralParams>,
-    pub van_der_waals: Vec<VdwParams>,
+    pub lennard_jones: Vec<LjParams>,
     pub remarks: Vec<String>,
 }
 
-/// Force field parameters, e.g. from Amber. Similar to that in `bio_files`, but
-/// with Hashmap-based keys (of atom-name tuples) for fast look-ups.
+/// Force field parameters, e.g. from Amber. Similar to `ForceFieldParams` but
+/// with Hashmap-based keys (of atom-name tuples) for fast look-ups. See that struct
+/// for a description of each field.
 ///
 /// For descriptions of each field and the units used, reference the structs in bio_files, of which
 /// this uses internally.
@@ -370,8 +373,8 @@ pub struct ForceFieldParamsKeyed {
     pub bond: HashMap<(String, String), BondStretchingParams>,
     pub angle: HashMap<(String, String, String), AngleBendingParams>,
     pub dihedral: HashMap<(String, String, String, String), DihedralParams>,
-    pub dihedral_improper: HashMap<(String, String, String, String), DihedralParams>,
-    pub van_der_waals: HashMap<String, VdwParams>,
+    pub improper: HashMap<(String, String, String, String), DihedralParams>,
+    pub lennard_jones: HashMap<String, LjParams>,
 }
 
 impl ForceFieldParamsKeyed {
@@ -398,13 +401,13 @@ impl ForceFieldParamsKeyed {
 
         for val in &params.improper {
             result
-                .dihedral_improper
+                .improper
                 .insert(val.atom_types.clone(), val.clone());
         }
 
-        for val in &params.van_der_waals {
+        for val in &params.lennard_jones {
             result
-                .van_der_waals
+                .lennard_jones
                 .insert(val.atom_type.clone(), val.clone());
         }
 
@@ -446,7 +449,7 @@ impl ForceFieldParamsKeyed {
             let hit = if proper {
                 self.dihedral.get(&key)
             } else {
-                self.dihedral_improper.get(&key)
+                self.improper.get(&key)
             };
 
             if hit.is_some() {
@@ -568,4 +571,15 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, V
     }
 
     Ok(result)
+}
+
+pub fn load_amino_charges(path: &Path) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParams>>> {
+    let mut file = File::open(path)?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)?;
+
+    let data_str: String = String::from_utf8(buffer)
+    .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
+
+    parse_amino_charges(&data_str)
 }

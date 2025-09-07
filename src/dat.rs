@@ -16,7 +16,7 @@ use std::{
 
 use crate::amber_params::{
     AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
-    VdwParams, get_atom_types,
+    LjParams, get_atom_types,
 };
 
 impl ForceFieldParams {
@@ -79,17 +79,17 @@ impl ForceFieldParams {
             match atom_types.len() {
                 1 => {
                     if in_mod4 {
-                        let vdw = VdwParams::from_line(line)?;
+                        let vdw = LjParams::from_line(line)?;
 
                         // Produce copies for all matching the alias. (The alias line should
                         // be above all individual VDW lines).
-                        result.van_der_waals.push(vdw.clone());
+                        result.lennard_jones.push(vdw.clone());
 
                         for (alias, canonical) in vdw_alias_map.iter() {
                             if canonical == &vdw.atom_type && alias != canonical {
                                 let mut alias_vdw = vdw.clone();
                                 alias_vdw.atom_type = alias.clone();
-                                result.van_der_waals.push(alias_vdw);
+                                result.lennard_jones.push(alias_vdw);
                             }
                         }
                     } else {

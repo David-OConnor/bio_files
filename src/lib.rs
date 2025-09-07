@@ -43,16 +43,18 @@ pub struct AtomGeneric {
     /// E.g. "c6", "ca", "n3", "ha", "h0" etc, as seen in Mol2 files from AMBER.
     /// e.g.: "ha": hydrogen attached to an aromatic carbon.
     /// "ho": hydrogen on a hydroxyl oxygen
-    /// "n3": sp³ nitrogen with three substituents
+    /// "n3": sp³ nitrogen with three substitutes
     /// "c6": sp² carbon in a pure six-membered aromatic ring (new in GAFF2; lets GAFF distinguish
     /// a benzene carbon from other aromatic caca carbons)
-    /// For proteins, this appears to be teh same as for `name`.
-    /// Internal term: "Type 3".
+    /// For proteins, this appears to be the same as for `name`.
     pub force_field_type: Option<String>,
-    pub occupancy: Option<f32>,
-    /// Elementary charge. (Charge of a proton)
+    /// An atom-centered electric charge, used in molecular dynamics simulations.
+    /// These are sometimes loaded from Mol2 or SDF files, and sometimes added after.
     pub partial_charge: Option<f32>,
+    /// Indicates, in proteins, that the atom isn't part of an amino acid. E.g., water or
+    /// ligands.
     pub hetero: bool,
+    pub occupancy: Option<f32>,
 }
 
 impl Display for AtomGeneric {
@@ -216,6 +218,7 @@ pub struct ResidueGeneric {
     pub res_type: ResidueType,
     /// Serial number
     pub atom_sns: Vec<u32>,
+    pub end: ResidueEnd,
 }
 
 #[derive(Clone, Copy, PartialEq, Debug)]

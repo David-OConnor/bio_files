@@ -3,11 +3,11 @@ use std::{collections::HashMap, path::PathBuf};
 use bio_files_rs;
 use pyo3::{prelude::*, types::PyType};
 
-use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric};
+use crate::{AtomGeneric, BondGeneric, ChainGeneric, ResidueGeneric, mol2::Mol2};
 
 #[pyclass(module = "bio_files")]
 pub struct Sdf {
-    inner: bio_files_rs::Sdf,
+    pub inner: bio_files_rs::Sdf,
 }
 
 #[pymethods]
@@ -16,10 +16,18 @@ impl Sdf {
     fn ident(&self) -> &str {
         &self.inner.ident
     }
+    #[setter(ident)]
+    fn ident_set(&mut self, val: String) {
+        self.inner.ident = val;
+    }
 
     #[getter]
     fn metadata(&self) -> &HashMap<String, String> {
         &self.inner.metadata
+    }
+    #[setter(metadata)]
+    fn metadata_set(&mut self, val: HashMap<String, String>) {
+        self.inner.metadata = val;
     }
 
     #[getter]
@@ -30,6 +38,12 @@ impl Sdf {
             .map(|a| AtomGeneric { inner: a.clone() })
             .collect()
     }
+    #[setter(atoms)]
+    fn atoms_set(&mut self, val: Vec<PyRef<'_, AtomGeneric>>) {
+        let atoms = val.iter().map(|a| a.inner.clone()).collect();
+
+        self.inner.atoms = atoms;
+    }
 
     #[getter]
     fn bonds(&self) -> Vec<BondGeneric> {
@@ -39,6 +53,12 @@ impl Sdf {
             .cloned()
             .map(|b| BondGeneric { inner: b.clone() })
             .collect()
+    }
+    #[setter(bonds)]
+    fn bonds_set(&mut self, val: Vec<PyRef<'_, BondGeneric>>) {
+        let bonds = val.iter().map(|a| a.inner.clone()).collect();
+
+        self.inner.bonds = bonds;
     }
 
     #[getter]
@@ -60,21 +80,17 @@ impl Sdf {
             .collect()
     }
 
-    #[getter]
-    fn pubchem_cid(&self) -> Option<u32> {
-        self.inner.pubchem_cid.clone()
-    }
-
-    #[getter]
-    fn drugbank_id(&self) -> Option<String> {
-        self.inner.drugbank_id.clone()
-    }
-
     #[new]
     fn new(text: &str) -> PyResult<Self> {
         Ok(Self {
             inner: bio_files_rs::Sdf::new(text)?,
         })
+    }
+
+    fn to_mol2(&self) -> Mol2 {
+        Mol2 {
+            inner: self.inner.clone().into(),
+        }
     }
 
     fn save(&self, path: PathBuf) -> PyResult<()> {

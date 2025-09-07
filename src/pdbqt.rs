@@ -14,9 +14,7 @@ use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 use regex::Regex;
 
-use crate::{
-    AtomGeneric, BondGeneric, ChainGeneric, ChargeType, MolType, ResidueGeneric, ResidueType,
-};
+use crate::{AtomGeneric, BondGeneric, ChainGeneric, ChargeType, MolType, ResidueEnd, ResidueGeneric, ResidueType};
 
 /// Helpers for parsing
 fn parse_usize(s: &str) -> io::Result<usize> {
@@ -157,6 +155,7 @@ impl Pdbqt {
                         serial_number: 0, // todo temp
                         res_type: residue_type.clone(),
                         atom_sns: vec![atom_id as u32],
+                        end: ResidueEnd::Hetero,
                         // atoms: vec![atom_id],
                         // dihedral: None,
                         // end: ResidueEnd::Hetero,

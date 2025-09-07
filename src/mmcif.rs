@@ -19,9 +19,7 @@ use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 use regex::Regex;
 
-use crate::{
-    AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueGeneric, ResidueType,
-};
+use crate::{AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueEnd, ResidueGeneric, ResidueType};
 
 #[derive(Clone, Debug)]
 pub struct MmCif {
@@ -178,6 +176,7 @@ impl MmCif {
                             serial_number: res_sn,
                             res_type: ResidueType::from_str(fields[c_res]),
                             atom_sns: Vec::new(),
+                            end: ResidueEnd::Internal, // We update this after.
                         });
                         idx
                     });
@@ -212,6 +211,35 @@ impl MmCif {
             }
 
             i += 1; // advance to next top-level line
+        }
+
+        // Populate the residue end, now that we know when the last non-het one is.
+        {
+            let mut last_non_het = 0;
+            for (i, res) in residues.iter().enumerate() {
+                match res.res_type {
+                    ResidueType::AminoAcid(_) => last_non_het = i,
+                    _ => break,
+                }
+            }
+
+            for (i, res) in residues.iter_mut().enumerate() {
+                let mut end = ResidueEnd::Internal;
+
+                // Match arm won't work due to non-constant arms, e.g. non_hetero?
+                if i == 0 {
+                    end = ResidueEnd::NTerminus;
+                } else if i == last_non_het {
+                    end = ResidueEnd::CTerminus;
+                }
+
+                match res.res_type {
+                    ResidueType::AminoAcid(_) => (),
+                    _ => end = ResidueEnd::Hetero,
+                }
+
+                res.end = end;
+            }
         }
 
         let ident = metadata

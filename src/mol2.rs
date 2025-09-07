@@ -10,11 +10,11 @@ use std::{
     path::Path,
     str::FromStr,
 };
-
+use std::collections::HashMap;
 use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 
-use crate::{AtomGeneric, BondGeneric, BondType};
+use crate::{AtomGeneric, BondGeneric, BondType, Sdf};
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MolType {
@@ -119,15 +119,16 @@ impl FromStr for ChargeType {
     }
 }
 
+// todo: Combine this and SDF into one struct?
 #[derive(Clone, Debug)]
 pub struct Mol2 {
     pub ident: String,
+    pub metadata: HashMap<String, String>,
+    pub atoms: Vec<AtomGeneric>,
+    pub bonds: Vec<BondGeneric>,
     pub mol_type: MolType,
     pub charge_type: ChargeType,
     pub comment: Option<String>,
-    // pub metadata: HashMap<String, String>,
-    pub atoms: Vec<AtomGeneric>,
-    pub bonds: Vec<BondGeneric>,
 }
 
 impl Mol2 {
@@ -343,8 +344,11 @@ impl Mol2 {
             Some(lines[5].to_owned())
         };
 
+        let metadata = HashMap::new(); // todo: A/R
+
         Ok(Self {
             ident,
+            metadata,
             mol_type,
             charge_type,
             atoms,
@@ -412,6 +416,8 @@ impl Mol2 {
 
         writeln!(file, "@<TRIPOS>BOND")?;
 
+        // todo: Where do we save metadata?
+
         for (i, bond) in self.bonds.iter().enumerate() {
             writeln!(
                 file,
@@ -435,5 +441,19 @@ impl Mol2 {
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
         Self::new(&data_str)
+    }
+}
+
+impl From<Sdf> for Mol2 {
+    fn from(m: Sdf) -> Self {
+        Self {
+            ident: m.ident.clone(),
+            metadata: m.metadata.clone(),
+            atoms: m.atoms.clone(),
+            bonds: m.bonds.clone(),
+            mol_type: MolType::Small,
+            charge_type: ChargeType::None,
+            comment: None,
+        }
     }
 }

@@ -13,19 +13,17 @@ use std::{
 use lin_alg::f64::Vec3;
 use na_seq::Element;
 
-use crate::{AtomGeneric, BondGeneric, BondType, ChainGeneric, ResidueGeneric, ResidueType};
+use crate::{AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType};
 
-#[derive(Debug)]
+// todo: Combine this and Mol2 into one struct?
+#[derive(Clone, Debug)]
 pub struct Sdf {
-    /// These fields aren't universal to the format.
     pub ident: String,
     pub metadata: HashMap<String, String>,
     pub atoms: Vec<AtomGeneric>,
     pub bonds: Vec<BondGeneric>,
     pub chains: Vec<ChainGeneric>,
     pub residues: Vec<ResidueGeneric>,
-    pub pubchem_cid: Option<u32>,
-    pub drugbank_id: Option<String>,
 }
 
 impl Sdf {
@@ -166,8 +164,6 @@ impl Sdf {
         let mut pubchem_cid = None;
         let mut drugbank_id = None;
 
-        // todo: Handle more metadata?
-
         for (i, line) in lines.iter().enumerate() {
             if line.contains("> <PUBCHEM_COMPOUND_CID>")
                 && let Some(value_line) = lines.get(i + 1)
@@ -212,6 +208,7 @@ impl Sdf {
             serial_number: 0,
             res_type: ResidueType::Other("Unknown".to_string()),
             atom_sns: atom_sns.clone(),
+            end: ResidueEnd::Hetero,
         });
 
         chains.push(ChainGeneric {
@@ -220,14 +217,61 @@ impl Sdf {
             atom_sns,
         });
 
+        // Load metadata. We use a separate pass for simplicity, although this is a bit slower.
+        let metadata = {
+
+            let mut md: HashMap<String, String> = HashMap::new();
+
+            let mut idx = if let Some(m_end) = lines.iter().position(|l| l.trim() == "M  END") {
+                m_end + 1
+            } else {
+                last_bond_line
+            };
+
+            while idx < lines.len() {
+                let line = lines[idx].trim();
+                if line == "$$$$" {
+                    break;
+                }
+                if line.starts_with('>') {
+                    if let (Some(l), Some(r)) = (line.find('<'), line.rfind('>')) {
+                        if r > l + 1 {
+                            let key = &line[l + 1..r];
+                            idx += 1;
+                            let mut vals: Vec<&str> = Vec::new();
+                            while idx < lines.len() {
+                                let v = lines[idx];
+                                let v_trim = v.trim_end();
+                                if v_trim.is_empty() || v_trim == "$$$$" || v_trim.starts_with("> <") {
+                                    break;
+                                }
+                                vals.push(v_trim);
+                                idx += 1;
+                            }
+                            md.insert(key.to_string(), vals.join("\n"));
+
+                            if key == "atom.dprop.PartialCharge" {
+                                let charges: Vec<_> = lines[idx + 1].split_whitespace().collect();
+                                for (i, q) in charges.into_iter().enumerate() {
+                                    atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
+                                }
+                            }
+
+                            continue;
+                        }
+                    }
+                }
+                idx += 1;
+            }
+            md
+        };
+
         Ok(Self {
             ident,
+            metadata,
             atoms,
             chains,
             residues,
-            pubchem_cid,
-            drugbank_id,
-            metadata: HashMap::new(), // todo: A/R
             bonds,
         })
     }
@@ -283,29 +327,30 @@ impl Sdf {
 
         writeln!(file, "M  END")?;
 
-        // Metadata
-        if let Some(cid) = self.pubchem_cid {
-            writeln!(file, "> <PUBCHEM_COMPOUND_CID>")?;
-            writeln!(file, "{cid}")?;
-            writeln!(file)?; // blank line
-        }
-        if let Some(ref dbid) = self.drugbank_id {
-            writeln!(file, "> <DATABASE_ID>")?;
-            writeln!(file, "{dbid}")?;
-            writeln!(file)?; // blank line
-            writeln!(file, "> <DATABASE_NAME>")?;
-            writeln!(file, "drugbank")?;
-            writeln!(file)?; // blank line
+        for m in &self.metadata {
+            write_metadata(m.0, m.1, &mut file)?;
         }
 
-        // If you have a general metadata HashMap, you could do:
-        // for (key, value) in &self.metadata {
-        //     writeln!(file, "> <{}>", key)?;
-        //     writeln!(file, "{}", value)?;
-        //     writeln!(file)?;
-        // }
+        // If partial charges are available, write them to metadata. This is an OpenFF convention.
+        let mut partial_charges = Vec::new();
+        let mut all_partial_charges_present = true;
+        for atom in &self.atoms {
+            match atom.partial_charge {
+                Some(q) => partial_charges.push(q),
+                None => {
+                    all_partial_charges_present = false;
+                    break;
+                }
+            }
+        }
 
-        // 8) End of this molecule record in SDF
+        if all_partial_charges_present {
+            let charges_formated: Vec<_> = partial_charges.iter().map(|q| format!("{q:.8}")).collect();
+            let charge_str = charges_formated.join(" ");
+            write_metadata("atom.dprop.PartialCharge", &charge_str, &mut file)?;
+        }
+
+        // End of this molecule record in SDF
         writeln!(file, "$$$$")?;
 
         Ok(())
@@ -322,4 +367,26 @@ impl Sdf {
 
         Self::new(&data_str)
     }
+}
+
+impl From<Mol2> for Sdf {
+    fn from(m: Mol2) -> Self {
+        Self {
+            ident: m.ident.clone(),
+            metadata: m.metadata.clone(),
+            atoms: m.atoms.clone(),
+            bonds: m.bonds.clone(),
+            chains: Vec::new(),
+            residues: Vec::new(),
+        }
+    }
+}
+
+
+fn write_metadata(key: &str, val: &str, file: &mut File) -> io::Result<()> {
+    writeln!(file, "> <{key}>")?;
+    writeln!(file, "{val}")?;
+    writeln!(file)?; // blank line
+
+    Ok(())
 }
