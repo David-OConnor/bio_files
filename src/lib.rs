@@ -4,12 +4,13 @@
 //! The `generic` label in names in this module are to differentiate from ones used in more specific
 //! applications.
 
-pub mod ab1;
-pub mod map;
 pub mod mmcif;
 pub mod mol2;
 pub mod pdbqt;
 pub mod sdf;
+
+pub mod ab1;
+pub mod map;
 
 pub mod amber_params;
 pub mod dat;

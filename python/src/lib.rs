@@ -3,6 +3,7 @@ use std::str::FromStr;
 use bio_files_rs;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
+mod amber_params;
 mod mmcif;
 mod mol2;
 mod pdbqt;
@@ -364,6 +365,8 @@ fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<pdbqt::Pdbqt>()?;
 
     m.add_class::<mol2::MolType>()?;
+
+    m.add_class::<amber_params::ForceFieldParamsKeyed>()?;
 
     Ok(())
 }

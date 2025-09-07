@@ -1,6 +1,6 @@
 [package]
 name = "bio_files"
-version = "0.2.11"
+version = "0.2.12"
 edition = "2024"
 authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Save and load common biology file formats"

@@ -412,6 +412,26 @@ impl ForceFieldParamsKeyed {
         result
     }
 
+    /// A convenience wrapper.
+    pub fn from_frcmod(text: &str) -> io::Result<Self> {
+        Ok(Self::new(&ForceFieldParams::from_frcmod(text)?))
+    }
+
+    /// A convenience wrapper.
+    pub fn from_dat(text: &str) -> io::Result<Self> {
+        Ok(Self::new(&ForceFieldParams::from_dat(text)?))
+    }
+
+    /// A convenience wrapper.
+    pub fn load_frcmod(path: &Path) -> io::Result<Self> {
+        Ok(Self::new(&ForceFieldParams::load_frcmod(path)?))
+    }
+
+    /// A convenience wrapper.
+    pub fn load_dat(path: &Path) -> io::Result<Self> {
+        Ok(Self::new(&ForceFieldParams::load_dat(path)?))
+    }
+
     /// A utility function that handles proper and improper dihedral data,
     /// tries both atom orders, and falls back to wildcard (“X”) matches on
     /// the outer atoms when an exact hit is not found.
