@@ -3,7 +3,7 @@ use std::str::FromStr;
 use bio_files_rs;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
-mod amber_params;
+mod md_params;
 mod mmcif;
 mod mol2;
 mod pdbqt;
@@ -179,7 +179,6 @@ impl BondGeneric {
 }
 
 #[pyclass]
-// todo: Enum fields
 struct ResidueType {
     inner: bio_files_rs::ResidueType,
 }
@@ -366,7 +365,7 @@ fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
 
     m.add_class::<mol2::MolType>()?;
 
-    m.add_class::<amber_params::ForceFieldParamsKeyed>()?;
+    m.add_class::<md_params::ForceFieldParams>()?;
 
     Ok(())
 }

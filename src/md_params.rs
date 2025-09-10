@@ -38,7 +38,7 @@ impl MassParams {
         if cols.len() < 2 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "Not enough cols (Mass))",
+                format!("Not enough cols (Mass) when parsing line {line}"),
             ));
         }
 
@@ -87,7 +87,7 @@ impl BondStretchingParams {
         if cols.len() < 3 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "Not enough cols (Bond).",
+                format!("Not enough cols (Bond) when parsing line {line}"),
             ));
         }
 
@@ -135,7 +135,7 @@ impl AngleBendingParams {
         if cols.len() < 3 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "Not enough cols (Angle).",
+                format!("Not enough cols (Angle) when parsing line {line}"),
             ));
         }
 
@@ -205,7 +205,7 @@ impl DihedralParams {
         if cols.len() < 4 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "Not enough cols. (Dihedral)",
+                format!("Not enough cols (Dihedral) when parsing line {line}"),
             ));
         }
 
@@ -279,7 +279,7 @@ impl LjParams {
         if cols.len() < 3 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "Not enough cols (Vdw).",
+                format!("Not enough cols (Lennard Jones) when parsing line {line}"),
             ));
         }
 
@@ -343,8 +343,7 @@ pub struct ChargeParams {
 /// Note that we don't include partial charges here, as they come from Mol2 files; this struct
 /// is for data parsed from DAT, FRCMOD etc files.
 #[derive(Debug, Default)]
-pub struct ForceFieldParams {
-    pub mass: Vec<MassParams>,
+pub struct ForceFieldParamsVec {
     /// Length between 2 covalently bonded atoms.
     pub bond: Vec<BondStretchingParams>,
     /// Angle between 3 linear covalently-bonded atoms (2 bonds)
@@ -357,6 +356,7 @@ pub struct ForceFieldParams {
     /// atoms 1-2-3, and 2-3-4. Note that these are generally only included for planar configurations,
     /// and always hold a planar dihedral shape. (e.g. τ/2 with symmetry 2)
     pub improper: Vec<DihedralParams>,
+    pub mass: Vec<MassParams>,
     pub lennard_jones: Vec<LjParams>,
     pub remarks: Vec<String>,
 }
@@ -368,19 +368,27 @@ pub struct ForceFieldParams {
 /// For descriptions of each field and the units used, reference the structs in bio_files, of which
 /// this uses internally.
 #[derive(Clone, Debug, Default)]
-pub struct ForceFieldParamsKeyed {
-    pub mass: HashMap<String, MassParams>,
+pub struct ForceFieldParams {
+    /// Length between 2 covalently bonded atoms.
     pub bond: HashMap<(String, String), BondStretchingParams>,
+    /// Angle between 3 linear covalently-bonded atoms (2 bonds)
     pub angle: HashMap<(String, String, String), AngleBendingParams>,
+    /// Angle between 4 linear covalently-bonded atoms (3 bonds). This is
+    /// the angle between the planes of atoms 1-2-3, and 2-3-4. (Rotation around the 2-3 bond)
     pub dihedral: HashMap<(String, String, String, String), DihedralParams>,
+    /// Angle between 4 covalently-bonded atoms (3 bonds), in a hub-and-spoke
+    /// arrangement. The third atom is the hub. This is the angle between the planes of
+    /// atoms 1-2-3, and 2-3-4. Note that these are generally only included for planar configurations,
+    /// and always hold a planar dihedral shape. (e.g. τ/2 with symmetry 2)
     pub improper: HashMap<(String, String, String, String), DihedralParams>,
+    pub mass: HashMap<String, MassParams>,
     pub lennard_jones: HashMap<String, LjParams>,
 }
 
-impl ForceFieldParamsKeyed {
+impl ForceFieldParams {
     /// Restructures params so the `atom_type` fields are arranged as HashMap keys, for faster
     /// lookup.
-    pub fn new(params: &ForceFieldParams) -> Self {
+    pub fn new(params: &ForceFieldParamsVec) -> Self {
         let mut result = Self::default();
 
         for val in &params.mass {
@@ -414,22 +422,22 @@ impl ForceFieldParamsKeyed {
 
     /// A convenience wrapper.
     pub fn from_frcmod(text: &str) -> io::Result<Self> {
-        Ok(Self::new(&ForceFieldParams::from_frcmod(text)?))
+        Ok(Self::new(&ForceFieldParamsVec::from_frcmod(text)?))
     }
 
     /// A convenience wrapper.
     pub fn from_dat(text: &str) -> io::Result<Self> {
-        Ok(Self::new(&ForceFieldParams::from_dat(text)?))
+        Ok(Self::new(&ForceFieldParamsVec::from_dat(text)?))
     }
 
     /// A convenience wrapper.
     pub fn load_frcmod(path: &Path) -> io::Result<Self> {
-        Ok(Self::new(&ForceFieldParams::load_frcmod(path)?))
+        Ok(Self::new(&ForceFieldParamsVec::load_frcmod(path)?))
     }
 
     /// A convenience wrapper.
     pub fn load_dat(path: &Path) -> io::Result<Self> {
-        Ok(Self::new(&ForceFieldParams::load_dat(path)?))
+        Ok(Self::new(&ForceFieldParamsVec::load_dat(path)?))
     }
 
     /// A utility function that handles proper and improper dihedral data,

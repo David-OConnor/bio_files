@@ -12,9 +12,9 @@ pub mod sdf;
 pub mod ab1;
 pub mod map;
 
-pub mod amber_params;
 pub mod dat;
 pub mod frcmod;
+pub mod md_params;
 
 mod mmcif_aux;
 

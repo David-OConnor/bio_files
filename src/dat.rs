@@ -14,12 +14,12 @@ use std::{
     path::Path,
 };
 
-use crate::amber_params::{
-    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, LjParams,
+use crate::md_params::{
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParamsVec, LjParams,
     MassParams, get_atom_types,
 };
 
-impl ForceFieldParams {
+impl ForceFieldParamsVec {
     /// From a string of a dat text file, from Amber.
     pub fn from_dat(text: &str) -> io::Result<Self> {
         let mut result = Self::default();

@@ -5,8 +5,8 @@ use std::{
     path::Path,
 };
 
-use crate::amber_params::{
-    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams, MassParams,
+use crate::md_params::{
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParamsVec, MassParams,
 };
 
 #[derive(Debug, PartialEq)]
@@ -20,7 +20,7 @@ enum Section {
     Nonbond,
 }
 
-impl ForceFieldParams {
+impl ForceFieldParamsVec {
     /// From a string of a FRCMOD text file.
     pub fn from_frcmod(text: &str) -> io::Result<Self> {
         let mut result = Self::default();
