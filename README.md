@@ -87,7 +87,7 @@ mol2_data.save("test.mol2");
 
 // Loading Force field parameters:
 let p = Path::new("gaff2.dat")
-let params = ForceFieldParamsKeyed::new(&ForceFieldParams::load_dat(p)?);
+let params = ForceFieldParams::load_dat(p)?;
 ```
 
 You can use similar syntax for mmCIF protein files.
