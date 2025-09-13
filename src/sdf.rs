@@ -239,6 +239,7 @@ impl Sdf {
                         if r > l + 1 {
                             let key = &line[l + 1..r];
                             idx += 1;
+
                             let mut vals: Vec<&str> = Vec::new();
                             while idx < lines.len() {
                                 let v = lines[idx];
@@ -254,10 +255,44 @@ impl Sdf {
                             }
                             md.insert(key.to_string(), vals.join("\n"));
 
+                            // OpenFF format.
                             if key == "atom.dprop.PartialCharge" {
                                 let charges: Vec<_> = lines[idx + 1].split_whitespace().collect();
                                 for (i, q) in charges.into_iter().enumerate() {
                                     atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
+                                }
+                            }
+
+                            // Pubchem format.
+                            if key == "PUBCHEM_MMFF94_PARTIAL_CHARGES" {
+                                if vals.is_empty() {
+                                    eprintln!("No values for PUBCHEM_MMFF94_PARTIAL_CHARGES");
+                                } else {
+                                    let n = vals[0].trim().parse::<usize>().unwrap_or(0);
+                                    if vals.len().saturating_sub(1) != n {
+                                        eprintln!(
+                                            "Charge count mismatch: expected {}, got {}",
+                                            n,
+                                            vals.len().saturating_sub(1)
+                                        );
+                                    }
+                                    for line in vals.iter().skip(1).take(n) {
+                                        let mut it = line.split_whitespace();
+                                        let i1 = it.next().and_then(|s| s.parse::<usize>().ok());
+                                        let q = it.next().and_then(|s| s.parse::<f32>().ok());
+
+                                        if let (Some(i1), Some(q)) = (i1, q) {
+                                            if (1..=atoms.len()).contains(&i1) {
+                                                atoms[i1 - 1].partial_charge = Some(q); // 1-based -> 0-based
+                                            } else {
+                                                eprintln!(
+                                                    "Atom index {} out of range (n_atoms={})",
+                                                    i1,
+                                                    atoms.len()
+                                                );
+                                            }
+                                        }
+                                    }
                                 }
                             }
 
@@ -336,6 +371,26 @@ impl Sdf {
         }
 
         // If partial charges are available, write them to metadata. This is an OpenFF convention.
+        // todo: Should we use the Pubhcem format instead? e.g.
+        // > <PUBCHEM_MMFF94_PARTIAL_CHARGES>
+        // 16
+        // 1 -0.53
+        // 10 0.63
+        // 11 0.15
+        // 12 0.15
+        // 13 0.15
+        // 14 0.15
+        // 15 0.45
+        // 16 0.5
+        // 2 -0.65
+        // 3 -0.57
+        // 4 0.09
+        // 5 -0.15
+        // 6 -0.15
+        // 7 0.08
+        // 8 -0.15
+        // 9 -0.15
+
         let mut partial_charges = Vec::new();
         let mut all_partial_charges_present = true;
         for atom in &self.atoms {
@@ -348,6 +403,7 @@ impl Sdf {
             }
         }
 
+        // Pubchem format.
         if all_partial_charges_present {
             let charges_formated: Vec<_> =
                 partial_charges.iter().map(|q| format!("{q:.8}")).collect();
