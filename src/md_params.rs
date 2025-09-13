@@ -297,7 +297,7 @@ impl LjParams {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct ChargeParams {
     /// The residue-specific ID. We use this value to map forcefield type
     /// to atoms loaded from mmCIF etc; these will have this `type_in_res`, but not
