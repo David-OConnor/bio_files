@@ -46,52 +46,9 @@ instead of serial numbers. We use SNs here because they're more robust, and matc
 add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the residue
 an atom's in, in your derived Atom struct).
 
-Example use. (The Python version uses an equivalent API)
 
-```rust
-pub fn open_molecule(&mut self, path: &Path) -> io::Result<()> {
-    let binding = path.extension().unwrap_or_default().to_ascii_lowercase();
-    let extension = binding;
+## Example use
 
-    let molecule = match extension.to_str().unwrap() {
-        "sdf" => Ok(Sdf::load(path)?.into()),
-        "mol2" => Ok(Mol2::load(path)?.into()),
-        _ => ()
-    };
-}
-
-pub fn open_map(&mut self, path: &Path) -> io::Result<()> {
-    let dm = DensityMap::load(path)?;
-    
-    // Call dm.density_at_point_trilinear(coord) to get density
-    // Run `density_to_sig` to get sigma-normalized density, for uniform display.
-    
-    self.load_density(dm);
-
-    Ok(())
-}
-
-/// A single endpoint to save a number of file types
-pub fn save(&mut self, path: &Path) -> io::Result<()> {
-    let binding = path.extension().unwrap_or_default().to_ascii_lowercase();
-    let extension = binding;
-
-    match extension.to_str().unwrap_or_default() {
-        "sdf" => match &self.ligand {
-            Some(lig) => {
-                lig.molecule.to_sdf().save(path)?;
-            }
-            None => return Err(io::Error::new(ErrorKind::InvalidData, "No ligand to save")),
-        },
-        "mol2" => match &self.ligand {
-            Some(lig) => {
-                lig.molecule.to_mol2().save(path)?;
-            }
-            None => return Err(io::Error::new(ErrorKind::InvalidData, "No ligand to save")),
-        }
-    }
-}
-```
 
 Small molecule save and load, Python.
 ```python
@@ -126,13 +83,18 @@ sdf_data.save("test.sdf");
 
 let mol2_data: Mol2 = sdf_data.into();
 mol2_data.save("test.mol2");
+
+
+// Loading Force field parameters:
+let p = Path::new("gaff2.dat")
+let params = ForceFieldParams::load_dat(p)?;
 ```
 
 You can use similar syntax for mmCIF protein files.
 
 ## Amber force fields
 
-Reference the [Amber reference manual](Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)
+Reference the [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)
 for details on how we parse its files, and how to use the results. In some cases, we change the format from
 the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals
 parameters. Structs and fields are documented with reference manual references.
