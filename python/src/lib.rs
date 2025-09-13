@@ -367,5 +367,8 @@ fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
 
     m.add_class::<md_params::ForceFieldParams>()?;
 
+    m.add_function(wrap_pyfunction!(md_params::load_prmtop, m)?)?;
+    m.add_function(wrap_pyfunction!(md_params::save_prmtop, m)?)?;
+
     Ok(())
 }

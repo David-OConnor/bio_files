@@ -1,6 +1,6 @@
 //! For opening Mol2 files. These are common molecular descriptions for ligands.
-//! [This unofficial resource](https://chemicbook.com/2021/02/20/mol2-file-format-explained-for-beginners-part-2.html)
-//! descripts the format.
+//! We implement the [Tripos Mol2 spec](https://zhanggroup.org/DockRMSD/mol2.pdf) variant,
+//! as it's used by Amber Geostd, and has a published spec.
 
 use std::{
     collections::HashMap,
@@ -120,6 +120,7 @@ impl FromStr for ChargeType {
     }
 }
 
+/// This implements the [Tripos Mol2 spec](https://zhanggroup.org/DockRMSD/mol2.pdf).
 // todo: Combine this and SDF into one struct?
 #[derive(Clone, Debug)]
 pub struct Mol2 {

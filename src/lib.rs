@@ -16,7 +16,9 @@ pub mod dat;
 pub mod frcmod;
 pub mod md_params;
 
+mod bond_inference;
 mod mmcif_aux;
+pub mod prmtop;
 
 use std::{
     fmt,
@@ -27,6 +29,7 @@ use std::{
 };
 
 pub use ab1::*;
+pub use bond_inference::create_bonds;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mmcif::*;

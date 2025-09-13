@@ -18,6 +18,8 @@ use std::{
 
 use na_seq::{AminoAcidGeneral, AtomTypeInRes};
 
+use crate::AtomGeneric;
+
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
 #[derive(Debug, Clone)]
 pub struct MassParams {
@@ -310,32 +312,6 @@ pub struct ChargeParams {
     pub ff_type: String,
     pub charge: f32, // partial charge (q_i)
 }
-
-// impl ChargeParams {
-//     /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
-//     /// Note: This comes from a .lib file; not .dat or .frcmod. This differs
-//     /// from the other parsings inthis file.
-//     pub fn from_line(line: &str) -> io::Result<Self> {
-//         let cols: Vec<_> = line.split_whitespace().collect();
-//
-//         if cols.len() < 3 {
-//             return Err(io::Error::new(
-//                 ErrorKind::InvalidData,
-//                 "Not enough cols (Charge).",
-//             ));
-//         }
-//
-//         let atom_type = cols[0].to_string();
-//         let r_min = parse_float(cols[1])?;
-//         let eps = parse_float(cols[2])?;
-//
-//         Ok(Self {
-//             atom_type,
-//             atom_type,
-//             charge
-//         })
-//     }
-// }
 
 /// Top-level lib, dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
 /// for parsing flexibility.
