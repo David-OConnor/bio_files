@@ -109,7 +109,7 @@ impl MmCif {
     }
 
     fn save(&self, path: PathBuf) -> PyResult<()> {
-        self.inner.save(&path)
+        Ok(self.inner.save(&path)?)
     }
 
     #[classmethod]
