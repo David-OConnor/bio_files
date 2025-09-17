@@ -108,10 +108,9 @@ impl MmCif {
         })
     }
 
-    // todo: When implemented in rust.
-    // fn save(&self, path: PathBuf) -> PyResult<()> {
-    //     self.inner.save(&path)
-    // }
+    fn save(&self, path: PathBuf) -> PyResult<()> {
+        self.inner.save(&path)
+    }
 
     #[classmethod]
     fn load(_cls: &Bound<'_, PyType>, path: PathBuf) -> PyResult<Self> {

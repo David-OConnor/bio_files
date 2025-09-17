@@ -121,6 +121,9 @@ impl FromStr for ChargeType {
 }
 
 /// This implements the [Tripos Mol2 spec](https://zhanggroup.org/DockRMSD/mol2.pdf).
+/// It's a format used for small organic molecules, and may include force field names and partial
+/// charges, making it suitable for molecular dynamics applications. This struct will likely
+/// be used as an intermediate format, and converted to something application-specific.
 // todo: Combine this and SDF into one struct?
 #[derive(Clone, Debug)]
 pub struct Mol2 {

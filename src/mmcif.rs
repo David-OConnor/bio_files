@@ -9,7 +9,7 @@ use std::{
     collections::HashMap,
     fs::File,
     io,
-    io::{ErrorKind, Read},
+    io::{ErrorKind, Read, Write},
     path::Path,
     str::FromStr,
     time::Instant,
@@ -24,6 +24,13 @@ use crate::{
     ResidueType,
 };
 
+/// Represents the most commonly-used data from the mmCIF format, used by the RCSB PDB to represent
+/// protein structures. May also be used in other cases, such as molecular dynamics snapshots.
+/// Note that it often does not include bond data or hydrogen atoms; these can be added automatically
+/// in a post-processing step.
+///
+/// This struct will likely
+/// be used as an intermediate format, and converted to something application-specific.
 #[derive(Clone, Debug)]
 pub struct MmCif {
     pub ident: String,
@@ -275,23 +282,117 @@ impl MmCif {
         })
     }
 
-    // todo: Impl `save`.
-    // pub fn save(&self, path: &Path) -> io::Result<()> {
-    //     //todo: Fix this so it outputs mol2 instead of sdf.
-    //     let mut file = File::create(path)?;
-    //
-    //     // todo: Implement this once loading works.
-    //     //
-    //     // // There is a subtlety here. Add that to your parser as well. There are two values
-    //     // // todo in the files we have; this top ident is not the DB id.
-    //     // writeln!(file, "@<TRIPOS>MOLECULE")?;
-    //     // writeln!(file, "{}", self.ident)?;
-    //     // writeln!(file, "{} {}", self.atoms.len(), self.bonds.len())?;
-    //     // writeln!(file, "{}", self.mol_type.to_str())?;
-    //     // writeln!(file, "{}", self.charge_type)?;
-    //
-    //     Ok(())
-    // }
+    // todo: QC this.
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        let mut file = File::create(path)?;
+
+        fn quote_if_needed(s: &str) -> String {
+            if s.is_empty() || s.chars().any(|c| c.is_whitespace()) {
+                let esc = s.replace('\'', "''");
+                format!("'{}'", esc)
+            } else {
+                s.to_string()
+            }
+        }
+
+        let ident = {
+            let id = self.ident.trim();
+            if id.is_empty() { "UNKNOWN" } else { id }
+        };
+
+        // Header + minimal metadata
+        writeln!(file, "data_{}", ident)?;
+        writeln!(file, "_struct.entry_id {}", quote_if_needed(ident))?;
+        if let Some(m) = &self.experimental_method {
+            writeln!(file, "_exptl.method {}", quote_if_needed(&m.to_string()))?;
+        }
+        for (k, v) in &self.metadata {
+            if k == "_struct.entry_id" || k == "_entry.id" || k == "_exptl.method" {
+                continue;
+            }
+            if k.starts_with('_') {
+                writeln!(file, "{} {}", k, quote_if_needed(v))?;
+            }
+        }
+        writeln!(file, "#")?;
+
+        // Build lookups for atom → residue and atom → chain
+        let mut atom_to_res = HashMap::<u32, u32>::new();
+        for r in &self.residues {
+            for &sn in &r.atom_sns {
+                atom_to_res.insert(sn, r.serial_number);
+            }
+        }
+        let mut res_map = HashMap::<u32, &ResidueGeneric>::new();
+        for r in &self.residues {
+            res_map.insert(r.serial_number, r);
+        }
+        let mut atom_to_chain = HashMap::<u32, &str>::new();
+        for c in &self.chains {
+            for &sn in &c.atom_sns {
+                atom_to_chain.insert(sn, &c.id);
+            }
+        }
+
+        // _atom_site loop (matches the columns the loader reads)
+        writeln!(file, "loop_")?;
+        writeln!(file, "_atom_site.group_PDB")?;
+        writeln!(file, "_atom_site.id")?;
+        writeln!(file, "_atom_site.Cartn_x")?;
+        writeln!(file, "_atom_site.Cartn_y")?;
+        writeln!(file, "_atom_site.Cartn_z")?;
+        writeln!(file, "_atom_site.type_symbol")?;
+        writeln!(file, "_atom_site.label_atom_id")?;
+        writeln!(file, "_atom_site.label_comp_id")?;
+        writeln!(file, "_atom_site.label_asym_id")?;
+        writeln!(file, "_atom_site.label_seq_id")?;
+        writeln!(file, "_atom_site.occupancy")?;
+
+        for a in &self.atoms {
+            let group = if a.hetero { "HETATM" } else { "ATOM" };
+            let sym = a.element.to_string();
+            let atom_name = match &a.type_in_res {
+                Some(na_seq::AtomTypeInRes::Hetero(n)) => n.clone(),
+                Some(t) => t.to_string(),
+                None => sym.clone(),
+            };
+            let res_sn = *atom_to_res.get(&a.serial_number).unwrap_or(&0u32);
+            let (res_name, chain_id) = if let Some(r) = res_map.get(&res_sn) {
+                (
+                    r.res_type.to_string(),
+                    atom_to_chain.get(&a.serial_number).copied().unwrap_or("A"),
+                )
+            } else {
+                (
+                    "UNK".to_string(),
+                    atom_to_chain.get(&a.serial_number).copied().unwrap_or("A"),
+                )
+            };
+            let occ_s = match a.occupancy {
+                Some(o) => format!("{:.2}", o),
+                None => "?".to_string(),
+            };
+
+            writeln!(
+                file,
+                "{} {} {:.3} {:.3} {:.3} {} {} {} {} {}",
+                group,
+                a.serial_number,
+                a.posit.x,
+                a.posit.y,
+                a.posit.z,
+                quote_if_needed(&sym),
+                quote_if_needed(&atom_name),
+                quote_if_needed(&res_name),
+                quote_if_needed(chain_id),
+                res_sn,
+            )?;
+            writeln!(file, "{}", occ_s)?;
+        }
+
+        writeln!(file, "#")?;
+        Ok(())
+    }
 
     pub fn load(path: &Path) -> io::Result<Self> {
         let mut file = File::open(path)?;

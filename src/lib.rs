@@ -38,13 +38,22 @@ use na_seq::{AminoAcid, AtomTypeInRes, Element};
 pub use pdbqt::Pdbqt;
 pub use sdf::*;
 
+/// This represents an atom, and can be used for various purposes. It is used in various format-specific
+/// molecules in this library. You may wish to augment the data here with a custom application-specific
+/// format.
 #[derive(Clone, Debug, Default)]
 pub struct AtomGeneric {
+    /// A unique identifier for this atom, within its molecule. This may originate from data in
+    /// mmCIF files, Mol2, SDF files, etc.
     pub serial_number: u32,
     pub posit: Vec3,
     pub element: Element,
+    /// This identifier will be unique within a given residue. For example, within an
+    /// amino acid on a protein. Different residues will have different sets of these.
     /// e.g. "CG1", "CA", "O", "C", "HA", "CD", "C9" etc.
     pub type_in_res: Option<AtomTypeInRes>,
+    /// Used by Amber and other force fields to apply the correct molecular dynamics parameters for
+    /// this atom.
     /// E.g. "c6", "ca", "n3", "ha", "h0" etc, as seen in Mol2 files from AMBER.
     /// e.g.: "ha": hydrogen attached to an aromatic carbon.
     /// "ho": hydrogen on a hydroxyl oxygen
@@ -172,6 +181,8 @@ impl FromStr for BondType {
 #[derive(Clone, Debug)]
 pub struct BondGeneric {
     pub bond_type: BondType,
+    /// You may wish to augment these serial numbers with atom indices in downstream
+    /// applications, for lookup speed.
     pub atom_0_sn: u32,
     pub atom_1_sn: u32,
 }

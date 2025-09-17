@@ -17,7 +17,9 @@ use crate::{
     AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType,
 };
 
-// todo: Combine this and Mol2 into one struct?
+/// It's a format used for small organic molecules, and is a common format on online databases
+/// like PubChem and Drugbank. This struct will likely
+/// be used as an intermediate format, and converted to something application-specific.
 #[derive(Clone, Debug)]
 pub struct Sdf {
     pub ident: String,
