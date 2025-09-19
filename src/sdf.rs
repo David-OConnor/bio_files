@@ -307,6 +307,9 @@ impl Sdf {
             md
         };
 
+        println!("LOADED IDENT: {ident}");
+        println!("MD: {metadata:?}");
+
         Ok(Self {
             ident,
             metadata,

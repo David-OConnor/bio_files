@@ -18,13 +18,11 @@ use std::{
 
 use na_seq::{AminoAcidGeneral, AtomTypeInRes};
 
-use crate::AtomGeneric;
-
-/// Data for a MASS entry: e.g. "CT 12.01100" with optional comment
+/// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
 pub struct MassParams {
     pub atom_type: String,
-    /// AMU
+    /// Atomic mass units (Daltons)
     pub mass: f32,
     // /// ATPOL: Atomic polarizability (Å^3).
     // /// Intended for Slater–Kirkwood or future polarizable models, and unused by Amber (?)
@@ -47,13 +45,6 @@ impl MassParams {
         let atom_type = cols[0].to_string();
         let mass = parse_float(cols[1])?;
 
-        // Skipping polarizability; in for historical reasons?
-        // // Note: This skips comments where this is a missing col[2].
-        // let mut polarizability = 0.0;
-        // if cols.len() >= 3 {
-        //     polarizability = parse_float(cols[2])?;
-        // }
-
         // Note: This skips comments where this is a missing col[2].
         let mut comment = None;
         if cols.len() >= 4 {
@@ -63,7 +54,6 @@ impl MassParams {
         Ok(Self {
             atom_type,
             mass,
-            // polarizability,
             comment,
         })
     }
@@ -124,7 +114,7 @@ pub struct AngleBendingParams {
     pub atom_types: (String, String, String),
     /// Force constant. kcal/mol/rad²
     pub k: f32,
-    /// In degrees.
+    /// In radians.
     pub theta_0: f32,
     pub comment: Option<String>,
 }
@@ -168,9 +158,9 @@ impl AngleBendingParams {
     }
 }
 
-/// Also known as Torsion. Data for both proper, and improper dihedral data.
+/// Also known as Torsion angle.
 ///
-/// Angle between 4 linear covalently-bonded atoms ("dihedral"), or 3 atoms in a hub-and-spoke
+/// Angle between 4 linear covalently-bonded atoms ("proper"), or 3 atoms in a hub-and-spoke
 /// configuration, with atom 3 as the hub ("improper"). In either case, this is the angle between the planes of
 /// atoms 1-2-3, and 2-3-4. (Rotation around the 2-3 bond)
 #[derive(Debug, Clone, Default)]
@@ -180,11 +170,11 @@ pub struct DihedralParams {
     /// Scaling factor used for barrier height.
     /// "Splits the torsion term into individual contributions for
     /// each pair of atoms involved in the torsion."
-    /// Always 1 for improper dihedrdals. (Not present in the Amber files for improper)
+    /// Always 1 for improper dihedrals. (Not present in the Amber files for improper)
     pub divider: u8,
-    /// Also known as V_n., kcal/mol/rad²
+    /// Also known as V_n. kcal/mol.
     pub barrier_height: f32,
-    /// Equilibrium angle, or phase, in radians. Often 0 or τ/2. Maximum (?) energy
+    /// Phase, in radians. Often 0 or τ/2. Minimum energy
     /// is encountered at this value, and other values implied by periodicity.
     /// For example, if this is 0, and periodicity is 3, there is no torsion
     /// force applied for dihedral angles 0, τ/3, and 2τ/3.
@@ -195,7 +185,7 @@ pub struct DihedralParams {
     /// "If the torsion definition has a "negative" periodicity (-2 in the case above), it tells
     /// programs reading the parameter file that additional terms are present for that
     /// particular connectivity.
-    pub periodicity: i8,
+    pub periodicity: u8,
     pub comment: Option<String>,
 }
 
@@ -232,7 +222,10 @@ impl DihedralParams {
 
         let barrier_height_vn = parse_float(cols[col1_i])?;
         let phase = parse_float(cols[col1_i + 1])?.to_radians();
-        let periodicity = parse_float(cols[col1_i + 2])? as i8;
+
+        // A negative periodicity in Amber params indicates that there are additional terms
+        // are present. We ignore those for now.
+        let periodicity = parse_float(cols[col1_i + 2])?.abs() as u8;
 
         // We ignore the remaining cols for now: Source, # of ref geometries used to fit,
         // and RMS deviation of the fit.
@@ -257,16 +250,17 @@ impl DihedralParams {
 }
 
 #[derive(Debug, Clone)]
+/// Represents Lennard Jones parameters. This approximate Pauli Exclusion (i.e. exchange interactions)
+/// with Van Der Waals ones. Note: Amber stores Rmin / 2 in Å. (This is called R star). We convert to σ, which can
+/// be used in more general LJ formulas. The relation: R_min = 2^(1/6) σ. σ = 2 R_star / 2^(1/6)
 /// Amber RM, section 15.1.7
 pub struct LjParams {
     pub atom_type: String,
     /// σ. derived from Van der Waals radius, Å. Note that Amber parameter files use R_min,
-    /// vice σ. This value is σ, which we compute when parsing.
-    ///
-    /// R_min (i, j) = 0.5(R_min_i + R_min_j)
-    /// σ_min (i, j) = 0.5(σ_min_i + σ_min_j)
+    /// vice σ. The value in this field is σ, which we compute when parsing.
     pub sigma: f32,
     /// Energy, kcal/mol. (Represents depth of the potential well).
+    /// σ(i, j) = 0.5 * (σ_i + σ_j)
     /// ε(i, j) = sqrt(ε_i * ε_j)
     pub eps: f32,
 }
@@ -274,7 +268,11 @@ pub struct LjParams {
 impl LjParams {
     /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
     pub fn from_line(line: &str) -> io::Result<Self> {
-        const SIGMA_FACTOR: f32 = 1.122_462_048_309_373; // 2^(1/6)
+        // todo: QC this factor of 2!
+        // 1.122 is 2^(1/6)
+        // todo: We're getting conflicting information on if we should
+        // todo use a factor of 2, or 4 as the prefix here.
+        const SIGMA_FACTOR: f32 = 2. / 1.122_462_048_309_373;
 
         let cols: Vec<_> = line.split_whitespace().collect();
 
@@ -286,10 +284,11 @@ impl LjParams {
         }
 
         let atom_type = cols[0].to_string();
-        let r_min = parse_float(cols[1])?;
+        let r_star = parse_float(cols[1])?;
         let eps = parse_float(cols[2])?;
 
-        let sigma = 2.0 * r_min / SIGMA_FACTOR;
+        println!("Using right one");
+        let sigma = r_star * SIGMA_FACTOR;
 
         Ok(Self {
             atom_type,
@@ -310,7 +309,8 @@ pub struct ChargeParams {
     pub type_in_res: AtomTypeInRes,
     /// "XC", "H1" etc.
     pub ff_type: String,
-    pub charge: f32, // partial charge (q_i)
+    /// Partial charge. Units of elementary charge.
+    pub charge: f32,
 }
 
 /// Top-level lib, dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
