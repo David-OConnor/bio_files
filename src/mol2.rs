@@ -242,7 +242,7 @@ impl Mol2 {
                     atom_name = before_dot.to_string();
                 }
 
-                let element = match Element::from_letter(
+                let mut element = match Element::from_letter(
                     &atom_name
                         .chars()
                         .filter(|c| c.is_ascii_alphabetic())
@@ -258,6 +258,11 @@ impl Mol2 {
                         }
                     }
                 };
+
+                // A manual override. Not Calcium.
+                if atom_name == "CA" {
+                    element = Element::Carbon;
+                }
 
                 let x = cols[2].parse::<f64>().map_err(|_| {
                     io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate")
