@@ -287,7 +287,6 @@ impl LjParams {
         let r_star = parse_float(cols[1])?;
         let eps = parse_float(cols[2])?;
 
-        println!("Using right one");
         let sigma = r_star * SIGMA_FACTOR;
 
         Ok(Self {

@@ -242,7 +242,12 @@ impl Mol2 {
                     atom_name = before_dot.to_string();
                 }
 
-                let element = match Element::from_letter(&atom_name) {
+                let element = match Element::from_letter(
+                    &atom_name
+                        .chars()
+                        .filter(|c| c.is_ascii_alphabetic())
+                        .collect::<String>(),
+                ) {
                     Ok(l) => l,
                     Err(e) => {
                         if atom_name.len() > 1 {
