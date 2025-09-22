@@ -174,7 +174,7 @@ pub struct DihedralParams {
     pub divider: u8,
     /// Also known as V_n. kcal/mol.
     pub barrier_height: f32,
-    /// Phase, in radians. Often 0 or τ/2. Minimum energy
+    /// Phase, in radians. Often 0 or τ/2. Maximum energy
     /// is encountered at this value, and other values implied by periodicity.
     /// For example, if this is 0, and periodicity is 3, there is no torsion
     /// force applied for dihedral angles 0, τ/3, and 2τ/3.
@@ -350,12 +350,15 @@ pub struct ForceFieldParams {
     pub angle: HashMap<(String, String, String), AngleBendingParams>,
     /// Angle between 4 linear covalently-bonded atoms (3 bonds). This is
     /// the angle between the planes of atoms 1-2-3, and 2-3-4. (Rotation around the 2-3 bond)
-    pub dihedral: HashMap<(String, String, String, String), DihedralParams>,
+    /// This is a Vec, as there can be multiple terms for proper dihedrals. (Negative
+    /// periodicity is a flag meaning there are follow-on terms)
+    pub dihedral: HashMap<(String, String, String, String), Vec<DihedralParams>>,
     /// Angle between 4 covalently-bonded atoms (3 bonds), in a hub-and-spoke
     /// arrangement. The third atom is the hub. This is the angle between the planes of
     /// atoms 1-2-3, and 2-3-4. Note that these are generally only included for planar configurations,
     /// and always hold a planar dihedral shape. (e.g. τ/2 with symmetry 2)
-    pub improper: HashMap<(String, String, String, String), DihedralParams>,
+    /// It's possible, but unlikely there can be more than one improper term
+    pub improper: HashMap<(String, String, String, String), Vec<DihedralParams>>,
     pub mass: HashMap<String, MassParams>,
     pub lennard_jones: HashMap<String, LjParams>,
 }
@@ -378,12 +381,20 @@ impl ForceFieldParams {
             result.angle.insert(val.atom_types.clone(), val.clone());
         }
 
+        // Insert, or append, as required. There can be multiple proper dihedral terms.
         for val in &params.dihedral {
-            result.dihedral.insert(val.atom_types.clone(), val.clone());
+            result
+                .dihedral
+                .entry(val.atom_types.clone())
+                .and_modify(|v| v.push(val.clone()))
+                .or_insert_with(|| vec![val.clone()]);
         }
 
         for val in &params.improper {
-            result.improper.insert(val.atom_types.clone(), val.clone());
+            result.improper
+                .entry(val.atom_types.clone())
+                .and_modify(|v| v.push(val.clone()))
+                .or_insert_with(|| vec![val.clone()]);
         }
 
         for val in &params.lennard_jones {
@@ -422,7 +433,7 @@ impl ForceFieldParams {
         &self,
         atom_types: &(String, String, String, String),
         proper: bool, // todo: Experimenting.
-    ) -> Option<&DihedralParams> {
+    ) -> Option<&Vec<DihedralParams>> {
         let a = atom_types.0.as_str();
         let b = atom_types.1.as_str();
         let c = atom_types.2.as_str();
