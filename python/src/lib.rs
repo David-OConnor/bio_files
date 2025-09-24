@@ -3,6 +3,7 @@ use std::str::FromStr;
 use bio_files_rs;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
+mod gro;
 mod md_params;
 mod mmcif;
 mod mol2;
@@ -361,6 +362,7 @@ fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<mmcif::MmCif>()?;
     m.add_class::<mol2::Mol2>()?;
     m.add_class::<sdf::Sdf>()?;
+    m.add_class::<gro::Gro>()?;
     m.add_class::<pdbqt::Pdbqt>()?;
 
     m.add_class::<mol2::MolType>()?;

@@ -48,7 +48,9 @@ impl ForceFieldParamsVec {
                 continue;
             }
 
-            if line.starts_with("END") {
+            /// Ignore lines below; they are metadata. We observe "END" generally, and "####" in
+            /// lipid21.
+            if line.starts_with("END") || line.starts_with("###") {
                 break;
             }
 

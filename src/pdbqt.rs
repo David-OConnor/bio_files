@@ -198,6 +198,7 @@ impl Pdbqt {
                     // temperature_factor,
                     partial_charge,
                     force_field_type: None,
+                    alt_conformation_id: None,
                     // dock_type,
                 });
 

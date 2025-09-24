@@ -302,6 +302,7 @@ impl Mol2 {
                     partial_charge,
                     force_field_type: Some(cols[5].to_string()),
                     hetero: true,
+                    alt_conformation_id: None,
                 });
             }
 

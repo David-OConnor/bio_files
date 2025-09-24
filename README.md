@@ -21,6 +21,9 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - DAT (Amber force field data for small molecules)
 - FRCMOD (Amber force field patch data for small molecules)
 - Amber .lib files, e.g. with charge data for amino acids and proteins.
+- GRO (Gromacs molecules)
+- TOP (Gromacs topology) - WIP
+- 
 
 ### Planned:
 - MTZ (Exists in Daedalus; needs to be decoupled)

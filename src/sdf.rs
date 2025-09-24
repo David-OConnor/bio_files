@@ -132,6 +132,7 @@ impl Sdf {
                 partial_charge: None,
                 force_field_type: None,
                 hetero: true,
+                alt_conformation_id: None,
             });
         }
 
