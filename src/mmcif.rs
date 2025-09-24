@@ -121,6 +121,7 @@ impl MmCif {
                 let c_z = col("_atom_site.Cartn_z")?;
                 let c_el = col("_atom_site.type_symbol")?;
                 let c_name = col("_atom_site.label_atom_id")?;
+                let c_alt_id = col("_atom_site.label_alt_id")?;
                 let c_res = col("_atom_site.label_comp_id")?;
                 let c_chain = col("_atom_site.label_asym_id")?;
                 let c_res_sn = col("_atom_site.label_seq_id")?;
@@ -148,6 +149,12 @@ impl MmCif {
                     let element = Element::from_letter(fields[c_el])?;
                     let atom_name = fields[c_name];
 
+                    let alt_conformation_id = if fields[c_alt_id] == "." {
+                        None
+                    } else {
+                        Some(fields[c_alt_id].to_string())
+                    };
+
                     let type_in_res = if hetero {
                         if !atom_name.is_empty() {
                             Some(AtomTypeInRes::Hetero(atom_name.to_string()))
@@ -172,6 +179,7 @@ impl MmCif {
                         occupancy: occ,
                         partial_charge: None,
                         hetero,
+                        alt_conformation_id,
                     });
 
                     // --------- Residue / Chain bookkeeping -----------

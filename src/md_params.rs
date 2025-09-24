@@ -391,7 +391,8 @@ impl ForceFieldParams {
         }
 
         for val in &params.improper {
-            result.improper
+            result
+                .improper
                 .entry(val.atom_types.clone())
                 .and_modify(|v| v.push(val.clone()))
                 .or_insert_with(|| vec![val.clone()]);

@@ -69,6 +69,9 @@ pub struct AtomGeneric {
     /// ligands.
     pub hetero: bool,
     pub occupancy: Option<f32>,
+    /// Used by mmCIF files to store alternate conformations. If this isn't None, there may
+    /// be, for example, an "A" and "B" variant of this atom at slightly different positions.
+    pub alt_conformation_id: Option<String>,
 }
 
 impl Display for AtomGeneric {
