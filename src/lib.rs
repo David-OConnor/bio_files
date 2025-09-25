@@ -40,6 +40,153 @@ use na_seq::{AminoAcid, AtomTypeInRes, Element};
 pub use pdbqt::Pdbqt;
 pub use sdf::*;
 
+// todo: SHould this be in na_seq?
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+/// Common lipid types, as defined in Amber params.
+/// todo: Label what each of these is.
+pub enum LipidStandard {
+    /// Arachidonoyl chain (20:4 ω-6).
+    Ar,
+    /// Cholesterol.
+    Chl,
+    /// Docosahexaenoyl chain (22:6 ω-3).
+    Dha,
+    /// Linoleoyl chain (18:2 ω-6). (Amber tag: LAL)
+    Lal,
+    /// Myristoyl chain (14:0).
+    My,
+    /// Oleoyl chain (18:1 ω-9).
+    Ol,
+    /// Palmitoyl chain (16:0).
+    Pa,
+    /// Phosphatidylcholine headgroup (PC).
+    Pc,
+    /// Phosphatidylethanolamine headgroup (PE).
+    Pe,
+    /// Phosphatidylinositol headgroup (PI). *Not in lib21.dat.*
+    Pi,
+    /// Phosphatidylglycerol headgroup (PG / PGR). Note: Daedalus currently uses "PG".
+    Pgr,
+    /// Phosphatidylglycerol sulfate / related PG variant (Amber tag: PGS).
+    Pgs,
+    /// Phosphate head (Amber tag: "PH-"; protonation/charge variant used in Amber lipids).
+    Ph,
+    /// Phosphatidylserine headgroup (PS).
+    Ps,
+    /// Stearoyl chain (18:0). (Amber tag: SA)
+    Sa,
+    /// Sphingomyelin (SPM).
+    Spm,
+    /// Stearoyl chain (18:0). (Amber tag: ST)
+    St,
+    /// Cardiolipin (diphosphatidylglycerol). *Not in lib21.dat.*
+    Cardiolipin,
+}
+
+impl Display for LipidStandard {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let name = match self {
+            Self::Ar => "Ar",
+            Self::Chl => "Chl",
+            Self::Dha => "Dha",
+            Self::Lal => "Lal",
+            Self::My => "My",
+            Self::Ol => "Ol",
+            Self::Pa => "Pa",
+            Self::Pc => "Pc",
+            Self::Pe => "Pe",
+            Self::Pi => "Pi", // not in lib21.dat
+            Self::Pgr => "Pgr",
+            Self::Pgs => "Pgs",
+            Self::Ph => "Ph", // corresponds to "PH-"
+            Self::Ps => "Ps",
+            Self::Sa => "Sa",
+            Self::Spm => "Spm",
+            Self::St => "St",
+            Self::Cardiolipin => "Cardiolipin", // not in lib21.dat
+        };
+
+        write!(f, "{name}")
+    }
+}
+
+impl FromStr for LipidStandard {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_uppercase().as_ref() {
+            // lib21.dat tags
+            "AR" => Self::Ar,
+            "CHL" => Self::Chl,
+            "DHA" => Self::Dha,
+            "LAL" => Self::Lal,
+            "MY" => Self::My,
+            "OL" => Self::Ol,
+            "PA" => Self::Pa,
+            "PC" => Self::Pc,
+            "PE" => Self::Pe,
+            "PGR" => Self::Pgr,
+            "PGS" => Self::Pgs,
+            "PH-" => Self::Ph,
+            "PS" => Self::Ps,
+            "SA" => Self::Sa,
+            "SPM" => Self::Spm,
+            "ST" => Self::St,
+            // Common aliases / non-lib21 extras
+            "PI" => Self::Pi, // not in lib21.dat
+            "CARDIOLIPIN" | "CL" | "CDL" | "CDL2" => Self::Cardiolipin, // tood; Not sure.
+            _ => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Unknown lipid standard: '{s}'"),
+                ));
+            }
+        })
+    }
+}
+
+// todo: Move this to NA/Seq too likely (even more likely than LipidStandard)
+#[derive(Clone, PartialEq, Debug)]
+pub enum AtomTypeInLipid {
+    // todo: Remove this wrapping, and use a plain string if it makmes sense
+    Val(String),
+    // todo: This may be the wrong column
+    // Ca,
+    // Cb,
+    // Cc,
+    // Cd,
+    // Hb,
+    // Hl,
+    // He,
+    // Ho,
+    // Hx,
+    // Pa,
+    // Oc,
+    // Oh,
+    // Op,
+    // Os,
+    // Ot,
+    // H(String),
+    // /// E.g. ligands and water molecules.
+    // Hetero(String),
+}
+
+impl Display for AtomTypeInLipid {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Val(s) => write!(f, "{s}"),
+        }
+    }
+}
+
+impl FromStr for AtomTypeInLipid {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::Val(s.to_owned()))
+    }
+}
+
 /// This represents an atom, and can be used for various purposes. It is used in various format-specific
 /// molecules in this library. You may wish to augment the data here with a custom application-specific
 /// format.

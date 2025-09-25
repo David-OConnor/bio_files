@@ -18,6 +18,8 @@ use std::{
 
 use na_seq::{AminoAcidGeneral, AtomTypeInRes};
 
+use crate::{AtomTypeInLipid, LipidStandard};
+
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
 pub struct MassParams {
@@ -299,7 +301,7 @@ impl LjParams {
 
 #[derive(Clone, Debug)]
 pub struct ChargeParams {
-    /// The residue-specific ID. We use this value to map forcefield type
+    /// For proteins. The residue-specific ID. We use this value to map forcefield type
     /// to atoms loaded from mmCIF etc; these will have this `type_in_res`, but not
     /// an Amber ff type. We apply the charge here to the atom based on its `type_in_res` and AA type,
     /// and apply its FF type.
@@ -312,7 +314,15 @@ pub struct ChargeParams {
     pub charge: f32,
 }
 
-/// Top-level lib, dat or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
+/// See notes on `ChargeParams`; equivalent here.
+#[derive(Clone, Debug)]
+pub struct ChargeParamsLipid {
+    pub type_in_res: AtomTypeInLipid,
+    pub ff_type: String,
+    pub charge: f32,
+}
+
+/// Top-level lib, dat, or frcmod data. We store the name-tuples in fields, vice as HashMaps here,
 /// for parsing flexibility.
 ///
 /// Note that we don't include partial charges here, as they come from Mol2 files; this struct
@@ -577,6 +587,88 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, V
 
             result.get_mut(res).unwrap().push(ChargeParams {
                 type_in_res: AtomTypeInRes::from_str(&type_in_res)?,
+                ff_type,
+                charge,
+            });
+        }
+    }
+
+    Ok(result)
+}
+
+// todo: This is DRY with the parse_amino_charges fn above. Fix it. Too much repetition for too little diff.
+pub fn parse_lipid_charges(
+    text: &str,
+) -> io::Result<HashMap<LipidStandard, Vec<ChargeParamsLipid>>> {
+    enum Mode {
+        Scan,                           // not inside an atoms table
+        InAtoms { res: LipidStandard }, // currently reading atom lines for this residue
+    }
+
+    let mut state = Mode::Scan;
+    let mut result: HashMap<LipidStandard, Vec<ChargeParamsLipid>> = HashMap::new();
+
+    let lines: Vec<&str> = text.lines().collect();
+
+    for line in lines {
+        let ltrim = line.trim_start();
+
+        // Section headers
+        if let Some(rest) = ltrim.strip_prefix("!entry.") {
+            state = Mode::Scan;
+
+            if let Some((tag, tail)) = rest.split_once('.') {
+                // We only care about "<RES>.unit.atoms table"
+                if tail.starts_with("unit.atoms table") {
+                    let Ok(aa) = LipidStandard::from_str(tag) else {
+                        return Err(io::Error::new(
+                            ErrorKind::InvalidData,
+                            format!("Unable to parse lipid from lib: {tag}"),
+                        ));
+                    };
+
+                    state = Mode::InAtoms { res: aa };
+
+                    result.entry(aa).or_default(); // make sure map key exists
+                }
+            }
+            continue;
+        }
+
+        // If inside atoms table, parse data line
+        if let Mode::InAtoms { ref res } = state {
+            // tables end when we hit an empty line or a comment
+            if ltrim.is_empty() || ltrim.starts_with('!') {
+                state = Mode::Scan;
+                continue;
+            }
+
+            let mut tokens = Vec::<&str>::new();
+            let mut in_quote = false;
+            let mut start = 0usize;
+            let bytes = ltrim.as_bytes();
+            for (i, &b) in bytes.iter().enumerate() {
+                match b {
+                    b'"' => in_quote = !in_quote,
+                    b' ' | b'\t' if !in_quote => {
+                        if start < i {
+                            tokens.push(&ltrim[start..i]);
+                        }
+                        start = i + 1;
+                    }
+                    _ => {}
+                }
+            }
+            if start < ltrim.len() {
+                tokens.push(&ltrim[start..]);
+            }
+
+            let type_in_res = tokens[0].trim_matches('"').to_string();
+            let ff_type = tokens[1].trim_matches('"').to_string();
+            let charge = parse_float(tokens.last().unwrap())?;
+
+            result.get_mut(res).unwrap().push(ChargeParamsLipid {
+                type_in_res: AtomTypeInLipid::from_str(&type_in_res)?,
                 ff_type,
                 charge,
             });
