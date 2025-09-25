@@ -190,16 +190,10 @@ impl Pdbqt {
                     posit: Vec3 { x, y, z },
                     element,
                     type_in_res: Some(type_in_res),
-                    // role,
-                    // residue: None,
-                    // chain: None,
                     hetero,
                     occupancy,
-                    // temperature_factor,
                     partial_charge,
-                    force_field_type: None,
-                    alt_conformation_id: None,
-                    // dock_type,
+                    ..Default::default()
                 });
 
                 // atoms.push(Atom {

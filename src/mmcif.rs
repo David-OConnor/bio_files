@@ -175,11 +175,10 @@ impl MmCif {
                         posit: Vec3::new(x, y, z),
                         element,
                         type_in_res,
-                        force_field_type: None,
                         occupancy: occ,
-                        partial_charge: None,
                         hetero,
                         alt_conformation_id,
+                        ..Default::default()
                     });
 
                     // --------- Residue / Chain bookkeeping -----------

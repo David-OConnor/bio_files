@@ -125,14 +125,10 @@ impl Sdf {
             atoms.push(AtomGeneric {
                 // SDF doesn't explicitly include incices.
                 serial_number: (i - first_atom_line) as u32 + 1,
-                type_in_res: None,
                 posit: Vec3 { x, y, z }, // or however you store coordinates
                 element: Element::from_letter(element)?,
-                occupancy: None,
-                partial_charge: None,
-                force_field_type: None,
                 hetero: true,
-                alt_conformation_id: None,
+                ..Default::default()
             });
         }
 

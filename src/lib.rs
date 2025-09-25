@@ -145,47 +145,47 @@ impl FromStr for LipidStandard {
     }
 }
 
-// todo: Move this to NA/Seq too likely (even more likely than LipidStandard)
-#[derive(Clone, PartialEq, Debug)]
-pub enum AtomTypeInLipid {
-    // todo: Remove this wrapping, and use a plain string if it makmes sense
-    Val(String),
-    // todo: This may be the wrong column
-    // Ca,
-    // Cb,
-    // Cc,
-    // Cd,
-    // Hb,
-    // Hl,
-    // He,
-    // Ho,
-    // Hx,
-    // Pa,
-    // Oc,
-    // Oh,
-    // Op,
-    // Os,
-    // Ot,
-    // H(String),
-    // /// E.g. ligands and water molecules.
-    // Hetero(String),
-}
-
-impl Display for AtomTypeInLipid {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Val(s) => write!(f, "{s}"),
-        }
-    }
-}
-
-impl FromStr for AtomTypeInLipid {
-    type Err = io::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::Val(s.to_owned()))
-    }
-}
+// // todo: Move this to NA/Seq too likely (even more likely than LipidStandard)
+// #[derive(Clone, PartialEq, Debug)]
+// pub enum AtomTypeInLipid {
+//     // todo: Remove this wrapping, and use a plain string if it makmes sense
+//     Val(String),
+//     // todo: This may be the wrong column
+//     // Ca,
+//     // Cb,
+//     // Cc,
+//     // Cd,
+//     // Hb,
+//     // Hl,
+//     // He,
+//     // Ho,
+//     // Hx,
+//     // Pa,
+//     // Oc,
+//     // Oh,
+//     // Op,
+//     // Os,
+//     // Ot,
+//     // H(String),
+//     // /// E.g. ligands and water molecules.
+//     // Hetero(String),
+// }
+//
+// impl Display for AtomTypeInLipid {
+//     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+//         match self {
+//             Self::Val(s) => write!(f, "{s}"),
+//         }
+//     }
+// }
+//
+// impl FromStr for AtomTypeInLipid {
+//     type Err = io::Error;
+//
+//     fn from_str(s: &str) -> Result<Self, Self::Err> {
+//         Ok(Self::Val(s.to_owned()))
+//     }
+// }
 
 /// This represents an atom, and can be used for various purposes. It is used in various format-specific
 /// molecules in this library. You may wish to augment the data here with a custom application-specific
@@ -201,6 +201,8 @@ pub struct AtomGeneric {
     /// amino acid on a protein. Different residues will have different sets of these.
     /// e.g. "CG1", "CA", "O", "C", "HA", "CD", "C9" etc.
     pub type_in_res: Option<AtomTypeInRes>,
+    /// There are too many variants of this (with different numbers) to use an enum effectively
+    pub type_in_res_lipid: Option<String>,
     /// Used by Amber and other force fields to apply the correct molecular dynamics parameters for
     /// this atom.
     /// E.g. "c6", "ca", "n3", "ha", "h0" etc, as seen in Mol2 files from AMBER.

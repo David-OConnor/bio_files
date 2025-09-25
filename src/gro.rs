@@ -170,14 +170,10 @@ impl Gro {
 
             atoms.push(AtomGeneric {
                 serial_number,
-                type_in_res: None, // todo: A/R.
                 posit,
                 element,
-                occupancy: None,
-                partial_charge: None,
-                force_field_type: None,
                 hetero: true,
-                alt_conformation_id: None,
+                ..Default::default()
             });
 
             residues[res_idx].atom_sns.push(serial_number);

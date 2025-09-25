@@ -298,11 +298,10 @@ impl Mol2 {
                     type_in_res,
                     posit: Vec3 { x, y, z }, // or however you store coordinates
                     element,
-                    occupancy: None,
                     partial_charge,
                     force_field_type: Some(cols[5].to_string()),
                     hetero: true,
-                    alt_conformation_id: None,
+                    ..Default::default()
                 });
             }
 

@@ -16,9 +16,10 @@ use std::{
     str::FromStr,
 };
 
-use na_seq::{AminoAcidGeneral, AtomTypeInRes};
+use lin_alg::f64::Vec3;
+use na_seq::{AminoAcidGeneral, AtomTypeInRes, Element};
 
-use crate::{AtomTypeInLipid, LipidStandard};
+use crate::{AtomGeneric, BondGeneric, BondType, LipidStandard};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
@@ -317,7 +318,8 @@ pub struct ChargeParams {
 /// See notes on `ChargeParams`; equivalent here.
 #[derive(Clone, Debug)]
 pub struct ChargeParamsLipid {
-    pub type_in_res: AtomTypeInLipid,
+    // pub type_in_res: AtomTypeInLipid,
+    pub type_in_res: String,
     pub ff_type: String,
     pub charge: f32,
 }
@@ -668,7 +670,8 @@ pub fn parse_lipid_charges(
             let charge = parse_float(tokens.last().unwrap())?;
 
             result.get_mut(res).unwrap().push(ChargeParamsLipid {
-                type_in_res: AtomTypeInLipid::from_str(&type_in_res)?,
+                // type_in_res: AtomTypeInLipid::from_str(&type_in_res)?,
+                type_in_res,
                 ff_type,
                 charge,
             });
@@ -687,4 +690,221 @@ pub fn load_amino_charges(path: &Path) -> io::Result<HashMap<AminoAcidGeneral, V
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
     parse_amino_charges(&data_str)
+}
+
+// todo: Consider an amino acid variant of this too!
+/// Creates a set of lipid atom and bonds for all items in a `.lib` file, e.g. `lipid21.lib` from Amber.
+/// The hashmap key is the lipid name, e.g. "AR", "CHL" etc.
+pub fn load_lipid_templates(
+    text: &str,
+) -> io::Result<HashMap<String, (Vec<AtomGeneric>, Vec<BondGeneric>)>> {
+    #[derive(Clone)]
+    struct AtomRow {
+        name: String,    // per-residue atom name (eg. "C116")
+        ff_type: String, // Amber/GAFF atom type (eg. "cD")
+        z: u32,          // atomic number
+        q: f64,          // partial charge
+    }
+
+    #[derive(Default)]
+    struct Work {
+        atoms: Vec<AtomRow>,
+        positions: Vec<Vec3>,
+        bonds: Vec<(u32, u32, u32)>, // (a1, a2, flag)
+    }
+
+    enum Sec {
+        Atoms,
+        Positions,
+        Connectivity,
+    }
+
+    let mut out: HashMap<String, (Vec<AtomGeneric>, Vec<BondGeneric>)> = HashMap::new();
+    let mut cur_key: Option<String> = None;
+    let mut cur_sec: Option<Sec> = None;
+    let mut cur: Work = Work::default();
+
+    let element_from_z = |z: u32| -> Element {
+        match z {
+            1 => Element::Hydrogen,
+            6 => Element::Carbon,
+            7 => Element::Nitrogen,
+            8 => Element::Oxygen,
+            9 => Element::Fluorine,
+            15 => Element::Phosphorus,
+            16 => Element::Sulfur,
+            17 => Element::Chlorine,
+            35 => Element::Bromine,
+            53 => Element::Iodine,
+            _ => Element::Tellurium, // fallback; adjust if you have a dedicated Unknown
+        }
+    };
+
+    let bond_from_flag = |f: u32| -> BondType {
+        match f {
+            1 => BondType::Single,
+            2 => BondType::Double,
+            3 => BondType::Triple,
+            // Add/adjust if you encode aromatic or order via other bits
+            _ => BondType::Single,
+        }
+    };
+
+    let mut finalize = |key: Option<String>, work: &mut Work| {
+        if let Some(k) = key {
+            if !work.atoms.is_empty() {
+                let n = work.atoms.len();
+
+                // Ensure positions length
+                if work.positions.len() < n {
+                    work.positions.extend(
+                        std::iter::repeat_with(|| Vec3::new(0.0, 0.0, 0.0))
+                            .take(n - work.positions.len()),
+                    );
+                }
+
+                // Build atoms
+                let atoms: Vec<AtomGeneric> = work
+                    .atoms
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ar)| AtomGeneric {
+                        serial_number: (i as u32) + 1,
+                        posit: work.positions[i],
+                        element: element_from_z(ar.z),
+                        type_in_res: None,
+                        type_in_res_lipid: Some(ar.name.clone()),
+                        force_field_type: Some(ar.ff_type.clone()),
+                        partial_charge: Some(ar.q as f32),
+                        hetero: false,
+                        occupancy: None,
+                        alt_conformation_id: None,
+                    })
+                    .collect();
+
+                // Build bonds
+                let bonds: Vec<BondGeneric> = work
+                    .bonds
+                    .iter()
+                    .map(|&(a1, a2, fl)| BondGeneric {
+                        bond_type: bond_from_flag(fl),
+                        atom_0_sn: a1 as u32,
+                        atom_1_sn: a2 as u32,
+                    })
+                    .collect();
+
+                out.insert(k, (atoms, bonds));
+            }
+            *work = Work::default();
+        }
+    };
+
+    for line in text.lines() {
+        let l = line.trim_start();
+
+        if let Some(rest) = l.strip_prefix("!entry.") {
+            // New entry section header
+            // Forms we care about:
+            // !entry.<NAME>.unit.atoms table ...
+            // !entry.<NAME>.unit.positions table ...
+            // !entry.<NAME>.unit.connectivity table ...
+            // Extract key = between "!entry." and ".unit."
+            if let Some(dot_unit_idx) = rest.find(".unit.") {
+                let key = &rest[..dot_unit_idx];
+                let after_unit = &rest[dot_unit_idx + ".unit.".len()..];
+
+                // If switching to a new NAME (key) and we already had a current key, finalize the previous lipid
+                let key_changed = match &cur_key {
+                    Some(k) => k != key,
+                    None => true,
+                };
+                if key_changed {
+                    finalize(cur_key.take(), &mut cur);
+                    cur_key = Some(key.to_string());
+                }
+
+                if after_unit.starts_with("atoms table") {
+                    cur_sec = Some(Sec::Atoms);
+                    continue;
+                } else if after_unit.starts_with("positions table") {
+                    cur_sec = Some(Sec::Positions);
+                    continue;
+                } else if after_unit.starts_with("connectivity table") {
+                    cur_sec = Some(Sec::Connectivity);
+                    continue;
+                } else {
+                    // Section we don't parse; leave state None so we skip rows
+                    cur_sec = None;
+                    continue;
+                }
+            } else {
+                // Some other entry; ignore
+                cur_sec = None;
+                continue;
+            }
+        }
+
+        match cur_sec {
+            Some(Sec::Atoms) => {
+                // Expect:  "NAME" "TYPE" 0 1 131073 1 6 0.039100
+                // Grab the two quoted fields first.
+                let bytes = l.as_bytes();
+                let mut qpos = Vec::with_capacity(4);
+                for (i, &b) in bytes.iter().enumerate() {
+                    if b == b'"' {
+                        qpos.push(i);
+                    }
+                    if qpos.len() == 4 {
+                        break;
+                    }
+                }
+                if qpos.len() == 4 {
+                    let name = &l[qpos[0] + 1..qpos[1]];
+                    let ff_type = &l[qpos[2] + 1..qpos[3]];
+                    let tail = &l[qpos[3] + 1..];
+                    // Remaining numeric tokens; we need elmnt (5th) and chg (6th) after the two quoted tokens
+                    // Layout: typex resx flags seq elmnt chg
+                    let nums: Vec<&str> = tail.split_whitespace().collect();
+                    if nums.len() >= 6 {
+                        let elmnt = nums[4].parse::<u32>().unwrap_or(0);
+                        let chg = nums[5].parse::<f64>().unwrap_or(0.0);
+                        cur.atoms.push(AtomRow {
+                            name: name.to_string(),
+                            ff_type: ff_type.to_string(),
+                            z: elmnt,
+                            q: chg,
+                        });
+                    }
+                }
+            }
+            Some(Sec::Positions) => {
+                // Expect three floats per line
+                let mut it = l.split_whitespace();
+                if let (Some(x), Some(y), Some(z)) = (it.next(), it.next(), it.next()) {
+                    if let (Ok(xv), Ok(yv), Ok(zv)) =
+                        (x.parse::<f64>(), y.parse::<f64>(), z.parse::<f64>())
+                    {
+                        cur.positions.push(Vec3::new(xv, yv, zv));
+                    }
+                }
+            }
+            Some(Sec::Connectivity) => {
+                // Expect three ints: atom1x atom2x flags
+                let mut it = l.split_whitespace();
+                if let (Some(a1), Some(a2), Some(flg)) = (it.next(), it.next(), it.next()) {
+                    if let (Ok(a1v), Ok(a2v), Ok(fv)) =
+                        (a1.parse::<u32>(), a2.parse::<u32>(), flg.parse::<u32>())
+                    {
+                        cur.bonds.push((a1v, a2v, fv));
+                    }
+                }
+            }
+            None => {}
+        }
+    }
+
+    // Finalize last lipid
+    finalize(cur_key.take(), &mut cur);
+
+    Ok(out)
 }
