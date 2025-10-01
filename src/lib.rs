@@ -41,13 +41,15 @@ pub use pdbqt::Pdbqt;
 pub use sdf::*;
 
 // todo: SHould this be in na_seq?
+/// Common lipid types, as defined in Amber params. For phospholipics, chains and head groups
+/// are separate entries, and can be combined.
+/// The repr assumes ingested from lipid21 in a deterministic (e.g. alphabetcial) order.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-/// Common lipid types, as defined in Amber params.
-/// todo: Label what each of these is.
+#[repr(usize)]
 pub enum LipidStandard {
     /// Arachidonoyl chain (20:4 ω-6).
     Ar,
-    /// Cholesterol.
+    /// Cholesterol
     Chl,
     /// Docosahexaenoyl chain (22:6 ω-3).
     Dha,
@@ -63,8 +65,6 @@ pub enum LipidStandard {
     Pc,
     /// Phosphatidylethanolamine headgroup (PE).
     Pe,
-    /// Phosphatidylinositol headgroup (PI). *Not in lib21.dat.*
-    Pi,
     /// Phosphatidylglycerol headgroup (PG / PGR). Note: Daedalus currently uses "PG".
     Pgr,
     /// Phosphatidylglycerol sulfate / related PG variant (Amber tag: PGS).
@@ -79,6 +79,8 @@ pub enum LipidStandard {
     Spm,
     /// Stearoyl chain (18:0). (Amber tag: ST)
     St,
+    /// Phosphatidylinositol headgroup (PI). *Not in lib21.dat.*
+    Pi,
     /// Cardiolipin (diphosphatidylglycerol). *Not in lib21.dat.*
     Cardiolipin,
 }
@@ -95,7 +97,6 @@ impl Display for LipidStandard {
             Self::Pa => "Pa",
             Self::Pc => "Pc",
             Self::Pe => "Pe",
-            Self::Pi => "Pi", // not in lib21.dat
             Self::Pgr => "Pgr",
             Self::Pgs => "Pgs",
             Self::Ph => "Ph", // corresponds to "PH-"
@@ -103,6 +104,7 @@ impl Display for LipidStandard {
             Self::Sa => "Sa",
             Self::Spm => "Spm",
             Self::St => "St",
+            Self::Pi => "Pi", // not in lib21.dat
             Self::Cardiolipin => "Cardiolipin", // not in lib21.dat
         };
 

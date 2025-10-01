@@ -221,9 +221,9 @@ impl MmCif {
 
             if line.starts_with('_') {
                 if let Some((tag, val)) = line.split_once(char::is_whitespace) {
-                    metadata.insert(tag.to_string(), val.trim_matches('\'').to_string());
+                    metadata.insert(tag.to_string(), val.trim_matches('\'').to_string().trim().to_string());
                 } else {
-                    metadata.insert(line.to_string(), String::new());
+                    metadata.insert(line.to_string().trim().to_string(), String::new());
                 }
             }
 
