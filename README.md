@@ -3,8 +3,7 @@
 [![Crate](https://img.shields.io/crates/v/bio_files.svg)](https://crates.io/crates/bio_files)
 [![Docs](https://docs.rs/bio_files/badge.svg)](https://docs.rs/bio_files)
 [![PyPI](https://img.shields.io/pypi/v/biology-files.svg)](https://pypi.org/project/biology-files)
-
-[//]: # ([![DOI]&#40;https://zenodo.org/badge/DOI/10.5281/zenodo.15616833.svg&#41;]&#40;https://doi.org/10.5281/zenodo.15616833&#41;)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17445294.svg)](https://doi.org/10.5281/zenodo.17445294)
 
 
 This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
@@ -123,6 +122,7 @@ let dm = DensityMap::load(path)?;
 
 You can use similar syntax for mmCIF protein files.
 
+
 ## Amber force fields
 
 Reference the [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf) 
@@ -133,7 +133,6 @@ parameters. Structs and fields are documented with reference manual references.
 The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching parameters,
 angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups 
 for your application. 
-
 
 Note that the above examples expect that your application has a struct representing the molecule that has
 `From<Mol2>`, and `to_mol2(&self)` (etc) methods. The details of these depend on the application. For example:
