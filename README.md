@@ -4,6 +4,8 @@
 [![Docs](https://docs.rs/bio_files/badge.svg)](https://docs.rs/bio_files)
 [![PyPI](https://img.shields.io/pypi/v/biology-files.svg)](https://pypi.org/project/biology-files)
 
+[//]: # ([![DOI]&#40;https://zenodo.org/badge/DOI/10.5281/zenodo.15616833.svg&#41;]&#40;https://doi.org/10.5281/zenodo.15616833&#41;)
+
 
 This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
 on data structures that are specific to each file format; you will need to convert to and from the structures
@@ -13,22 +15,34 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 
 ### Supported formats:
 - mmCIF (Protein atom, residue, chain, and related data like secondary structure)
+- mmCIF (structure factors / 2fo-fc: Electron density data, raw)
 - Mol2 (Small molecules, e.g. ligands)
 - SDF (Small molecules, e.g. ligands)
 - PDBQT (Small molecules, e.g. ligands. Includes docking-specific fields.)
-- Map (Electron density, e.g. from crystallography, Cryo EM)
+- Map (Electron density, e.g. from crystallography, Cryo EM. Processed using Fourier transforms)
 - AB1 (Sequence tracing)
 - DAT (Amber force field data for small molecules)
 - FRCMOD (Amber force field patch data for small molecules)
 - Amber .lib files, e.g. with charge data for amino acids and proteins.
 - GRO (Gromacs molecules)
 - TOP (Gromacs topology) - WIP
-- 
+
 
 ### Planned:
 - MTZ (Exists in Daedalus; needs to be decoupled)
 - DNA (Exists in PlasCAD; needs to be decoupled)
-- CIF structure formats (2fo-fc etc) (Exists in Daedalus; needs to be decoupled)
+
+
+## Generic data types
+This library includes a number of relatively generic data types which are returned by various load functions,
+and required to save data. These may be used in your application directly, or converted into a more specific
+format. Examples:
+
+  - [AtomGeneric](https://docs.rs/bio_files/latest/bio_files/struct.AtomGeneric.html)
+  - [BondGeneric](https://docs.rs/bio_files/latest/bio_files/struct.BondGeneric.html)
+  - [ResidueGeneric](https://docs.rs/bio_files/latest/bio_files/struct.ResidueGeneric.html)
+  - [BondType](https://docs.rs/bio_files/latest/bio_files/enum.BondType.html)
+  - [LipidStandard](https://docs.rs/bio_files/latest/bio_files/enum.LipidStandard.html)
 
 
 For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do not plan to support this format, due to this high quality library.
@@ -41,6 +55,7 @@ using the [API docs](https://docs.rs/bio_files), or your IDE. These structs gene
 `load()` accept `&Path`.
 The Force Field formats use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
 
+
 ## Serial numbers
 Serial numbers for atoms, residues, secondary structure, and chains are generally pulled directly from atom data files
 (mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as `Vec<u32>`, with the `u32` being the serial number.
@@ -51,7 +66,6 @@ an atom's in, in your derived Atom struct).
 
 
 ## Example use
-
 
 Small molecule save and load, Python.
 ```python
@@ -91,6 +105,20 @@ mol2_data.save("test.mol2");
 // Loading Force field parameters:
 let p = Path::new("gaff2.dat")
 let params = ForceFieldParams::load_dat(p)?;
+
+
+// Load electron density structure factors data, to be processed with a FFT:
+let p = Path::new("8s6p_validation_2fo-fc_map_coef.cif")
+let data = CifStructureFactors::new_from_path(path)?;
+
+// These functions aren't included; an example of turning loaded structure factor data
+// into a density map.
+let mut fft_planner = FftPlanner::new();
+let dm = density_map_from_mmcif(&data, &mut fft_planner)?;
+
+// Or if you have a Map file:
+let p = Path::new("8s6p.map")
+let dm = DensityMap::load(path)?;
 ```
 
 You can use similar syntax for mmCIF protein files.
