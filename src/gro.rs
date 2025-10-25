@@ -13,7 +13,7 @@ use lin_alg::f64::Vec3;
 use na_seq::Element;
 
 use crate::{
-    AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType,
+    AtomGeneric, BondGeneric, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType,
 };
 
 #[derive(Clone, Debug)]
@@ -184,7 +184,7 @@ impl Gro {
             let parts: Vec<&str> = box_line.split_whitespace().collect();
             if !parts.is_empty() {
                 // Typical GRO has 3 floats (triclinic can have 9, we only take 3)
-                let mut nums = parts
+                let nums = parts
                     .iter()
                     .filter_map(|s| s.parse::<f64>().ok())
                     .collect::<Vec<_>>();

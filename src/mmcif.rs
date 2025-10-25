@@ -10,7 +10,7 @@ use std::{
     fs,
     fs::File,
     io,
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     path::Path,
     str::FromStr,
     time::Instant,

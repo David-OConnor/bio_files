@@ -788,8 +788,8 @@ pub fn load_lipid_templates(
                     .iter()
                     .map(|&(a1, a2, fl)| BondGeneric {
                         bond_type: bond_from_flag(fl),
-                        atom_0_sn: a1 as u32,
-                        atom_1_sn: a2 as u32,
+                        atom_0_sn: a1,
+                        atom_1_sn: a2,
                     })
                     .collect();
 
@@ -880,23 +880,21 @@ pub fn load_lipid_templates(
             Some(Sec::Positions) => {
                 // Expect three floats per line
                 let mut it = l.split_whitespace();
-                if let (Some(x), Some(y), Some(z)) = (it.next(), it.next(), it.next()) {
-                    if let (Ok(xv), Ok(yv), Ok(zv)) =
+                if let (Some(x), Some(y), Some(z)) = (it.next(), it.next(), it.next())
+                    && let (Ok(xv), Ok(yv), Ok(zv)) =
                         (x.parse::<f64>(), y.parse::<f64>(), z.parse::<f64>())
-                    {
-                        cur.positions.push(Vec3::new(xv, yv, zv));
-                    }
+                {
+                    cur.positions.push(Vec3::new(xv, yv, zv));
                 }
             }
             Some(Sec::Connectivity) => {
                 // Expect three ints: atom1x atom2x flags
                 let mut it = l.split_whitespace();
-                if let (Some(a1), Some(a2), Some(flg)) = (it.next(), it.next(), it.next()) {
-                    if let (Ok(a1v), Ok(a2v), Ok(fv)) =
+                if let (Some(a1), Some(a2), Some(flg)) = (it.next(), it.next(), it.next())
+                    && let (Ok(a1v), Ok(a2v), Ok(fv)) =
                         (a1.parse::<u32>(), a2.parse::<u32>(), flg.parse::<u32>())
-                    {
-                        cur.bonds.push((a1v, a2v, fv));
-                    }
+                {
+                    cur.bonds.push((a1v, a2v, fv));
                 }
             }
             None => {}

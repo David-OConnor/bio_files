@@ -6,7 +6,7 @@ use std::{
     fs,
     fs::File,
     io,
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     path::Path,
     str::FromStr,
 };
@@ -175,12 +175,12 @@ impl Sdf {
                     pubchem_cid = Some(v);
                 }
             }
-            if line.contains("> <DATABASE_ID>") {
-                if let Some(value_line) = lines.get(i + 1) {
-                    let value = value_line.trim();
-                    if !value.is_empty() {
-                        drugbank_id = Some(value.to_string());
-                    }
+            if line.contains("> <DATABASE_ID>")
+                && let Some(value_line) = lines.get(i + 1)
+            {
+                let value = value_line.trim();
+                if !value.is_empty() {
+                    drugbank_id = Some(value.to_string());
                 }
             }
         }
@@ -234,71 +234,67 @@ impl Sdf {
                 if line == "$$$$" {
                     break;
                 }
-                if line.starts_with('>') {
-                    if let (Some(l), Some(r)) = (line.find('<'), line.rfind('>')) {
-                        if r > l + 1 {
-                            let key = &line[l + 1..r];
-                            idx += 1;
+                if line.starts_with('>')
+                    && let (Some(l), Some(r)) = (line.find('<'), line.rfind('>'))
+                    && r > l + 1
+                {
+                    let key = &line[l + 1..r];
+                    idx += 1;
 
-                            let mut vals: Vec<&str> = Vec::new();
-                            while idx < lines.len() {
-                                let v = lines[idx];
-                                let v_trim = v.trim_end();
-                                if v_trim.is_empty()
-                                    || v_trim == "$$$$"
-                                    || v_trim.starts_with("> <")
-                                {
-                                    break;
-                                }
-                                vals.push(v_trim);
-                                idx += 1;
-                            }
-                            md.insert(key.to_string(), vals.join("\n"));
+                    let mut vals: Vec<&str> = Vec::new();
+                    while idx < lines.len() {
+                        let v = lines[idx];
+                        let v_trim = v.trim_end();
+                        if v_trim.is_empty() || v_trim == "$$$$" || v_trim.starts_with("> <") {
+                            break;
+                        }
+                        vals.push(v_trim);
+                        idx += 1;
+                    }
+                    md.insert(key.to_string(), vals.join("\n"));
 
-                            // OpenFF format.
-                            if key == "atom.dprop.PartialCharge" {
-                                let charges: Vec<_> = lines[idx + 1].split_whitespace().collect();
-                                for (i, q) in charges.into_iter().enumerate() {
-                                    atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
-                                }
-                            }
-
-                            // Pubchem format.
-                            if key == "PUBCHEM_MMFF94_PARTIAL_CHARGES" {
-                                if vals.is_empty() {
-                                    eprintln!("No values for PUBCHEM_MMFF94_PARTIAL_CHARGES");
-                                } else {
-                                    let n = vals[0].trim().parse::<usize>().unwrap_or(0);
-                                    if vals.len().saturating_sub(1) != n {
-                                        eprintln!(
-                                            "Charge count mismatch: expected {}, got {}",
-                                            n,
-                                            vals.len().saturating_sub(1)
-                                        );
-                                    }
-                                    for line in vals.iter().skip(1).take(n) {
-                                        let mut it = line.split_whitespace();
-                                        let i1 = it.next().and_then(|s| s.parse::<usize>().ok());
-                                        let q = it.next().and_then(|s| s.parse::<f32>().ok());
-
-                                        if let (Some(i1), Some(q)) = (i1, q) {
-                                            if (1..=atoms.len()).contains(&i1) {
-                                                atoms[i1 - 1].partial_charge = Some(q); // 1-based -> 0-based
-                                            } else {
-                                                eprintln!(
-                                                    "Atom index {} out of range (n_atoms={})",
-                                                    i1,
-                                                    atoms.len()
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            continue;
+                    // OpenFF format.
+                    if key == "atom.dprop.PartialCharge" {
+                        let charges: Vec<_> = lines[idx + 1].split_whitespace().collect();
+                        for (i, q) in charges.into_iter().enumerate() {
+                            atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
                         }
                     }
+
+                    // Pubchem format.
+                    if key == "PUBCHEM_MMFF94_PARTIAL_CHARGES" {
+                        if vals.is_empty() {
+                            eprintln!("No values for PUBCHEM_MMFF94_PARTIAL_CHARGES");
+                        } else {
+                            let n = vals[0].trim().parse::<usize>().unwrap_or(0);
+                            if vals.len().saturating_sub(1) != n {
+                                eprintln!(
+                                    "Charge count mismatch: expected {}, got {}",
+                                    n,
+                                    vals.len().saturating_sub(1)
+                                );
+                            }
+                            for line in vals.iter().skip(1).take(n) {
+                                let mut it = line.split_whitespace();
+                                let i1 = it.next().and_then(|s| s.parse::<usize>().ok());
+                                let q = it.next().and_then(|s| s.parse::<f32>().ok());
+
+                                if let (Some(i1), Some(q)) = (i1, q) {
+                                    if (1..=atoms.len()).contains(&i1) {
+                                        atoms[i1 - 1].partial_charge = Some(q); // 1-based -> 0-based
+                                    } else {
+                                        eprintln!(
+                                            "Atom index {} out of range (n_atoms={})",
+                                            i1,
+                                            atoms.len()
+                                        );
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    continue;
                 }
                 idx += 1;
             }

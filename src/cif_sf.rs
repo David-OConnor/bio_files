@@ -13,7 +13,7 @@ pub struct MillerIndices {
     pub k: i32,
     pub l: i32,
     pub amp: Option<f32>, // amplitude of 2Fo-Fc
-    pub phase_deg: Option<f32>,
+    pub phase: Option<f32>,
     // todo: Complex struct for this? Or can they be present one or the other?
     pub re: Option<f32>,
     pub im: Option<f32>,
@@ -26,7 +26,7 @@ impl Display for MillerIndices {
         if let Some(v) = self.amp {
             write!(f, "  Amp: {v:.2}")?;
         }
-        if let Some(v) = self.phase_deg {
+        if let Some(v) = self.phase {
             write!(f, "  Phase: {v:.2}")?;
         }
         if let Some(v) = self.re {
@@ -73,7 +73,7 @@ impl CifStructureFactors {
         let mut loops = Vec::new();
         parse_loops(cif_data, &mut loops);
 
-        for (tags, rows) in &loops {
+        for (tags, _rows) in &loops {
             // cell constants (non-loop case handled below too)
             if tags.iter().any(|t| t.starts_with("_cell.")) {
                 // ignore; single-value keys are parsed later
@@ -165,13 +165,14 @@ impl CifStructureFactors {
                 if let (Some(ia), Some(ip)) = (ia, ip) {
                     let amp = some_f(&row[ia]);
                     let ph = some_f(&row[ip]);
+
                     if let (Some(amp), Some(ph)) = (amp, ph) {
                         milller.push(MillerIndices {
                             h,
                             k,
                             l,
                             amp: Some(amp as f32),
-                            phase_deg: Some(ph as f32),
+                            phase: Some((ph as f32).to_radians()),
                             re: None,
                             im: None,
                         });
@@ -188,7 +189,7 @@ impl CifStructureFactors {
                             k,
                             l,
                             amp: None,
-                            phase_deg: None,
+                            phase: None,
                             re: Some(re as f32),
                             im: Some(im as f32),
                         });
@@ -218,6 +219,8 @@ impl CifStructureFactors {
 
         let header = DensityHeaderInner {
             cell,
+            // Is this always true? Lots of hard-coded values here. I don't
+            // see this values from observing these files, so it's probably OK.
             mapc: 1,
             mapr: 2,
             maps: 3,
@@ -339,10 +342,11 @@ fn parse_keyvals(input: &str) -> std::collections::HashMap<String, String> {
     map
 }
 
-fn parse_loops<'a>(input: &'a str, out: &mut Vec<(Vec<String>, Vec<Vec<String>>)>) {
+fn parse_loops(input: &str, out: &mut Vec<(Vec<String>, Vec<Vec<String>>)>) {
     let mut it = input.lines().peekable();
     while let Some(line) = it.next() {
-        let mut l = line.trim();
+        let l = line.trim();
+
         if l.is_empty() || l.starts_with('#') {
             continue;
         }

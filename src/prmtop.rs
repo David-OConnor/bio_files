@@ -183,8 +183,8 @@ pub fn save_prmtop(
 
     // Minimal RESIDUE_* (single residue spanning all atoms)
     let nres = 1_i32;
-    let residue_labels = vec![fmt_a4("SYS")];
-    let residue_ptr = vec![1_i32]; // 1-based start of residue
+    let residue_labels = [fmt_a4("SYS")];
+    let residue_ptr = [1_i32]; // 1-based start of residue
 
     // POINTERS (31 ints; NCOPY present and set to 1)
     // Order per Amber spec.
@@ -371,6 +371,7 @@ pub fn load_prmtop(path: &Path) -> io::Result<(Vec<AtomGeneric>, ForceFieldParam
     for i in 0..31 {
         pointers[i] = get_i(&p.data[i])?;
     }
+
     let natom = pointers[0] as usize;
     let ntypes = pointers[1] as usize;
     let _nres = pointers[11] as usize;
@@ -483,12 +484,15 @@ pub fn load_prmtop(path: &Path) -> io::Result<(Vec<AtomGeneric>, ForceFieldParam
 
     // Build outputs
     let mut atoms_out = Vec::with_capacity(natom);
+
     for i in 0..natom {
-        let mut a = AtomGeneric::default();
-        a.serial_number = (i + 1) as u32;
-        a.force_field_type = Some(type_names[i].clone());
-        a.partial_charge = Some(charges[i]);
-        a.hetero = false;
+        let a = AtomGeneric {
+            serial_number: (i + 1) as u32,
+            force_field_type: Some(type_names[i].clone()),
+            partial_charge: Some(charges[i]),
+            ..Default::default()
+        };
+
         // element/posit/occupancy left as defaults
         atoms_out.push(a);
     }

@@ -204,7 +204,7 @@ pub fn create_bonds(atoms: &[AtomGeneric]) -> Vec<BondGeneric> {
 }
 
 /// A helper fn. Maps from a global index, to a local atom from a subset.
-fn find_atom<'a>(
+fn _find_atom<'a>(
     atoms: &'a [AtomGeneric],
     indices: &[usize],
     i_to_find: usize,

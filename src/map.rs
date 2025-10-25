@@ -616,10 +616,10 @@ pub fn gemmi_sf_to_map(cif_path: &Path, gemmi_path: Option<&Path>) -> io::Result
 
     if !out.status.success() {
         let stderr_str = String::from_utf8_lossy(&out.stderr);
-        return Err(io::Error::new(
-            ErrorKind::Other,
-            format!("Problem parsing SF file: {}", stderr_str),
-        ));
+        return Err(io::Error::other(format!(
+            "Problem parsing SF file: {}",
+            stderr_str
+        )));
     }
 
     println!("Loading map file..."); // todo A/R

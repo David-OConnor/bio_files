@@ -7,7 +7,7 @@ use std::{
     fmt, fs,
     fs::File,
     io,
-    io::{ErrorKind, Read, Write},
+    io::{ErrorKind, Write},
     path::Path,
     str::FromStr,
 };
