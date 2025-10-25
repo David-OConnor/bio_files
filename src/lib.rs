@@ -18,6 +18,7 @@ pub mod frcmod;
 pub mod md_params;
 
 mod bond_inference;
+pub mod cif_sf;
 mod mmcif_aux;
 pub mod prmtop;
 
@@ -104,7 +105,7 @@ impl Display for LipidStandard {
             Self::Sa => "Sa",
             Self::Spm => "Spm",
             Self::St => "St",
-            Self::Pi => "Pi", // not in lib21.dat
+            Self::Pi => "Pi",                   // not in lib21.dat
             Self::Cardiolipin => "Cardiolipin", // not in lib21.dat
         };
 
@@ -296,7 +297,6 @@ impl Display for BondType {
     }
 }
 
-
 impl BondType {
     /// Return the exact MOL2 bond-type token as an owned `String`.
     /// (Use `&'static str` if you never need it allocated.)
@@ -313,7 +313,8 @@ impl BondType {
             Self::Quadruple => "quad",
             Self::Delocalized => "delo",
             Self::PolymericLink => "poly",
-        }.to_string()
+        }
+        .to_string()
     }
 
     /// SDF format uses a truncated set, and does things like mark every other

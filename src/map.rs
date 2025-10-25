@@ -1,11 +1,10 @@
 //! For parsing CCP4/MRC .map files. These contain electron density; they are computed
-//! from reflection data, using a fourier transform.
+//! from reflection data, using a fourier transform. We parse them in a direct manner, loading
+//! density data on a grid into a flattened array of values.
 //!
 //! This [source file from Gemmi](https://github.com/project-gemmi/gemmi/blob/master/include/gemmi/ccp4.hpp)
 //! is a decent ref of the spec. See, for example, the `prepare_ccp4_header_except_mode_and_stats` function
 //! for header fields.
-//!
-//! We currently run Gemmi direclty, to load 2fo-fo and MTZ files.
 
 use std::{
     fs,
@@ -21,41 +20,30 @@ use lin_alg::f64::{Mat3, Vec3};
 
 const HEADER_SIZE: u64 = 1_024;
 
-/// Minimal subset of the 1024-byte CCP4/MRC header
-#[allow(unused)]
+/// Contains data shared between `MapHeader` and `CifStructureFactors` data.
+/// todo: This may be an intermediate phase to combining these structures.
 #[derive(Clone, Debug)]
-pub struct MapHeader {
-    /// Number of grid points along each axis. nx × ny × nz is the number of voxels.
-    pub nx: i32,
-    pub ny: i32,
-    pub nz: i32,
-    pub mode: i32, // data type (0=int8, 1=int16, 2=float32, …)
-    /// the `n[xyz]start` values specify the grid starting point (offset) in each dimension.
-    /// They are 0 in most cryo-EM maps.
-    pub nxstart: i32,
-    pub nystart: i32,
-    pub nzstart: i32,
+pub struct DensityHeaderInner {
+    pub cell: UnitCell,
+    /// The fast (contiguous) dimension
+    pub mapc: i32, // 1..3
+    /// The medium-speed dimension
+    pub mapr: i32,
+    /// The slow (strided) dimension
+    pub maps: i32,
     /// the m values give number of grid-sampling intervals along each axis. This is usually equal
     /// to the n values. In this case, each voxel corresponds to one spacing unit. They will differ
     /// in the case of over and under sampling.
     pub mx: i32,
     pub my: i32,
     pub mz: i32,
-    /// Unit cell dimensions. [XYZ] length. Then α: Angle between Y and Z, β: Angle
-    /// between X and Z, and γ: ANgle between X and Y. Distances are in Å, and angles are in degrees.
-    pub cell: [f32; 6], // cell dimensions: a, b, c, alpha, beta, gamma
-    /// Which axis is fast (1=X, 2=Y, 3=Z)
-    pub mapc: i32,
-    /// Which axis is medium speed
-    pub mapr: i32,
-    /// Which axis is slow
-    pub maps: i32,
-    /// Minimum density value
-    pub dmin: f32,
-    /// Maximum density value
-    pub dmax: f32,
-    pub dmean: f32, // mean density
-    pub ispg: i32,  // space group number
+    /// the `n[xyz]start` values specify the grid starting point (offset) in each dimension.
+    /// They are 0 in most cryo-EM maps.
+    pub nxstart: i32,
+    pub nystart: i32,
+    pub nzstart: i32,
+    /// Space group number
+    pub ispg: i32,
     /// Number of bytes used by the symmetry block. (Usually 0 for cry-EM, and 80xn for crystallography.)
     pub nsymbt: i32,
     pub version: i32,
@@ -63,6 +51,25 @@ pub struct MapHeader {
     pub xorigin: Option<f32>,
     pub yorigin: Option<f32>,
     pub zorigin: Option<f32>, // todo: More header items A/R.
+}
+
+/// Minimal subset of the 1024-byte CCP4/MRC header
+#[allow(unused)]
+#[derive(Clone, Debug)]
+pub struct MapHeader {
+    /// Data shared with CifSf.
+    pub inner: DensityHeaderInner,
+    /// Number of grid points along each axis. nx × ny × nz is the number of voxels.
+    pub nx: i32,
+    pub ny: i32,
+    pub nz: i32,
+    pub mode: i32, // data type (0=int8, 1=int16, 2=float32, …)
+    /// Minimum density value
+    pub dmin: f32,
+    /// Maximum density value
+    pub dmax: f32,
+    /// Mean density
+    pub dmean: f32,
 }
 
 fn read_map_header<R: Read + Seek>(mut r: R) -> io::Result<MapHeader> {
@@ -147,11 +154,16 @@ fn read_map_header<R: Read + Seek>(mut r: R) -> io::Result<MapHeader> {
     // skip ahead to end of 1024-byte header
     r.seek(SeekFrom::Start(HEADER_SIZE))?;
 
-    Ok(MapHeader {
-        nx,
-        ny,
-        nz,
-        mode,
+    let cell = UnitCell::new(
+        cell[0] as f64,
+        cell[1] as f64,
+        cell[2] as f64,
+        cell[3] as f64,
+        cell[4] as f64,
+        cell[5] as f64,
+    );
+
+    let inner = DensityHeaderInner {
         nxstart,
         nystart,
         nzstart,
@@ -162,19 +174,28 @@ fn read_map_header<R: Read + Seek>(mut r: R) -> io::Result<MapHeader> {
         mapc,
         mapr,
         maps,
-        dmin,
-        dmax,
-        dmean,
         ispg,
         nsymbt,
         version,
         xorigin,
         yorigin,
         zorigin,
+    };
+
+    Ok(MapHeader {
+        inner,
+        nx,
+        ny,
+        nz,
+        mode,
+        dmin,
+        dmax,
+        dmean,
     })
 }
 
-// todo: Good candidate to make generic? Used in both reflections/electron map, and docking.
+/// Unit cell dimensions. [XYZ] length. Then α: Angle between Y and Z, β: Angle
+/// between X and Z, and γ: ANgle between X and Y. Distances are in Å, and angles are in degrees.
 #[derive(Clone, Debug)]
 pub struct UnitCell {
     pub a: f64,
@@ -244,7 +265,7 @@ fn read_header_dens<R: Read + Seek>(data: &mut R) -> io::Result<(MapHeader, Vec<
         ));
     }
 
-    data.seek(SeekFrom::Start(HEADER_SIZE + hdr.nsymbt as u64))?;
+    data.seek(SeekFrom::Start(HEADER_SIZE + hdr.inner.nsymbt as u64))?;
 
     let n = (hdr.nx * hdr.ny * hdr.nz) as usize;
     let mut dens = Vec::with_capacity(n);
@@ -257,13 +278,15 @@ fn read_header_dens<R: Read + Seek>(data: &mut R) -> io::Result<(MapHeader, Vec<
 }
 
 pub(crate) fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
-    if let (Some(ox), Some(oy), Some(oz)) = (hdr.xorigin, hdr.yorigin, hdr.zorigin) {
+    if let (Some(ox), Some(oy), Some(oz)) =
+        (hdr.inner.xorigin, hdr.inner.yorigin, hdr.inner.zorigin)
+    {
         cell.cartesian_to_fractional(Vec3::new(ox as f64, oy as f64, oz as f64))
     } else {
         Vec3::new(
-            hdr.nxstart as f64 / hdr.mx as f64,
-            hdr.nystart as f64 / hdr.my as f64,
-            hdr.nzstart as f64 / hdr.mz as f64,
+            hdr.inner.nxstart as f64 / hdr.inner.mx as f64,
+            hdr.inner.nystart as f64 / hdr.inner.my as f64,
+            hdr.inner.nzstart as f64 / hdr.inner.mz as f64,
         )
     }
 }
@@ -274,7 +297,6 @@ pub(crate) fn get_origin_frac(hdr: &MapHeader, cell: &UnitCell) -> Vec3 {
 /// to CCP4's map structure.
 pub struct DensityMap {
     pub hdr: MapHeader,
-    pub cell: UnitCell,
     /// Header origin, already converted to fractional
     pub origin_frac: Vec3,
     /// A map from file axis to crystal axis
@@ -289,23 +311,11 @@ pub struct DensityMap {
 }
 
 impl DensityMap {
-    /// Create a new density map, e.g. from a File or byte array.
-    pub fn new<R: Read + Seek>(data: &mut R) -> io::Result<Self> {
-        let (hdr, data) = read_header_dens(data)?;
-
-        let cell = UnitCell::new(
-            hdr.cell[0] as f64,
-            hdr.cell[1] as f64,
-            hdr.cell[2] as f64,
-            hdr.cell[3] as f64,
-            hdr.cell[4] as f64,
-            hdr.cell[5] as f64,
-        );
-
+    pub fn new(hdr: MapHeader, data: Vec<f32>) -> io::Result<Self> {
         let perm_f2c = [
-            hdr.mapc as usize - 1,
-            hdr.mapr as usize - 1,
-            hdr.maps as usize - 1,
+            hdr.inner.mapc as usize - 1,
+            hdr.inner.mapr as usize - 1,
+            hdr.inner.maps as usize - 1,
         ];
 
         let mut perm_c2f = [0; 3];
@@ -313,7 +323,7 @@ impl DensityMap {
             perm_c2f[*c] = f;
         }
 
-        let origin_frac = get_origin_frac(&hdr, &cell);
+        let origin_frac = get_origin_frac(&hdr, &hdr.inner.cell);
 
         let n = data.len() as f32;
 
@@ -332,7 +342,6 @@ impl DensityMap {
 
         Ok(Self {
             hdr,
-            cell,
             origin_frac,
             perm_f2c,
             perm_c2f,
@@ -341,20 +350,25 @@ impl DensityMap {
             inv_sigma,
         })
     }
+    /// Create a new density map, e.g. from a File or byte array.
+    pub fn open<R: Read + Seek>(data: &mut R) -> io::Result<Self> {
+        let (hdr, data) = read_header_dens(data)?;
+        Self::new(hdr, data)
+    }
 
     /// Uses nearest-neighbour lookup to calculate density at a point.
     pub fn density_at_point(&self, cart: Vec3) -> f32 {
         // Cartesian to fractional (wrap to [0,1) )
-        let mut frac = self.cell.cartesian_to_fractional(cart);
+        let mut frac = self.hdr.inner.cell.cartesian_to_fractional(cart);
         frac.x -= frac.x.floor();
         frac.y -= frac.y.floor();
         frac.z -= frac.z.floor();
 
         // Fractional to crystallographic voxel index.
         let ic = [
-            (frac.x * self.hdr.mx as f64 - 0.5).round() as isize,
-            (frac.y * self.hdr.my as f64 - 0.5).round() as isize,
-            (frac.z * self.hdr.mz as f64 - 0.5).round() as isize,
+            (frac.x * self.hdr.inner.mx as f64 - 0.5).round() as isize,
+            (frac.y * self.hdr.inner.my as f64 - 0.5).round() as isize,
+            (frac.z * self.hdr.inner.mz as f64 - 0.5).round() as isize,
         ];
 
         // Crystallographic ➜ file order
@@ -379,7 +393,7 @@ impl DensityMap {
     /// This produces smoother visuals than the nearest-neighbor approach.
     pub fn density_at_point_trilinear(&self, cart: Vec3) -> f32 {
         // 1. Cartesian → fractional, wrap into [0,1]
-        let mut frac = self.cell.cartesian_to_fractional(cart);
+        let mut frac = self.hdr.inner.cell.cartesian_to_fractional(cart);
 
         // shift by the map origin if you want strict CCP4 compliance:
         // frac -= self.origin_frac;
@@ -390,9 +404,9 @@ impl DensityMap {
 
         // Crystallographic fractional → cryst grid coordinates
         // grid coordinate in *float* space; (0 … mx−1) etc.
-        let gx = frac.x * self.hdr.mx as f64 - 0.5;
-        let gy = frac.y * self.hdr.my as f64 - 0.5;
-        let gz = frac.z * self.hdr.mz as f64 - 0.5;
+        let gx = frac.x * self.hdr.inner.mx as f64 - 0.5;
+        let gy = frac.y * self.hdr.inner.my as f64 - 0.5;
+        let gz = frac.z * self.hdr.inner.mz as f64 - 0.5;
 
         let ix0 = gx.floor() as isize;
         let iy0 = gy.floor() as isize;
@@ -453,8 +467,7 @@ impl DensityMap {
     /// Load a map from file.
     pub fn load(path: &Path) -> io::Result<Self> {
         let mut file = File::open(path)?;
-
-        Self::new(&mut file)
+        Self::open(&mut file)
     }
 
     /// Save the density map to a file.
@@ -503,25 +516,28 @@ impl DensityMap {
             hdr_buf.write_i32::<LittleEndian>(self.hdr.ny)?; // 2 NY
             hdr_buf.write_i32::<LittleEndian>(self.hdr.nz)?; // 3 NZ
             hdr_buf.write_i32::<LittleEndian>(2)?; // 4 MODE = 2 (float32)
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.nxstart)?; // 5
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.nystart)?; // 6
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.nzstart)?; // 7
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.mx)?; // 8
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.my)?; // 9
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.mz)?; // 10
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.nxstart)?; // 5
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.nystart)?; // 6
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.nzstart)?; // 7
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.mx)?; // 8
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.my)?; // 9
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.mz)?; // 10
 
-            for &c in &self.hdr.cell {
-                // 11..16 cell a,b,c,α,β,γ
-                hdr_buf.write_f32::<LittleEndian>(c)?;
-            }
+            // 11..16 cell a,b,c,α,β,γ
+            hdr_buf.write_f32::<LittleEndian>(self.hdr.inner.cell.a as f32)?;
+            hdr_buf.write_f32::<LittleEndian>(self.hdr.inner.cell.b as f32)?;
+            hdr_buf.write_f32::<LittleEndian>(self.hdr.inner.cell.c as f32)?;
+            hdr_buf.write_f32::<LittleEndian>(self.hdr.inner.cell.alpha as f32)?;
+            hdr_buf.write_f32::<LittleEndian>(self.hdr.inner.cell.beta as f32)?;
+            hdr_buf.write_f32::<LittleEndian>(self.hdr.inner.cell.gamma as f32)?;
 
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.mapc)?; // 17 MAPC
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.mapr)?; // 18 MAPR
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.maps)?; // 19 MAPS
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.mapc)?; // 17 MAPC
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.mapr)?; // 18 MAPR
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.maps)?; // 19 MAPS
             hdr_buf.write_f32::<LittleEndian>(dmin)?; // 20 DMIN
             hdr_buf.write_f32::<LittleEndian>(dmax)?; // 21 DMAX
             hdr_buf.write_f32::<LittleEndian>(dmean)?; // 22 DMEAN
-            hdr_buf.write_i32::<LittleEndian>(self.hdr.ispg)?; // 23 ISPG
+            hdr_buf.write_i32::<LittleEndian>(self.hdr.inner.ispg)?; // 23 ISPG
 
             // We'll write no symmetry block.
             let nsymbt: i32 = 0;
@@ -531,8 +547,8 @@ impl DensityMap {
             // word index (1-based)
             for w in 25..=49 {
                 if w == 28 {
-                    hdr_buf.write_i32::<LittleEndian>(if self.hdr.version != 0 {
-                        self.hdr.version
+                    hdr_buf.write_i32::<LittleEndian>(if self.hdr.inner.version != 0 {
+                        self.hdr.inner.version
                     } else {
                         20140
                     })?;
@@ -542,9 +558,9 @@ impl DensityMap {
             }
 
             // Words 50..52: ORIGIN (MRC2014)
-            let xorig = self.hdr.xorigin.unwrap_or(0.0);
-            let yorig = self.hdr.yorigin.unwrap_or(0.0);
-            let zorig = self.hdr.zorigin.unwrap_or(0.0);
+            let xorig = self.hdr.inner.xorigin.unwrap_or(0.0);
+            let yorig = self.hdr.inner.yorigin.unwrap_or(0.0);
+            let zorig = self.hdr.inner.zorigin.unwrap_or(0.0);
 
             hdr_buf.write_f32::<LittleEndian>(xorig)?; // 50 XORIGIN
             hdr_buf.write_f32::<LittleEndian>(yorig)?; // 51 YORIGIN
@@ -581,6 +597,7 @@ impl DensityMap {
     }
 }
 
+// todo: Remove this once you have your own setup working.
 /// Converts electron density data in 2fo-fc or MTZ formats to our Density Map, via
 /// a map file intermediate.
 /// If `gemmi_path` i s None, `gemmi` must be available on the PATH env var.
@@ -614,6 +631,7 @@ pub fn gemmi_sf_to_map(cif_path: &Path, gemmi_path: Option<&Path>) -> io::Result
     Ok(map)
 }
 
+// todo: Remove this once you have your own setup working.
 /// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
 /// loads the Map to string, then deletes both files.
 ///
@@ -634,19 +652,6 @@ pub fn density_from_2fo_fc_rcsb_gemmi(
     fs::remove_file(path)?;
 
     Ok(result)
-}
-
-/// Downloads a 2fo_fc file from RCSB, saves it to disk.
-/// Returns both the raw bytes, and our parsed Map.
-// pub fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
-fn density_from_2fo_fc_rcsb(ident: &str) -> io::Result<DensityMap> {
-    println!("Downloading Map data for {ident}...");
-
-    let map_2fo_fc = rcsb::load_validation_2fo_fc_cif(ident)
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Problem loading 2fo-fc from RCSB"))?;
-
-    unimplemented!()
-    // map_loading::sf_cif_to_map(map_2fo_fc.as_str())
 }
 
 /// Positive modulus that always lands in 0..n-1

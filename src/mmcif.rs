@@ -7,6 +7,7 @@
 
 use std::{
     collections::HashMap,
+    fs,
     fs::File,
     io,
     io::{ErrorKind, Read, Write},
@@ -221,7 +222,10 @@ impl MmCif {
 
             if line.starts_with('_') {
                 if let Some((tag, val)) = line.split_once(char::is_whitespace) {
-                    metadata.insert(tag.to_string(), val.trim_matches('\'').to_string().trim().to_string());
+                    metadata.insert(
+                        tag.to_string(),
+                        val.trim_matches('\'').to_string().trim().to_string(),
+                    );
                 } else {
                     metadata.insert(line.to_string().trim().to_string(), String::new());
                 }
@@ -402,13 +406,7 @@ impl MmCif {
     }
 
     pub fn load(path: &Path) -> io::Result<Self> {
-        let mut file = File::open(path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
-        let data_str: String = String::from_utf8(buffer)
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
-
+        let data_str = fs::read_to_string(path)?;
         Self::new(&data_str)
     }
 }

@@ -4,7 +4,7 @@
 
 use std::{
     collections::HashMap,
-    fmt,
+    fmt, fs,
     fs::File,
     io,
     io::{ErrorKind, Read, Write},
@@ -448,13 +448,7 @@ impl Mol2 {
     }
 
     pub fn load(path: &Path) -> io::Result<Self> {
-        let mut file = File::open(path)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
-        let data_str: String = String::from_utf8(buffer)
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
-
+        let data_str = fs::read_to_string(path)?;
         Self::new(&data_str)
     }
 }
