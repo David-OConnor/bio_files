@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 //! For reading AB1 trace files. (Applied Biosystem's sequencing)
 //! [BioPython docs](https://biopython.org/wiki/ABI_traces)
 //!

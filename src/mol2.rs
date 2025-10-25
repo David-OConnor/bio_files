@@ -440,7 +440,7 @@ impl Mol2 {
                 i + 1,
                 bond.atom_0_sn,
                 bond.atom_1_sn,
-                bond.bond_type.to_string(),
+                bond.bond_type.to_mol2_str(),
             )?;
         }
 

@@ -609,7 +609,6 @@ pub fn gemmi_sf_to_map(cif_path: &Path, gemmi_path: Option<&Path>) -> io::Result
     let map = DensityMap::load(Path::new("temp_map.map"))?;
     println!("Complete");
 
-    fs::remove_file(cif_path)?;
     fs::remove_file(Path::new("temp_map.map"))?;
 
     Ok(map)
@@ -631,7 +630,10 @@ pub fn density_from_2fo_fc_rcsb_gemmi(
     let path = Path::new("temp_map.cif");
 
     fs::write(path, map_2fo_fc)?;
-    gemmi_sf_to_map(path, gemmi_path)
+    let result = gemmi_sf_to_map(path, gemmi_path)?;
+    fs::remove_file(path)?;
+
+    Ok(result)
 }
 
 /// Downloads a 2fo_fc file from RCSB, saves it to disk.

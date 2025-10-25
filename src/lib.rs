@@ -215,8 +215,10 @@ pub struct AtomGeneric {
     /// a benzene carbon from other aromatic caca carbons)
     /// For proteins, this appears to be the same as for `name`.
     pub force_field_type: Option<String>,
-    /// An atom-centered electric charge, used in molecular dynamics simulations.
-    /// These are sometimes loaded from Mol2 or SDF files, and sometimes added after.
+    /// An atom-centered electric charge, used in molecular dynamics simulations. In elementary charge units.
+    /// These are sometimes loaded from Amber-provided Mol2 or SDF files, and sometimes added after.
+    /// We get partial charge for ligands from (e.g. Amber-provided) Mol files, so we load it from the atom, vice
+    /// the loaded FF params. Convert to appropriate units prior to running dynamics.
     pub partial_charge: Option<f32>,
     /// Indicates, in proteins, that the atom isn't part of an amino acid. E.g., water or
     /// ligands.
@@ -276,10 +278,30 @@ pub enum BondType {
 }
 
 impl Display for BondType {
-    /// Return the exact MOL2 bond-type token as an owned `String`.
-    /// (Use `&'static str` if you never need it allocated.)
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let name = match self {
+            Self::Single => "Single",
+            Self::Double => "Double",
+            Self::Triple => "Triple",
+            Self::Aromatic => "Aromatic",
+            Self::Amide => "Amide",
+            Self::Dummy => "Dummy",
+            Self::Unknown => "Unknown",
+            Self::NotConnected => "Not connected",
+            Self::Quadruple => "Quadruple",
+            Self::Delocalized => "Delocalized",
+            Self::PolymericLink => "Polymeric link",
+        };
+        write!(f, "{name}")
+    }
+}
+
+
+impl BondType {
+    /// Return the exact MOL2 bond-type token as an owned `String`.
+    /// (Use `&'static str` if you never need it allocated.)
+    pub fn to_mol2_str(&self) -> String {
+        match self {
             Self::Single => "1",
             Self::Double => "2",
             Self::Triple => "3",
@@ -291,13 +313,9 @@ impl Display for BondType {
             Self::Quadruple => "quad",
             Self::Delocalized => "delo",
             Self::PolymericLink => "poly",
-        };
-
-        write!(f, "{name}")
+        }.to_string()
     }
-}
 
-impl BondType {
     /// SDF format uses a truncated set, and does things like mark every other
     /// aromatic bond as double.
     pub fn to_str_sdf(&self) -> String {
@@ -305,7 +323,7 @@ impl BondType {
             Self::Single | Self::Double | Self::Triple => *self,
             _ => Self::Single,
         }
-        .to_string()
+        .to_mol2_str()
     }
 }
 

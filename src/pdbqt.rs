@@ -301,7 +301,7 @@ impl Pdbqt {
             // - columns 71..76: partial charge
             // - columns 77..78: autodock type
 
-            let mut res_num = 1;
+            let res_num = 1;
 
             // let residue_name = if ligand.is_some() {
             //     "UNL".to_owned()

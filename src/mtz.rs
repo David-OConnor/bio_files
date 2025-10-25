@@ -5,6 +5,8 @@
 //! [Gemmi source](https://github.com/project-gemmi/gemmi/blob/master/src/mtz.cpp)
 //! [Gemmi docs] https://gemmi.readthedocs.io/en/latest/hkl.html)
 //! [Unnoficial guide (Vague, but has general info)](https://staraniso.globalphasing.org/html/mtzformat.html)
+//!
+//! Note: For now, we use Gemmi instead of this, to convert MTZ to map, then read the map.
 
 use std::{
     fs::File,

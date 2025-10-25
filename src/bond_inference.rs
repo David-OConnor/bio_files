@@ -12,12 +12,11 @@ use std::{collections::HashMap, f64::consts::TAU};
 use lin_alg::f64::Vec3;
 use na_seq::{
     Element,
-    Element::{Carbon, Fluorine, Hydrogen, Nitrogen, Oxygen, Sulfur},
+    Element::{Carbon, Hydrogen, Nitrogen, Oxygen, Sulfur},
 };
 use rayon::prelude::*;
 
 use crate::{AtomGeneric, BondGeneric, BondType};
-// use crate::{molecule::{Atom, Bond, HydrogenBond}, util::{find_atom, setup_neighbor_pairs}, AtomGeneric, BondGeneric, BondType};
 
 struct BondSpecs {
     len: f64,
