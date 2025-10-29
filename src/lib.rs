@@ -298,6 +298,24 @@ impl Display for BondType {
 }
 
 impl BondType {
+    /// A shorthand, visual string.
+    pub fn to_visual_str(&self) -> String {
+        match self {
+            Self::Single => "-",
+            Self::Double => "=",
+            Self::Triple => "≡",
+            Self::Aromatic => "=–",
+            Self::Amide => "-am-",
+            Self::Dummy => "-",
+            Self::Unknown => "-un-",
+            Self::NotConnected => "-nc-",
+            Self::Quadruple => "-#-",
+            Self::Delocalized => "-delo-",
+            Self::PolymericLink => "-poly-",
+        }
+        .to_string()
+    }
+
     /// Return the exact MOL2 bond-type token as an owned `String`.
     /// (Use `&'static str` if you never need it allocated.)
     pub fn to_mol2_str(&self) -> String {
