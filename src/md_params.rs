@@ -21,6 +21,9 @@ use na_seq::{AminoAcidGeneral, AtomTypeInRes, Element};
 
 use crate::{AtomGeneric, BondGeneric, BondType, LipidStandard};
 
+// X: A wildcard for any atom type. Seen in dihedrals from GAFF2.
+const X: &str = "X";
+
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
 pub struct MassParams {
@@ -439,46 +442,109 @@ impl ForceFieldParams {
         Ok(Self::new(&ForceFieldParamsVec::load_dat(path)?))
     }
 
+    /// For the `get_` methods below. Expand possible wildcard forms of an atom type, keeping priority order:
+    /// 1. Exact atom name
+    /// 2. Pattern with same first letter and '*'
+    /// 3. Global wildcard "X"
+    fn wildcard_variants(atom: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        out.push(atom.to_string()); // exact
+
+        if atom.len() > 0 {
+            let first = atom.chars().next().unwrap();
+            // Only add meaningful ones like C*, N*, O*, etc.
+            if first.is_ascii_alphabetic() {
+                out.push(format!("{}*", first));
+            }
+        }
+        out.push("X".to_string());
+        out
+    }
+
     /// A utility function that handles proper and improper dihedral data,
     /// tries both atom orders, and falls back to wildcard (“X”) matches on
     /// the outer atoms when an exact hit is not found.
+    pub fn get_bond(&self, atom_types: &(String, String)) -> Option<&BondStretchingParams> {
+        let a_variants = Self::wildcard_variants(&atom_types.0);
+        let b_variants = Self::wildcard_variants(&atom_types.1);
+
+        // Priority: exact before partial before X
+        for a in &a_variants {
+            for b in &b_variants {
+                // try both orders
+                for &(k0, k1) in &[(a, b), (b, a)] {
+                    let key = (k0.clone(), k1.clone());
+                    if let Some(hit) = self.bond.get(&key) {
+                        return Some(hit);
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    // todo: YOu may need to augment all these helps with support for "C*", "N*" etc.
+
+    /// A utility function that handles proper and improper dihedral data,
+    /// tries both atom orders, and falls back to wildcard (“X”) matches on
+    /// the outer atoms when an exact hit is not found.
+    pub fn get_valence_angle(
+        &self,
+        atom_types: &(String, String, String),
+    ) -> Option<&AngleBendingParams> {
+        let a_variants = Self::wildcard_variants(&atom_types.0);
+        let b_variants = Self::wildcard_variants(&atom_types.1);
+        let c_variants = Self::wildcard_variants(&atom_types.2);
+
+        // Try combinations in both directions (a-b-c and c-b-a)
+        for a in &a_variants {
+            for b in &b_variants {
+                for c in &c_variants {
+                    for &(k0, k1, k2) in &[(a, b, c), (c, b, a)] {
+                        let key = (k0.clone(), k1.clone(), k2.clone());
+                        if let Some(hit) = self.angle.get(&key) {
+                            return Some(hit);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// A utility function that handles proper and improper dihedral data,
+    /// tries both atom orders, and falls back to wildcard (“X”) matches on
+    /// the outer atoms when an exact hit is not found.
+    ///
+    /// We return multiple, as there can be multiple dihedrals for a single atom type set;
+    /// we add them during computations.
     pub fn get_dihedral(
         &self,
         atom_types: &(String, String, String, String),
-        proper: bool, // todo: Experimenting.
+        proper: bool,
     ) -> Option<&Vec<DihedralParams>> {
-        let a = atom_types.0.as_str();
-        let b = atom_types.1.as_str();
-        let c = atom_types.2.as_str();
-        let d = atom_types.3.as_str();
+        let a_variants = Self::wildcard_variants(&atom_types.0);
+        let b_variants = Self::wildcard_variants(&atom_types.1);
+        let c_variants = Self::wildcard_variants(&atom_types.2);
+        let d_variants = Self::wildcard_variants(&atom_types.3);
 
-        const X: &str = "X";
-        let candidates = [
-            // Exact
-            (a, b, c, d),
-            (d, c, b, a),
-            // X on one side
-            (X, b, c, d),
-            (X, c, b, a),
-            (a, b, c, X),
-            (d, c, b, X),
-            // Xs on both sides.
-            (X, b, c, X),
-            (X, c, b, X),
-        ];
-
-        for &(k0, k1, k2, k3) in &candidates {
-            // Build a temporary `String` tuple only for the actual lookup
-            let key = (k0.to_owned(), k1.to_owned(), k2.to_owned(), k3.to_owned());
-
-            let hit = if proper {
-                self.dihedral.get(&key)
-            } else {
-                self.improper.get(&key)
-            };
-
-            if hit.is_some() {
-                return hit;
+        for a in &a_variants {
+            for b in &b_variants {
+                for c in &c_variants {
+                    for d in &d_variants {
+                        for &(k0, k1, k2, k3) in &[(a, b, c, d), (d, c, b, a)] {
+                            let key = (k0.clone(), k1.clone(), k2.clone(), k3.clone());
+                            let hit = if proper {
+                                self.dihedral.get(&key)
+                            } else {
+                                self.improper.get(&key)
+                            };
+                            if let Some(h) = hit {
+                                return Some(h);
+                            }
+                        }
+                    }
+                }
             }
         }
         None

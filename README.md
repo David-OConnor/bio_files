@@ -76,7 +76,7 @@ sdf_data.atoms[0]
 #AtomGeneric { serial_number: 1, posit: Vec3 { x: 2.3974, y: 1.1259, z: 2.5289 }, element: Chlorine, 
 type_in_res: None, force_field_type: None, occupancy: None, partial_charge: None, hetero: true }
 
->>> sdf_data.atoms[0].posit
+sdf_data.atoms[0].posit
 # [2.3974, 1.1259, 2.5289]
 
 sdf_data.save("test.sdf")
