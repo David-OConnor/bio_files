@@ -3,6 +3,7 @@ use std::str::FromStr;
 use bio_files_rs;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
+mod cif_sf;
 mod gro;
 mod md_params;
 mod mmcif;
@@ -344,7 +345,7 @@ impl ExperimentalMethod {
 }
 
 #[pymodule]
-fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
+fn biology_files(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     // General
     m.add_class::<AtomGeneric>()?;
     m.add_class::<BondType>()?;
@@ -364,6 +365,10 @@ fn biology_files(py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<sdf::Sdf>()?;
     m.add_class::<gro::Gro>()?;
     m.add_class::<pdbqt::Pdbqt>()?;
+
+    // Electron density;
+    // todo: Map
+    m.add_class::<cif_sf::CifStructureFactors>()?;
 
     m.add_class::<mol2::MolType>()?;
 

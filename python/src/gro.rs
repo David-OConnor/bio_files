@@ -87,12 +87,6 @@ impl Gro {
         })
     }
 
-    fn to_mol2(&self) -> Mol2 {
-        Mol2 {
-            inner: self.inner.clone().into(),
-        }
-    }
-
     fn save(&self, path: PathBuf) -> PyResult<()> {
         Ok(self.inner.save(&path)?)
     }
