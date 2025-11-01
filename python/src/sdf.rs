@@ -104,6 +104,27 @@ impl Sdf {
         })
     }
 
+    #[classmethod]
+    fn load_pubchem(_cls: &Bound<'_, PyType>, cid: u32) -> PyResult<Self> {
+        Ok(Self {
+            inner: bio_files_rs::Sdf::load_pubchem(cid)?,
+        })
+    }
+
+    #[classmethod]
+    fn load_drugbank(_cls: &Bound<'_, PyType>, ident: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: bio_files_rs::Sdf::load_drugbank(ident)?,
+        })
+    }
+
+    #[classmethod]
+    fn load_pdbe(_cls: &Bound<'_, PyType>, ident: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: bio_files_rs::Sdf::load_pdbe(ident)?,
+        })
+    }
+
     fn __repr__(&self) -> String {
         format!("{:?}", self.inner)
     }

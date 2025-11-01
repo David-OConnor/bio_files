@@ -83,11 +83,22 @@ sdf_data.save("test.sdf")
 
 mol2_data = sdf_data.to_mol2()
 mol2_data.save("test.mol2")
+
+# Load molecules from databases using identifiers:
+mol = Sdf.load_drugbank("DB00069")
+mol = Sdf.load_pubchem(12345)
+mol = Sdf.load_pdbe("CPB")
+mol = Mol2.load_amber_geostd("CPB")
+
+peptide = MmCif.load_rcsb("8S6P")
+
+# (See the Rust examples and API docs for more functionality; most
+# is exposed in Python as well)
 ```
 
 Small molecule save and load, Rust.
 ```rust
-use bio_files::{Sdf, Mol2};}
+use bio_files::{Sdf, Mol2};
 
 // ...
 let sdf_data = Sdf::load("./molecules/DB03496.sdf");
@@ -118,6 +129,15 @@ let dm = density_map_from_mmcif(&data, &mut fft_planner)?;
 // Or if you have a Map file:
 let p = Path::new("8s6p.map")
 let dm = DensityMap::load(path)?;
+
+
+// Load molecules from databases using identifiers:
+let mol = Sdf::load_drugbank("DB00069")?;
+let mol = Sdf::load_pubchem(12345)?;
+let mol = Sdf::load_pdbe("CPB")?;
+let mol = Mol2::load_amber_geostd("CPB")?;
+
+let peptide = MmCif::load_rcsb("8S6P")?;
 ```
 
 You can use similar syntax for mmCIF protein files.

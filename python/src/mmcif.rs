@@ -119,6 +119,13 @@ impl MmCif {
         })
     }
 
+    #[classmethod]
+    fn load_rcsb(_cls: &Bound<'_, PyType>, ident: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: bio_files_rs::MmCif::load_rcsb(ident)?,
+        })
+    }
+
     fn __repr__(&self) -> String {
         format!("{:?}", self.inner)
     }

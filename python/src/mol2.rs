@@ -133,6 +133,13 @@ impl Mol2 {
         })
     }
 
+    #[classmethod]
+    fn load_amber_geostd(_cls: &Bound<'_, PyType>, ident: &str) -> PyResult<Self> {
+        Ok(Self {
+            inner: bio_files_rs::Mol2::load_amber_geostd(ident)?,
+        })
+    }
+
     fn __repr__(&self) -> String {
         format!("{:?}", self.inner)
     }

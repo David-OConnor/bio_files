@@ -11,6 +11,7 @@ use std::{
     str::FromStr,
 };
 
+use bio_apis::{drugbank, pdbe, pubchem};
 use lin_alg::f64::Vec3;
 use na_seq::Element;
 
@@ -416,6 +417,27 @@ impl Sdf {
     // todo: Generic fn for this and save, among all text-based types.
     pub fn load(path: &Path) -> io::Result<Self> {
         let data_str = fs::read_to_string(path)?;
+        Self::new(&data_str)
+    }
+
+    /// Download from DrugBank from a Drugbank ID.
+    pub fn load_drugbank(ident: &str) -> io::Result<Self> {
+        let data_str = drugbank::load_sdf(ident)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+        Self::new(&data_str)
+    }
+
+    /// Download from PubChem from a CID.
+    pub fn load_pubchem(cid: u32) -> io::Result<Self> {
+        let data_str = pubchem::load_sdf(cid)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+        Self::new(&data_str)
+    }
+
+    /// Download from PDBe from a PDBe ID.
+    pub fn load_pdbe(ident: &str) -> io::Result<Self> {
+        let data_str = pdbe::load_sdf(ident)
+            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }
 }
