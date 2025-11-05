@@ -21,8 +21,6 @@ use na_seq::{AminoAcidGeneral, AtomTypeInRes, Element};
 
 use crate::{AtomGeneric, BondGeneric, BondType, LipidStandard};
 
-// X: A wildcard for any atom type. Seen in dihedrals from GAFF2.
-const X: &str = "X";
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]

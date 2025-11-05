@@ -252,8 +252,13 @@ impl Mol2 {
                     Ok(l) => l,
                     Err(e) => {
                         if atom_name.len() > 1 {
-                            // It might be something like "c3", "c1" etc."
-                            Element::from_letter(&atom_name[0..1])?
+                            // Try this:
+                            if atom_name.starts_with("BR") {
+                                Element::Bromine
+                            } else {
+                                // It might be something like "c3", "c1" etc.; try the first letter only.
+                                Element::from_letter(&atom_name[0..1])?
+                            }
                         } else {
                             return Err(e);
                         }
