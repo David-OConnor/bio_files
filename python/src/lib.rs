@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use bio_files_rs;
+use lin_alg::f64::Vec3;
 use pyo3::{exceptions::PyValueError, prelude::*, types::PyType};
 
 mod cif_sf;
@@ -70,15 +71,34 @@ impl AtomGeneric {
         self.inner.serial_number
     }
 
+    #[setter(partial_charge)]
+    fn serial_number_set(&mut self, v: u32) {
+        self.inner.serial_number = v;
+    }
+
     #[getter]
     fn posit(&self) -> [f64; 3] {
         self.inner.posit.to_arr()
+    }
+
+    #[setter(posit)]
+    fn posit_set(&mut self, v: [f64; 3]) -> PyResult<()> {
+        self.inner.posit = Vec3::from_slice(&v)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(format!("{e:?}")))?;
+        Ok(())
     }
 
     #[getter]
     // todo: String for now
     fn element(&self) -> String {
         self.inner.element.to_string()
+    }
+
+    #[setter(posit)]
+    fn element_set(&mut self, v: String) -> PyResult<()> {
+        self.inner.element = na_seq::Element::from_letter(&v)
+            .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;
+        Ok(())
     }
 
     #[getter]
@@ -92,14 +112,29 @@ impl AtomGeneric {
         self.inner.force_field_type.clone()
     }
 
+    #[setter(force_field_type)]
+    fn force_field_type_set(&mut self, v: Option<String>) {
+        self.inner.force_field_type = v;
+    }
+
     #[getter]
     fn partial_charge(&self) -> Option<f32> {
         self.inner.partial_charge
     }
 
+    #[setter(partial_charge)]
+    fn partial_charge_set(&mut self, v: Option<f32>) {
+        self.inner.partial_charge = v;
+    }
+
     #[getter]
     fn hetero(&self) -> bool {
         self.inner.hetero
+    }
+
+    #[setter(hetero)]
+    fn hetero_set(&mut self, v: bool) {
+        self.inner.hetero = v;
     }
 
     fn __repr__(&self) -> String {
