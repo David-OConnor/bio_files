@@ -85,7 +85,7 @@ mol2_data = sdf_data.to_mol2()
 mol2_data.save("test.mol2")
 
 # Load molecules from databases using identifiers:
-mol = Sdf.load_drugbank("DB00069")
+mol = Sdf.load_drugbank("DB00198")
 mol = Sdf.load_pubchem(12345)
 mol = Sdf.load_pdbe("CPB")
 mol = Mol2.load_amber_geostd("CPB")
@@ -132,7 +132,7 @@ let dm = DensityMap::load(path)?;
 
 
 // Load molecules from databases using identifiers:
-let mol = Sdf::load_drugbank("DB00069")?;
+let mol = Sdf::load_drugbank("DB00198")?;
 let mol = Sdf::load_pubchem(12345)?;
 let mol = Sdf::load_pdbe("CPB")?;
 let mol = Mol2::load_amber_geostd("CPB")?;
