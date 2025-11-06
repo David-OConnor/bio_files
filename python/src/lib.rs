@@ -71,7 +71,7 @@ impl AtomGeneric {
         self.inner.serial_number
     }
 
-    #[setter(partial_charge)]
+    #[setter(serial_number)]
     fn serial_number_set(&mut self, v: u32) {
         self.inner.serial_number = v;
     }
@@ -94,7 +94,7 @@ impl AtomGeneric {
         self.inner.element.to_string()
     }
 
-    #[setter(posit)]
+    #[setter(element)]
     fn element_set(&mut self, v: String) -> PyResult<()> {
         self.inner.element = na_seq::Element::from_letter(&v)
             .map_err(|e| pyo3::exceptions::PyValueError::new_err(e.to_string()))?;

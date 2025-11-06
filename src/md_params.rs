@@ -21,7 +21,6 @@ use na_seq::{AminoAcidGeneral, AtomTypeInRes, Element};
 
 use crate::{AtomGeneric, BondGeneric, BondType, LipidStandard};
 
-
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
 pub struct MassParams {
