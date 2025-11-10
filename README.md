@@ -5,6 +5,7 @@
 [![PyPI](https://img.shields.io/pypi/v/biology-files.svg)](https://pypi.org/project/biology-files)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17445294.svg)](https://doi.org/10.5281/zenodo.17445294)
 
+[Home page](https://www.athanorlab.com/rust-tools)
 
 This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
 on data structures that are specific to each file format; you will need to convert to and from the structures
