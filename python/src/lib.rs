@@ -9,6 +9,7 @@ mod gro;
 mod md_params;
 mod mmcif;
 mod mol2;
+mod orca;
 mod pdbqt;
 mod sdf;
 
