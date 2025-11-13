@@ -2,12 +2,21 @@
 //!
 //! todo: Consider an XYZ format module, to assist with ORA input?
 
+use std::{
+    fs,
+    fs::File,
+    io::{self, ErrorKind, Write},
+    path::Path,
+    process::Command,
+};
+
 use crate::AtomGeneric;
 
 // todo: Rename A/R
 /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
-#[derive(Clone, Copy, PartialEq, Debug)]
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum SinglePointEnergyType {
+    #[default]
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#hartree-fock-hf
     HartreeFock,
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#density-functional-theory-dft
@@ -47,37 +56,57 @@ impl SinglePointEnergyType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct OrcaInput {
-    entry_type: SinglePointEnergyType,
-    atoms: Vec<AtomGeneric>,
-    opt: bool,
+    pub energy_type: SinglePointEnergyType,
+    pub atoms: Vec<AtomGeneric>,
+    /// Optimize geometry
+    pub opt: bool,
+    /// Calculate vibrational frequencies
+    pub freq: bool,
+    /// Request a numerical gradient
+    pub numerical_gradient: bool,
+    /// Optimize positions of hydrogen atoms only
+    pub optimize_hydrogens: bool,
 }
 
 impl OrcaInput {
-    pub fn new(entry_type: SinglePointEnergyType, atoms: &[AtomGeneric]) -> Self {
+    pub fn new(energy_type: SinglePointEnergyType, atoms: &[AtomGeneric]) -> Self {
         Self {
-            entry_type,
+            energy_type,
             atoms: atoms.to_vec(),
             opt: false,
+            freq: false,
+            numerical_gradient: false,
+            optimize_hydrogens: false,
         }
     }
 
-    pub fn make_file(&self) -> String {
+    /// Create an .inp string for input into ORCA.
+    pub fn make_inp(&self) -> String {
         let mut result = String::new();
 
-        result.push_str(&format!("!{} DEF2-SVP", self.entry_type.command()));
+        result.push_str(&format!("!{} DEF2-SVP", self.energy_type.command()));
 
         if self.opt {
             result.push_str(" OPT")
         }
+        if self.freq {
+            result.push_str(" FREQ")
+        }
+        if self.numerical_gradient {
+            result.push_str(" NUMGRAD")
+        }
+
+        if self.optimize_hydrogens {
+            result.push_str("\n\n%geom\n  optimizehydrogens true\nend\n\n")
+        }
 
         result.push_str("\n* xyz 0 1\n");
 
-        // todo: Look at other files to see how you do this. E.g. write! on file objects, < > in formatting etc.
         for atom in &self.atoms {
             result.push_str(&format!(
-                "{}    {:>5.4}    {:>5.4}    {:>10.4}  \n",
+                "{:<2} {:>12.5} {:>12.5} {:>12.5}\n",
                 atom.element.to_letter(),
                 atom.posit.x,
                 atom.posit.y,
@@ -88,6 +117,52 @@ impl OrcaInput {
         result.push_str("*");
 
         result
+    }
+
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        let mut file = File::create(path)?;
+        let text = self.make_inp();
+
+        write!(file, "{text}")
+    }
+
+    /// Run this command in Orca, and collect the output. Requires `orca` to be available
+    /// on the system PATH environment variable.
+    /// todo: Outputs a string for now; adjust this as required into a custom output struct
+    pub fn run(&self) -> io::Result<String> {
+        let file_name = "temp_orca_input.inp";
+        let path = Path::new(file_name);
+        self.save(&path)?;
+
+        let out = match Command::new("orca").args([file_name]).output() {
+            Ok(out) => out,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                // Orca binary not found on PATH
+                fs::remove_file(path)?;
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    "`orca` executable not found in the system PATH",
+                ));
+            }
+            Err(e) => return Err(e),
+        };
+
+        if !out.status.success() {
+            let stderr_str = String::from_utf8_lossy(&out.stderr);
+            fs::remove_file(path)?;
+            return Err(io::Error::other(format!(
+                "Problem reading out temporary orca file: {}",
+                stderr_str
+            )));
+        }
+
+        fs::remove_file(path)?;
+
+        // Convert stdout bytes to String
+        let result =
+            String::from_utf8(out.stdout).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+
+        Ok(result)
     }
 }
 

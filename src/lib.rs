@@ -16,7 +16,7 @@ pub mod map;
 pub mod dat;
 pub mod frcmod;
 pub mod md_params;
-mod orca;
+pub mod orca;
 
 pub mod amber_typedef;
 mod bond_inference;
