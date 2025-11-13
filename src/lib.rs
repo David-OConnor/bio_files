@@ -23,6 +23,7 @@ mod bond_inference;
 pub mod cif_sf;
 mod mmcif_aux;
 pub mod prmtop;
+pub mod xyz;
 
 use std::{
     fmt,
@@ -42,6 +43,7 @@ pub use mol2::*;
 use na_seq::{AminoAcid, AtomTypeInRes, Element};
 pub use pdbqt::Pdbqt;
 pub use sdf::*;
+pub use xyz::*;
 
 // todo: SHould this be in na_seq?
 /// Common lipid types, as defined in Amber params. For phospholipics, chains and head groups

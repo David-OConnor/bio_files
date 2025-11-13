@@ -12,10 +12,9 @@ use std::{
 
 use crate::AtomGeneric;
 
-// todo: Rename A/R
 /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum SinglePointEnergyType {
+pub enum Method {
     #[default]
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#hartree-fock-hf
     HartreeFock,
@@ -36,11 +35,14 @@ pub enum SinglePointEnergyType {
     CoupledCluster,
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#semiempirical-methods-sqm
     SemiEmpericalMethods,
+    /// AKA GOAT. https://www.faccts.de/docs/orca/6.0/tutorials/prop/goat.html
+    ConformerSearch,
+    B97M,
 }
 
-impl SinglePointEnergyType {
+impl Method {
     /// Prefixed with an !, starts the .inp file.
-    pub fn command(self) -> String {
+    pub fn keyword(self) -> String {
         match self {
             Self::HartreeFock => "HF",
             Self::Dft => "B3LYP",
@@ -51,34 +53,99 @@ impl SinglePointEnergyType {
             Self::DoubleHybridDft => "B2PLYP",
             Self::CoupledCluster => "DLPNO-CCSD(T)",
             Self::SemiEmpericalMethods => "XTB2",
+            Self::ConformerSearch => "GOAT",
+            Self::B97M => "B97M-V",
         }
         .to_string()
     }
 }
 
+/// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum BasisSet {
+    #[default]
+    Svp,
+    TZVP,
+    Xtb,
+}
+
+impl BasisSet {
+    /// Prefixed with an !, starts the .inp file.
+    pub fn keyword(self) -> String {
+        match self {
+            Self::Svp => "DEF2-SVP",
+            Self::TZVP => "DEF2-TZVP",
+            Self::Xtb => "XTB", // todo?
+        }
+        .to_string()
+    }
+}
+
+/// Misc other keywords not including method and basis set.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Keyword {
+    WB97X_V,
+    SmdWater,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/solvator.html
+    AlpbWater,
+    OptimizeGeometry,
+    // OptimizeHydrogens,
+    TightOptimization,
+    Freq,
+    NumericalGradient,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/disp.html
+    D4Dispersion,
+}
+
+impl Keyword {
+    /// Prefixed with an !, starts the .inp file.
+    pub fn keyword(self) -> String {
+        match self {
+            Self::WB97X_V => "wB97X-V",
+            Self::SmdWater => "SMD(WATER)",
+            Self::AlpbWater => "ALPB(WATER)",
+            Self::OptimizeGeometry => "OPT",
+            // Self::OptimizeHydrogens => "OPT",
+            Self::TightOptimization => "TIGHTOPT",
+            Self::Freq => "FREQ",
+            Self::NumericalGradient => "NUMGRAD",
+            Self::D4Dispersion => "D4",
+        }
+        .to_string()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum SolvatorClusterMode {
+    #[default]
+    None,
+    Stochastic,
+}
+
+#[derive(Clone, Debug)]
+pub struct Solvator {
+    num_mols: u16,
+    cluster_mode: SolvatorClusterMode,
+    droplet: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct OrcaInput {
-    pub energy_type: SinglePointEnergyType,
+    pub method: Method,
+    pub basis_set: BasisSet,
+    pub keywords: Vec<Keyword>,
     pub atoms: Vec<AtomGeneric>,
-    /// Optimize geometry
-    pub opt: bool,
-    /// Calculate vibrational frequencies
-    pub freq: bool,
-    /// Request a numerical gradient
-    pub numerical_gradient: bool,
-    /// Optimize positions of hydrogen atoms only
-    pub optimize_hydrogens: bool,
+    pub solvator: Option<Solvator>,
 }
 
 impl OrcaInput {
-    pub fn new(energy_type: SinglePointEnergyType, atoms: &[AtomGeneric]) -> Self {
+    // todo: Keywords?
+    pub fn new(method: Method, basis_set: BasisSet, atoms: &[AtomGeneric]) -> Self {
         Self {
-            energy_type,
+            method,
+            basis_set,
             atoms: atoms.to_vec(),
-            opt: false,
-            freq: false,
-            numerical_gradient: false,
-            optimize_hydrogens: false,
+            ..Self::default()
         }
     }
 
@@ -86,20 +153,38 @@ impl OrcaInput {
     pub fn make_inp(&self) -> String {
         let mut result = String::new();
 
-        result.push_str(&format!("!{} DEF2-SVP", self.energy_type.command()));
+        result.push_str(&format!(
+            "!{} {}",
+            self.method.keyword(),
+            self.basis_set.keyword()
+        ));
 
-        if self.opt {
-            result.push_str(" OPT")
-        }
-        if self.freq {
-            result.push_str(" FREQ")
-        }
-        if self.numerical_gradient {
-            result.push_str(" NUMGRAD")
+        for kw in &self.keywords {
+            result.push_str(&format!(" {}", kw.keyword()));
         }
 
-        if self.optimize_hydrogens {
-            result.push_str("\n\n%geom\n  optimizehydrogens true\nend\n\n")
+        // todo: Handle this etc.
+        // if self.optimize_hydrogens {
+        //     result.push_str("\n\n%geom\n    optimizehydrogens true\nend\n\n");
+        // }
+
+        if let Some(solvator) = &self.solvator {
+            result.push_str(&format!(
+                "\n\n%solvator\n    nsolve {}\n",
+                solvator.num_mols
+            ));
+
+            match solvator.cluster_mode {
+                SolvatorClusterMode::None => (),
+                SolvatorClusterMode::Stochastic => {
+                    // todo: Impl Format for CLusterMOde etc.
+                    result.push_str(&format!("    CLUSTERMODE {}", "STOCHASTIC"));
+                }
+            }
+            if solvator.droplet {
+                result.push_str(&format!("    DROPLET true"));
+            }
+            result.push_str("\nend\n");
         }
 
         result.push_str("\n* xyz 0 1\n");

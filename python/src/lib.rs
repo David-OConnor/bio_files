@@ -12,6 +12,7 @@ mod mol2;
 mod orca;
 mod pdbqt;
 mod sdf;
+mod xyz;
 
 /// Candidate for standalone helper lib.
 #[macro_export]
@@ -399,6 +400,7 @@ fn biology_files(_py: Python<'_>, m: &Bound<PyModule>) -> PyResult<()> {
     m.add_class::<mmcif::MmCif>()?;
     m.add_class::<mol2::Mol2>()?;
     m.add_class::<sdf::Sdf>()?;
+    m.add_class::<xyz::Xyz>()?;
     m.add_class::<gro::Gro>()?;
     m.add_class::<pdbqt::Pdbqt>()?;
 

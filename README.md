@@ -27,6 +27,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - GRO (Gromacs molecules)
 - TOP (Gromacs topology) - WIP
 - ORCA Input and output files (quantum chemistry; HF, DFT etc)
+- XYZ (Minimal atom coordinate format)
 
 
 ### Planned:
@@ -66,6 +67,27 @@ add optimizations downstream, like converting to indices, and/or applying back-r
 an atom's in, in your derived Atom struct).
 
 
+## Orca interop
+Can generate and run [ORCA](https://www.faccts.de/orca/) commands, and parse the result. Example:
+```rust
+let orca_inp = bio_files::orca::OrcaInput {
+    atoms,
+    opt: true,
+    freq: true,
+    ..Default::default()
+};
+
+println!("Orca input:\n{}\n", orca_inp.make_inp());
+// Save to disk if desired:
+orca_inp.save(Path::new("atoms.inp"))?;
+
+println!("Running Orca...");
+let orca_out = orca_inp.run()?;
+
+println!("Orca OUT:\n{}\n", orca_out);
+```
+
+
 ## Example use
 
 Small molecule save and load, Python.
@@ -103,15 +125,17 @@ Small molecule save and load, Rust.
 use bio_files::{Sdf, Mol2};
 
 // ...
-let sdf_data = Sdf::load("./molecules/DB03496.sdf");
+let sdf_data = Sdf::load("./molecules/DB03496.sdf")?;
 
 sdf_data.atoms[0]; // (as above)
 sdf_data.atoms[0].posit;  // (as above, but lin_alg::Vec3))
 
-sdf_data.save("test.sdf");
+sdf_data.save("test.sdf")?;
 
 let mol2_data: Mol2 = sdf_data.into();
-mol2_data.save("test.mol2");
+mol2_data.save("test.mol2")?;
+
+let xyz_data = Xyz::load("./atom_posits.xyz")?;
 
 
 // Loading Force field parameters:
@@ -131,7 +155,6 @@ let dm = density_map_from_mmcif(&data, &mut fft_planner)?;
 // Or if you have a Map file:
 let p = Path::new("8s6p.map")
 let dm = DensityMap::load(path)?;
-
 
 // Load molecules from databases using identifiers:
 let mol = Sdf::load_drugbank("DB00198")?;
