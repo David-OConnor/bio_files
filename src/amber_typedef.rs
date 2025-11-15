@@ -37,12 +37,12 @@ fn parse_str_field(s: Option<&str>) -> Option<String> {
 }
 
 #[derive(Debug)]
-pub struct DefFile {
+pub struct AmberDef {
     pub wildatoms: Vec<WildAtom>,
     pub atomtypes: Vec<AtomTypeDef>,
 }
 
-impl DefFile {
+impl AmberDef {
     pub fn new(text: &str) -> io::Result<Self> {
         let mut wildatoms = Vec::new();
         let mut atomtypes = Vec::new();
