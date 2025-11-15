@@ -173,6 +173,45 @@ impl Method {
     }
 }
 
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/counterpoise.html
+/// Table 2.52
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum GcpOption {
+    HfMinis,
+    HfSv,
+    Hf631Gd,
+    HfSvp,
+    HfTz,
+    DftMinis,
+    DftSv,
+    Dft631Gd,
+    DftLanl,
+    DftVsP_,
+    DftSvp,
+    DftTz,
+    File
+}
+
+impl GcpOption {
+    pub fn keyword(self) -> String {
+        match self {
+            Self::HfMinis => "hf/minis",
+            Self::HfSv=> "hf/sv",
+            Self:: Hf631Gd=> "hf/631gd",
+            Self:: HfSvp=> "hf/svp",
+            Self:: HfTz=> "hf/tz",
+            Self::  DftMinis=> "dft/minis",
+            Self::  DftSv=> "dft/sv",
+            Self::  Dft631Gd=> "dft/631gd",
+            Self::  DftLanl=> "dft/lanl",
+            Self:: DftVsP_=> "dft/sv(p)",
+            Self::  DftSvp=> "dft/svp",
+            Self::  DftTz=> "dft/tz",
+            Self:: File=> "file",
+        }.to_string()
+    }
+}
+
 /// Misc other keywords not including method and basis set.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Keyword {
@@ -191,24 +230,27 @@ pub enum Keyword {
     D4Dispersion,
     /// AKA GOAT. https://www.faccts.de/docs/orca/6.0/tutorials/prop/goat.html
     ConformerSearch,
+    /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/counterpoise.html
+    Gcp(GcpOption)
 }
 
 impl Keyword {
     /// Prefixed with an !, starts the .inp file.
     pub fn keyword(self) -> String {
         match self {
-            Self::MBIS => "MBIS",
-            Self::SmdWater => "SMD(WATER)",
-            Self::AlpbWater => "ALPB(WATER)",
-            Self::OptimizeGeometry => "OPT",
+            Self::MBIS => "MBIS".to_string(),
+            Self::SmdWater => "SMD(WATER)".to_string(),
+            Self::AlpbWater => "ALPB(WATER)".to_string(),
+            Self::OptimizeGeometry => "OPT".to_string(),
             // Self::OptimizeHydrogens => "OPT",
-            Self::TightOptimization => "TIGHTOPT",
-            Self::Freq => "FREQ",
-            Self::NumericalGradient => "NUMGRAD",
-            Self::D4Dispersion => "D4",
-            Self::ConformerSearch => "GOAT",
+            Self::TightOptimization => "TIGHTOPT".to_string(),
+            Self::Freq => "FREQ".to_string(),
+            Self::NumericalGradient => "NUMGRAD".to_string(),
+            Self::D4Dispersion => "D4".to_string(),
+            Self::ConformerSearch => "GOAT".to_string(),
+            Self::Gcp(option) => format!("GCP({}", option.keyword()),
         }
-        .to_string()
+
     }
 }
 
@@ -241,6 +283,7 @@ pub enum SolvatorClusterMode {
     Stochastic,
 }
 
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html
 #[derive(Clone, Debug)]
 pub struct Solvator {
     num_mols: u16,
@@ -377,7 +420,7 @@ impl OrcaInput {
             result.push_str(&scf.make_inp());
         }
 
-        result.push_str("\n* xyz 0 1\n");
+        result.push_str("\n\n* xyz 0 1\n");
 
         for atom in &self.atoms {
             result.push_str(&format!(

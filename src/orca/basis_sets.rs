@@ -359,7 +359,7 @@ impl BasisSet {
             // --- Ahlrich end
             // --- Karlsruhe def2 start
             // Karlsruhe def2- family
-            Def2Svp => "DEF2-SVP",
+            Def2Svp => "def2-SVP",
             Def2Svp_ => "def2-SV(P)",
             Def2Tzvp => "def2-TZVP",
             Def2TzvpMinusF => "def2-TZVP(-f)",
@@ -521,11 +521,11 @@ impl BasisSet {
 /// May be useful to organize basis sets.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum BasisSetCategory {
-    #[default]
     Pople,
     Ahlrich,
-    KarlseruhDef2,
-    KarlseruhDhs,
+    #[default]
+    KarlseruheDef2,
+    KarlseruheDhf,
     CorrelationConsistent,
 }
 
@@ -629,7 +629,7 @@ impl BasisSetCategory {
                 MaDef2Tzvpp,
                 MaDef2Qzvpp,
             ],
-            Self::KarlseruhDef2 => vec![
+            Self::KarlseruheDef2 => vec![
                 Def2Svp,
                 Def2Svp_,
                 Def2Tzvp,
@@ -654,7 +654,7 @@ impl BasisSetCategory {
                 MaDef2Tzvpp,
                 MaDef2Qzvpp,
             ],
-            Self::KarlseruhDhf => vec![
+            Self::KarlseruheDhf => vec![
                 // Karlsruhe dhf- family
                 DhfSvp_,
                 DhfSvp,
@@ -790,9 +790,9 @@ impl Display for BasisSetCategory {
         let v = match self {
             Self::Pople => "Pople",
             Self::Ahlrich => "Ahlrich",
-            Self::KarlseruhDef2 => "KarlseruhDef2",
-            Self::KarlseruhDhs => "karlseruhDhs",
-            Self::CorrelationConsistent => "CorrelationConsistent",
+            Self::KarlseruheDef2 => "Karlsruhe Def2",
+            Self::KarlseruheDhf => "karlsruhe Dhf",
+            Self::CorrelationConsistent => "Correlation Consistent",
         };
         write!(f, "{v}")
     }

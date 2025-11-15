@@ -68,14 +68,19 @@ an atom's in, in your derived Atom struct).
 
 
 ## Orca interop
+Note: Orca support is currently limited to a subset of features. We plan to gradually expand this.
+If you're looking for specific functionality, please open an Issue or PR on Github.
+
 Can generate and run [ORCA](https://www.faccts.de/orca/) commands, and parse the result. Example:
 ```rust
-let orca_inp = bio_files::orca::OrcaInput {
+let mut orca_inp = bio_files::orca::OrcaInput {
+    method: Method::HartreeFock,
+    basis_set: BasisSet::Def2Svp,
     atoms,
-    opt: true,
-    freq: true,
     ..Default::default()
 };
+
+orca_inp.keywords = vec![Keyword::Opt, Keyword::Freq];
 
 println!("Orca input:\n{}\n", orca_inp.make_inp());
 // Save to disk if desired:
