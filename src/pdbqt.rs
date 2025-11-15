@@ -34,11 +34,6 @@ fn parse_f64(s: &str) -> io::Result<f64> {
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid float"))
 }
 
-fn parse_f32(s: &str) -> io::Result<f32> {
-    s.parse::<f32>()
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid float"))
-}
-
 fn parse_optional_f32(s: &str) -> io::Result<Option<f32>> {
     if s.is_empty() {
         Ok(None)
@@ -51,12 +46,12 @@ fn parse_optional_f32(s: &str) -> io::Result<Option<f32>> {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum TorsionStatus {
+enum _TorsionStatus {
     Active,
     Inactive,
 }
 
-impl Display for TorsionStatus {
+impl Display for _TorsionStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let str = match self {
             Self::Active => "A".to_string(),
@@ -171,7 +166,7 @@ impl Pdbqt {
                 let z = parse_f64(line[46..54].trim())?;
 
                 let occupancy = parse_optional_f32(line[54..60].trim())?;
-                let temperature_factor = parse_optional_f32(line[60..66].trim())?;
+                let _temperature_factor = parse_optional_f32(line[60..66].trim())?;
                 // Gasteiger PEOE partial charge q.
                 let partial_charge = parse_optional_f32(line[66..76].trim())?;
 
@@ -280,7 +275,7 @@ impl Pdbqt {
 
         // Optionally write remarks, ROOT/ENDROOT, etc. here if needed.
         // For each atom:
-        for (i, atom) in self.atoms.iter().enumerate() {
+        for atom in &self.atoms {
             // todo: A/R
             // if let Some(role) = atom.role {
             //     // if role == AtomRole::Water || atom.element == Element::Hydrogen {

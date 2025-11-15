@@ -67,7 +67,12 @@ add optimizations downstream, like converting to indices, and/or applying back-r
 an atom's in, in your derived Atom struct).
 
 
-## Orca interop
+## Orca interface
+This library provides an interface to building Orca inputs, executing commands, and parsing
+outputs. It uses Rust data structures to contrain input choices into valid ones when possible, and allows you to integrate Orca into Rust programs and libraries. For example,
+[Daedalus](https://github.com/david-oconnor/daedalus) uses it to minimize energy on organic
+molecules, and augment traditional MD technique with quantum mechanics.
+
 ORCA support in this library is limited to Rust only. If you wish to use Orca with Python,
 use [OPI, the official FACCTS library](https://github.com/faccts/opi).
 

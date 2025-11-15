@@ -1,3 +1,5 @@
+#![allow(clippy::excessive_precision)]
+
 //! Contains parameters used in Amber Forcefields. For details on these formats,
 //! see the [Amber Reference Manual](https://ambermd.org/doc12/Amber25.pdf), section
 //! 15: Reading and modifying Amber parameter files.
@@ -447,7 +449,7 @@ impl ForceFieldParams {
         let mut out = Vec::new();
         out.push(atom.to_string()); // exact
 
-        if atom.len() > 0 {
+        if !atom.is_empty() {
             let first = atom.chars().next().unwrap();
             // Only add meaningful ones like C*, N*, O*, etc.
             if first.is_ascii_alphabetic() {

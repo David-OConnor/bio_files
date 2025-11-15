@@ -164,8 +164,8 @@ impl Sdf {
 
         // Look for a molecule identifier in the file. Check for either
         // "> <PUBCHEM_COMPOUND_CID>" or "> <DATABASE_ID>" and take the next nonempty line.
-        let mut pubchem_cid = None;
-        let mut drugbank_id = None;
+        let mut _pubchem_cid = None;
+        let mut _drugbank_id = None;
 
         for (i, line) in lines.iter().enumerate() {
             if line.contains("> <PUBCHEM_COMPOUND_CID>")
@@ -173,7 +173,7 @@ impl Sdf {
             {
                 let value = value_line.trim();
                 if let Ok(v) = value.parse::<u32>() {
-                    pubchem_cid = Some(v);
+                    _pubchem_cid = Some(v);
                 }
             }
             if line.contains("> <DATABASE_ID>")
@@ -181,7 +181,7 @@ impl Sdf {
             {
                 let value = value_line.trim();
                 if !value.is_empty() {
-                    drugbank_id = Some(value.to_string());
+                    _drugbank_id = Some(value.to_string());
                 }
             }
         }
@@ -190,7 +190,7 @@ impl Sdf {
         // We observe that on at least some DrugBank files, this line
         // is the PubChem ID, even if the PUBCHEM_COMPOUND_CID line is omitted.
         if let Ok(v) = lines[0].parse::<u32>() {
-            pubchem_cid = Some(v);
+            _pubchem_cid = Some(v);
         }
 
         // We could now skip over the bond lines if we want:
@@ -423,21 +423,21 @@ impl Sdf {
     /// Download from DrugBank from a Drugbank ID.
     pub fn load_drugbank(ident: &str) -> io::Result<Self> {
         let data_str = drugbank::load_sdf(ident)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+            .map_err(|e| io::Error::other(format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }
 
     /// Download from PubChem from a CID.
     pub fn load_pubchem(cid: u32) -> io::Result<Self> {
         let data_str = pubchem::load_sdf(cid)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+            .map_err(|e| io::Error::other(format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }
 
     /// Download from PDBe from a PDBe ID.
     pub fn load_pdbe(ident: &str) -> io::Result<Self> {
-        let data_str = pdbe::load_sdf(ident)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+        let data_str =
+            pdbe::load_sdf(ident).map_err(|e| io::Error::other(format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }
 }

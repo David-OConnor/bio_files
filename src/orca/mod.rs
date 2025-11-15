@@ -4,8 +4,11 @@
 //! run these if ORCA is available in the system PATH, and display and parse the output.
 //!
 //! This currently supports a limited subset of ORCA's functionality.
+//!
+//! Fields marked as None generally mean *use ORCA's defaults*.
 
 pub mod basis_sets;
+pub mod scf;
 pub mod solvation;
 
 use std::{
@@ -17,7 +20,8 @@ use std::{
 };
 
 use basis_sets::BasisSet;
-use solvation::*;
+use scf::Scf;
+use solvation::{Solvator, SolvatorImplicit};
 
 /// A helper. The &str and String use reflects how we use this in practie,
 /// e.g. with &str literals vs format!().
@@ -248,6 +252,8 @@ pub enum Keyword {
     ConformerSearch,
     /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/counterpoise.html
     Gcp(GcpOption),
+    /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/symmetry.html
+    UseSymmetry,
 }
 
 impl Keyword {
@@ -263,6 +269,7 @@ impl Keyword {
             Self::D4Dispersion => "D4".to_string(),
             Self::ConformerSearch => "GOAT".to_string(),
             Self::Gcp(option) => format!("GCP({}", option.keyword()),
+            Self::UseSymmetry => "UseSymmetry".to_string(),
         }
     }
 }
@@ -289,51 +296,32 @@ pub struct BondLocalization {
     pub method: LocalizationMethod,
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum ScfConvergenceTolerance {
-    /// Between medium and strong
-    #[default]
-    None,
-    Sloppy,
-    Loose,
-    Medium,
-    Strong,
-    Tight,
-    VeryTight,
-    Extreme,
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/symmetry.html
+#[derive(Clone, Debug, Default)]
+pub struct Symmetry {
+    pub sym_thresh: Option<f32>,
+    pub prefer_c2v: Option<bool>,
+    pub point_group: Option<String>,
+    // todo: Fill out the remaining items using the table A/R.
 }
 
-impl ScfConvergenceTolerance {
-    pub fn keyword(self) -> String {
-        match self {
-            Self::None => "",
-            Self::Sloppy => "Sloppy",
-            Self::Loose => "Loose",
-            Self::Medium => "Medium",
-            Self::Strong => "Strong",
-            Self::Tight => "Tight",
-            Self::VeryTight => "VeryTight",
-            Self::Extreme => "Extreme",
-        }
-        .to_string()
-    }
-}
-
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
-#[derive(Clone, Debug)]
-pub struct Scf {
-    // todo: Damping, level shifting etc. Lots more features to implement
-    pub convergence_tolerance: ScfConvergenceTolerance,
-    // todo: Allow custom values. See https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html Table 2.9
-}
-
-impl Scf {
+impl Symmetry {
     pub fn make_inp(&self) -> String {
-        make_inp_block(
-            "scf",
-            &[("Convergence", self.convergence_tolerance.keyword())],
-        )
+        let mut contents = vec![("UseSymmetry", "true".to_owned())];
+
+        if let Some(v) = self.sym_thresh {
+            contents.push(("SymThresh", format!("{v:.6}")));
+        }
+
+        if let Some(v) = self.prefer_c2v {
+            contents.push(("PreferC2v", format!("{v:?}")));
+        }
+
+        if let Some(v) = &self.point_group {
+            contents.push(("PreferC2v", v.clone()));
+        }
+
+        make_inp_block("sym", &contents)
     }
 }
 
@@ -348,6 +336,9 @@ pub struct OrcaInput {
     pub solvator_implicit: Option<SolvatorImplicit>,
     pub bond_localization: Option<BondLocalization>,
     pub scf: Option<Scf>,
+    pub symmetry: Option<Symmetry>,
+    // todo: A/R: https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/stabilityanalysis.html
+    // pub shark: Option<Shark>,
 }
 
 impl OrcaInput {
@@ -365,6 +356,7 @@ impl OrcaInput {
     pub fn make_inp(&self) -> String {
         let mut result = String::new();
 
+        // --- Initial line ---
         result.push_str(&format!(
             "!{} {}",
             self.method.keyword(),
@@ -375,12 +367,9 @@ impl OrcaInput {
             result.push_str(&format!(" {}", kw.keyword()));
         }
 
-        // todo: Handle this etc.
-        // if self.optimize_hydrogens {
-        //     result.push_str("\n\n%geom\n    optimizehydrogens true\nend\n\n");
-        // }
-
-        // todo: Generalization over these blocks A/R.
+        // --- Blocks ---
+        //
+        // todo: Generalization over these blocks A/R with a macro.
         if let Some(solvator) = &self.solvator {
             result.push('\n');
             result.push_str(&solvator.make_inp());
@@ -392,17 +381,23 @@ impl OrcaInput {
         }
 
         if let Some(loc) = &self.bond_localization {
+            result.push('\n');
             result.push_str(&make_inp_block("loc", &[("locmet", loc.method.keyword())]));
         }
 
-        // todo: Generalization over these blocks A/R.
         if let Some(scf) = &self.scf {
             result.push('\n');
             result.push_str(&scf.make_inp());
         }
 
+        if let Some(sym) = &self.symmetry {
+            result.push('\n');
+            result.push_str(&sym.make_inp());
+        }
+
         result.push_str("\n\n* xyz 0 1\n");
 
+        // --- Atoms ---
         for atom in &self.atoms {
             result.push_str(&format!(
                 "{:<2} {:>12.5} {:>12.5} {:>12.5}\n",
@@ -413,7 +408,7 @@ impl OrcaInput {
             ));
         }
 
-        result.push_str("*");
+        result.push('*');
 
         result
     }
@@ -429,12 +424,13 @@ impl OrcaInput {
     /// on the system PATH environment variable.
     /// todo: Outputs a string for now; adjust this as required into a custom output struct
     pub fn run(&self) -> io::Result<String> {
+        // pub fn run(&self) -> io::Result<OrcaOutput> {
         let dir = Path::new("orca_temp");
         fs::create_dir_all(dir)?;
 
         let file_name = "temp_orca_input.inp";
         let path = Path::new(file_name);
-        self.save(&path)?;
+        self.save(path)?;
 
         let out = match Command::new("orca")
             .current_dir(dir)
@@ -462,8 +458,9 @@ impl OrcaInput {
             )));
         }
 
-        // todo: Do we want to clean up the temp dir?
-        fs::remove_file(path)?;
+        // Remove the entire temporary directory.
+        fs::remove_dir(dir)?;
+        // fs::remove_file(path)?;
 
         // Convert stdout bytes to String
         let result =

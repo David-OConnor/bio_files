@@ -461,7 +461,7 @@ impl Mol2 {
     /// Download  rom our Amber Geostd DB using a PDBe/Amber ID.
     pub fn load_amber_geostd(ident: &str) -> io::Result<Self> {
         let data_str = amber_geostd::load_mol2(ident)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+            .map_err(|e| io::Error::other(format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }
 }

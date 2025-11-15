@@ -84,11 +84,10 @@ impl AmberDef {
                     let name = tokens[1].to_string();
                     let residue = parse_str_field(tokens.get(2).copied());
                     let atomic_number = tokens.get(3).and_then(|s| parse_u8_field(s));
-                    let element = match atomic_number {
-                        // todo: Placeholder, given Element is missing items.
-                        Some(n) => Some(Element::from_atomic_number(n).unwrap_or(Element::Zinc)),
-                        None => None,
-                    };
+
+                    // todo: Placeholder, given Element is missing items.
+                    let element = atomic_number
+                        .map(|n| Element::from_atomic_number(n).unwrap_or(Element::Zinc));
 
                     let attached_atoms = tokens.get(4).and_then(|s| parse_u8_field(s));
                     let attached_h = tokens.get(5).and_then(|s| parse_u8_field(s));

@@ -7,7 +7,7 @@
 //!
 //! All lengths are in angstrom (Å)
 
-use std::{collections::HashMap, f64::consts::TAU};
+use std::collections::HashMap;
 
 use lin_alg::f64::Vec3;
 use na_seq::{

@@ -368,8 +368,8 @@ pub fn load_prmtop(path: &Path) -> io::Result<(Vec<AtomGeneric>, ForceFieldParam
         ));
     }
     let mut pointers = [0i32; 31];
-    for i in 0..31 {
-        pointers[i] = get_i(&p.data[i])?;
+    for (i, pointer) in pointers.iter_mut().enumerate() {
+        *pointer = get_i(&p.data[i])?;
     }
 
     let natom = pointers[0] as usize;

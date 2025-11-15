@@ -10,6 +10,15 @@ pub enum SolvatorClusterMode {
     Stochastic,
 }
 
+impl SolvatorClusterMode {
+    pub fn keyword(self) -> String {
+        match self {
+            Self::None => String::new(),
+            Self::Stochastic => "stochastic".to_owned(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ImplicitSolvationSurfaceType {
     // todo: This is a stub
@@ -64,11 +73,11 @@ impl SolvatorImplicit {
         }
 
         if let Some(v) = self.epsilon {
-            contents.push(("epsilon", format!("{v}:.6")));
+            contents.push(("epsilon", format!("{v:.6}")));
         }
 
         if let Some(v) = self.rsolv {
-            contents.push(("rsolv", format!("{v}:.6")));
+            contents.push(("rsolv", format!("{v:.6}")));
         }
 
         if self.draco {
@@ -76,11 +85,11 @@ impl SolvatorImplicit {
         }
 
         if let Some(v) = self.soln {
-            contents.push(("soln", format!("{v}:.6")));
+            contents.push(("soln", format!("{v:.6}")));
         }
 
         if let Some(v) = self.soln25 {
-            contents.push(("soln25", format!("{v}:.6")));
+            contents.push(("soln25", format!("{v:.6}")));
         }
 
         match self.model {
@@ -98,7 +107,7 @@ impl SolvatorImplicit {
 impl ImplicitSolvationModel {
     pub fn keyword(self) -> String {
         match self {
-            /// Note: It appears the ORCA API treats SMD as a subset of CPCM. (?)
+            // Note: It appears the ORCA API treats SMD as a subset of CPCM. (?)
             Self::Cpcm => "cpcm",
             Self::Smd => "smd",
             Self::OpenCosmo => "cosmors",
@@ -120,22 +129,17 @@ pub struct Solvator {
 
 impl Solvator {
     pub fn make_inp(&self) -> String {
-        let mut result = String::new();
-        result.push_str(&format!("\n\n%solvator\n    nsolv {}\n", self.num_mols));
+        // todo: Add the Solvent too
+        let mut contents = vec![
+            ("nsolv", self.num_mols.to_string()),
+            ("clustermode", self.cluster_mode.keyword()),
+        ];
 
-        match self.cluster_mode {
-            SolvatorClusterMode::None => (),
-            SolvatorClusterMode::Stochastic => {
-                // todo: Impl Format for CLusterMOde etc.
-                result.push_str(&format!("    CLUSTERMODE {}", "STOCHASTIC"));
-            }
-        }
         if self.droplet {
-            result.push_str(&format!("    DROPLET true"));
+            contents.push(("droplet", "true".to_string()));
         }
-        result.push_str("\nend\n");
 
-        result
+        make_inp_block("solvator", &contents)
     }
 }
 

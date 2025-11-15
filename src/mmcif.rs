@@ -413,8 +413,8 @@ impl MmCif {
 
     /// Download Load from DrugBank from the RCSB Protein Data Bank. (PDB)
     pub fn load_rcsb(ident: &str) -> io::Result<Self> {
-        let data_str = rcsb::load_cif(ident)
-            .map_err(|e| io::Error::new(ErrorKind::Other, format!("Error loading: {e:?}")))?;
+        let data_str =
+            rcsb::load_cif(ident).map_err(|e| io::Error::other(format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }
 }
