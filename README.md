@@ -52,7 +52,7 @@ For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do n
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
 It operates using structs with public fields, which you can explore
-using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`, 
+using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`,
 `save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and
 `load()` accept `&Path`.
 The Force Field formats use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
@@ -68,6 +68,9 @@ an atom's in, in your derived Atom struct).
 
 
 ## Orca interop
+ORCA support in this library is limited to Rust only. If you wish to use Orca with Python,
+use [OPI, the official FACCTS library](https://github.com/faccts/opi).
+
 Note: Orca support is currently limited to a subset of features. We plan to gradually expand this.
 If you're looking for specific functionality, please open an Issue or PR on Github.
 
@@ -102,7 +105,7 @@ from biology_files import Sdf
 sdf_data = Sdf.load("./molecules/DB03496.sdf")
 
 sdf_data.atoms[0]
-#AtomGeneric { serial_number: 1, posit: Vec3 { x: 2.3974, y: 1.1259, z: 2.5289 }, element: Chlorine, 
+#AtomGeneric { serial_number: 1, posit: Vec3 { x: 2.3974, y: 1.1259, z: 2.5289 }, element: Chlorine,
 type_in_res: None, force_field_type: None, occupancy: None, partial_charge: None, hetero: true }
 
 sdf_data.atoms[0].posit
@@ -175,14 +178,14 @@ You can use similar syntax for mmCIF protein files.
 
 ## Amber force fields
 
-Reference the [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf) 
+Reference the [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)
 for details on how we parse its files, and how to use the results. In some cases, we change the format from
-the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals 
+the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals
 parameters. Structs and fields are documented with reference manual references.
 
 The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching parameters,
-angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups 
-for your application. 
+angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups
+for your application.
 
 Note that the above examples expect that your application has a struct representing the molecule that has
 `From<Mol2>`, and `to_mol2(&self)` (etc) methods. The details of these depend on the application. For example:

@@ -1,10 +1,12 @@
 #![allow(non_camel_case_types)]
 
-//! For interop with ORCA files. For example, `inp` and `out` files.
+//! For interop with ORCA files. For example, `inp` and `out` files. Can construct inputs for ORCA,
+//! run these if ORCA is available in the system PATH, and display and parse the output.
 //!
-//! todo: Consider an XYZ format module, to assist with ORA input?
+//! This currently supports a limited subset of ORCA's functionality.
 
 pub mod basis_sets;
+pub mod solvation;
 
 use std::{
     fs,
@@ -13,7 +15,23 @@ use std::{
     path::Path,
     process::Command,
 };
+
 use basis_sets::BasisSet;
+use solvation::*;
+
+/// A helper. The &str and String use reflects how we use this in practie,
+/// e.g. with &str literals vs format!().
+fn make_inp_block(block_name: &str, contents: &[(&str, String)]) -> String {
+    let mut r = format!("%{block_name}\n");
+
+    for (k, v) in contents {
+        r.push_str(&format!("    {} {}\n", k, v));
+    }
+
+    r.push_str("end");
+    r
+}
+
 use crate::AtomGeneric;
 /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
@@ -94,7 +112,6 @@ pub enum Method {
     PBEH_3C,
     B3LYP_3C,
     // --- End HFX
-
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/fod.html
     FractionalOccupationDensity,
     None, // todo: I believe this is right?
@@ -189,38 +206,37 @@ pub enum GcpOption {
     DftVsP_,
     DftSvp,
     DftTz,
-    File
+    File,
 }
 
 impl GcpOption {
     pub fn keyword(self) -> String {
         match self {
             Self::HfMinis => "hf/minis",
-            Self::HfSv=> "hf/sv",
-            Self:: Hf631Gd=> "hf/631gd",
-            Self:: HfSvp=> "hf/svp",
-            Self:: HfTz=> "hf/tz",
-            Self::  DftMinis=> "dft/minis",
-            Self::  DftSv=> "dft/sv",
-            Self::  Dft631Gd=> "dft/631gd",
-            Self::  DftLanl=> "dft/lanl",
-            Self:: DftVsP_=> "dft/sv(p)",
-            Self::  DftSvp=> "dft/svp",
-            Self::  DftTz=> "dft/tz",
-            Self:: File=> "file",
-        }.to_string()
+            Self::HfSv => "hf/sv",
+            Self::Hf631Gd => "hf/631gd",
+            Self::HfSvp => "hf/svp",
+            Self::HfTz => "hf/tz",
+            Self::DftMinis => "dft/minis",
+            Self::DftSv => "dft/sv",
+            Self::Dft631Gd => "dft/631gd",
+            Self::DftLanl => "dft/lanl",
+            Self::DftVsP_ => "dft/sv(p)",
+            Self::DftSvp => "dft/svp",
+            Self::DftTz => "dft/tz",
+            Self::File => "file",
+        }
+        .to_string()
     }
 }
 
 /// Misc other keywords not including method and basis set.
+/// Note that we ommit some that are part of other fields we have, as with solvents.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Keyword {
     /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/charges.html
-    MBIS,
-    SmdWater,
-    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/solvator.html
-    AlpbWater,
+    Mbis,
     OptimizeGeometry,
     // OptimizeHydrogens,
     TightOptimization,
@@ -231,16 +247,14 @@ pub enum Keyword {
     /// AKA GOAT. https://www.faccts.de/docs/orca/6.0/tutorials/prop/goat.html
     ConformerSearch,
     /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/counterpoise.html
-    Gcp(GcpOption)
+    Gcp(GcpOption),
 }
 
 impl Keyword {
     /// Prefixed with an !, starts the .inp file.
     pub fn keyword(self) -> String {
         match self {
-            Self::MBIS => "MBIS".to_string(),
-            Self::SmdWater => "SMD(WATER)".to_string(),
-            Self::AlpbWater => "ALPB(WATER)".to_string(),
+            Self::Mbis => "MBIS".to_string(),
             Self::OptimizeGeometry => "OPT".to_string(),
             // Self::OptimizeHydrogens => "OPT",
             Self::TightOptimization => "TIGHTOPT".to_string(),
@@ -250,7 +264,6 @@ impl Keyword {
             Self::ConformerSearch => "GOAT".to_string(),
             Self::Gcp(option) => format!("GCP({}", option.keyword()),
         }
-
     }
 }
 
@@ -276,45 +289,9 @@ pub struct BondLocalization {
     pub method: LocalizationMethod,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum SolvatorClusterMode {
-    #[default]
-    None,
-    Stochastic,
-}
-
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html
-#[derive(Clone, Debug)]
-pub struct Solvator {
-    num_mols: u16,
-    cluster_mode: SolvatorClusterMode,
-    droplet: bool,
-}
-
-impl Solvator {
-    pub fn make_inp(&self) -> String {
-        let mut result = String::new();
-        result.push_str(&format!("\n\n%solvator\n    nsolv {}\n", self.num_mols));
-
-        match self.cluster_mode {
-            SolvatorClusterMode::None => (),
-            SolvatorClusterMode::Stochastic => {
-                // todo: Impl Format for CLusterMOde etc.
-                result.push_str(&format!("    CLUSTERMODE {}", "STOCHASTIC"));
-            }
-        }
-        if self.droplet {
-            result.push_str(&format!("    DROPLET true"));
-        }
-        result.push_str("\nend\n");
-        
-        result
-    }
-}
-
 /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
-pub enum ScfConvergenceTolerance{
+pub enum ScfConvergenceTolerance {
     /// Between medium and strong
     #[default]
     None,
@@ -338,7 +315,8 @@ impl ScfConvergenceTolerance {
             Self::Tight => "Tight",
             Self::VeryTight => "VeryTight",
             Self::Extreme => "Extreme",
-        }.to_string()
+        }
+        .to_string()
     }
 }
 
@@ -352,12 +330,10 @@ pub struct Scf {
 
 impl Scf {
     pub fn make_inp(&self) -> String {
-        let mut result = "%scf\n    Convergence\n".to_string();
-        
-        result.push_str(&format!("        {}", self.convergence_tolerance.keyword()));
-        result.push_str("\nend");
-        
-        result
+        make_inp_block(
+            "scf",
+            &[("Convergence", self.convergence_tolerance.keyword())],
+        )
     }
 }
 
@@ -369,6 +345,7 @@ pub struct OrcaInput {
     pub atoms: Vec<AtomGeneric>,
     /// todo: Ref [this list of input blocks from the docs](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html);
     pub solvator: Option<Solvator>,
+    pub solvator_implicit: Option<SolvatorImplicit>,
     pub bond_localization: Option<BondLocalization>,
     pub scf: Option<Scf>,
 }
@@ -409,9 +386,13 @@ impl OrcaInput {
             result.push_str(&solvator.make_inp());
         }
 
+        if let Some(solvator) = &self.solvator_implicit {
+            result.push('\n');
+            result.push_str(&solvator.make_inp());
+        }
+
         if let Some(loc) = &self.bond_localization {
-            result.push_str(&format!("\n\n%LOC\n    LOCMET {}\n", loc.method.keyword()));
-            result.push_str("\nEND\n");
+            result.push_str(&make_inp_block("loc", &[("locmet", loc.method.keyword())]));
         }
 
         // todo: Generalization over these blocks A/R.
@@ -458,7 +439,8 @@ impl OrcaInput {
         let out = match Command::new("orca")
             .current_dir(dir)
             .args([file_name])
-            .output() {
+            .output()
+        {
             Ok(out) => out,
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 // Orca binary not found on PATH

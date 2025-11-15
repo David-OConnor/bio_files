@@ -1,7 +1,7 @@
 //! A separate file, as these are quite lengthy!
 
-
 use std::fmt::{Display, Formatter};
+
 use BasisSet::*;
 
 /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/basisset.html
@@ -254,7 +254,6 @@ pub enum BasisSet {
     HaVTPlusdZ,
     HaVQPlusdZ,
     HaV5PlusdZ,
-
     // --- End Correlation-consistent
 }
 
@@ -512,9 +511,8 @@ impl BasisSet {
             HaVQPlusdZ => "haV(Q+d)Z",
             HaV5PlusdZ => "haV(5+d)Z",
             // --- End Correlation-consistent
-
         }
-            .to_string()
+        .to_string()
     }
 }
 
@@ -637,14 +635,12 @@ impl BasisSetCategory {
                 Def2Tzvpp,
                 Def2Qzvp,
                 Def2Qzvpp,
-
                 // Diffuse def2- sets
                 Def2Svpd,
                 Def2Tzvpd,
                 Def2Tzvppd,
                 Def2Qzvpd,
                 Def2Qzvppd,
-
                 // Minimally augmented ma-def2- sets
                 MaDef2Svp,
                 MaDef2SvP,
@@ -656,19 +652,9 @@ impl BasisSetCategory {
             ],
             Self::KarlseruheDhf => vec![
                 // Karlsruhe dhf- family
-                DhfSvp_,
-                DhfSvp,
-                DhfTzvp,
-                DhfTzvpp,
-                DhfQzvp,
-                DhfQzvpp,
-
+                DhfSvp_, DhfSvp, DhfTzvp, DhfTzvpp, DhfQzvp, DhfQzvpp,
                 // Karlsruhe dhf- two-component variants
-                DhfSvp2c,
-                DhfTzvp2c,
-                DhfTzvpp2c,
-                DhfQzvp2c,
-                DhfQzvpp2c,
+                DhfSvp2c, DhfTzvp2c, DhfTzvpp2c, DhfQzvp2c, DhfQzvpp2c,
             ],
             Self::CorrelationConsistent => vec![
                 CcPvdz,
@@ -676,27 +662,23 @@ impl BasisSetCategory {
                 CcPvqz,
                 CcPv5z,
                 CcPv6z,
-
                 // Augmented aug-cc-pVnZ
                 AugCcPvdz,
                 AugCcPvtz,
                 AugCcPvqz,
                 AugCcPv5z,
                 AugCcPv6z,
-
                 // Tight-d variants cc-pVn(+d)Z
                 CcPvdPlusdZ,
                 CcPvtPlusdZ,
                 CcPvqPlusdZ,
                 CcPv5PlusdZ,
-
                 // Tight-d augmented aug-cc-pVn(+d)Z
                 AugCcPvdPlusdZ,
                 AugCcPvtPlusdZ,
                 AugCcPvqPlusdZ,
                 AugCcPv5PlusdZ,
                 AugCcPv6PlusdZ,
-
                 // Partially augmented Truhlar sets
                 AprCcPvQPlusdZ,
                 MayCcPvTPlusdZ,
@@ -710,77 +692,65 @@ impl BasisSetCategory {
                 MaugCcPvDPlusdZ,
                 MaugCcPvTPlusdZ,
                 MaugCcPvQPlusdZ,
-
                 // Core-valence cc-pCVnZ
                 CcPcvdz,
                 CcPcvtz,
                 CcPcvqz,
                 CcPcv5z,
                 CcPcv6z,
-
                 // Augmented core-valence aug-cc-pCVnZ
                 AugCcPcvdz,
                 AugCcPcvtz,
                 AugCcPcvqz,
                 AugCcPcv5z,
                 AugCcPcv6z,
-
                 // Weighted core-valence cc-pwCVnZ
                 CcPwCvdz,
                 CcPwCvtz,
                 CcPwCvqz,
                 CcPwCv5z,
-
                 // Augmented weighted core-valence aug-cc-pwCVnZ
                 AugCcPwCvdz,
                 AugCcPwCvtz,
                 AugCcPwCvqz,
                 AugCcPwCv5z,
-
                 // Pseudopotential cc-pVnZ-PP
                 CcPvdzPp,
                 CcPvtzPp,
                 CcPvqzPp,
                 CcPv5zPp,
-
                 // Augmented pseudopotential aug-cc-pVnZ-PP
                 AugCcPvdzPp,
                 AugCcPvtzPp,
                 AugCcPvqzPp,
                 AugCcPv5zPp,
-
                 // Core-valence pseudopotential cc-pCVnZ-PP
                 CcPcvdzPp,
                 CcPcvtzPp,
                 CcPcvqzPp,
                 CcPcv5zPp,
-
                 // Augmented core-valence pseudopotential aug-cc-pCVnZ-PP
                 AugCcPcvdzPp,
                 AugCcPcvtzPp,
                 AugCcPcvqzPp,
                 AugCcPcv5zPp,
-
                 // Weighted core-valence pseudopotential cc-pwCVnZ-PP
                 CcPwCvdzPp,
                 CcPwCvtzPp,
                 CcPwCvqzPp,
                 CcPwCv5zPp,
-
                 // Augmented weighted core-valence pseudopotential aug-cc-pwCVnZ-PP
                 AugCcPwCvdzPp,
                 AugCcPwCvtzPp,
                 AugCcPwCvqzPp,
                 AugCcPwCv5zPp,
-
                 // Hyperfine-optimized
                 AugCcPvtzJ,
-
                 // W4 theory haV sets
                 HaVTPlusdZ,
                 HaVQPlusdZ,
                 HaV5PlusdZ,
-            ]
+            ],
         }
     }
 }
