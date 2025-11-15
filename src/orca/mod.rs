@@ -1,0 +1,473 @@
+#![allow(non_camel_case_types)]
+
+//! For interop with ORCA files. For example, `inp` and `out` files.
+//!
+//! todo: Consider an XYZ format module, to assist with ORA input?
+
+pub mod basis_sets;
+
+use std::{
+    fs,
+    fs::File,
+    io::{self, ErrorKind, Write},
+    path::Path,
+    process::Command,
+};
+use basis_sets::BasisSet;
+use crate::AtomGeneric;
+/// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum Method {
+    #[default]
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#hartree-fock-hf
+    HartreeFock,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#density-functional-theory-dft
+    /// todo: Multiple DFT functionals.
+    Dft,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#mp2-perturbation-theory
+    Mp2Perturbation,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#spin-component-scaled-mp2-scs-mp2
+    SpinComponentScaledMp2,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#orbital-optimized-mp2-oo-mp2
+    OrbitalOptimzedMp2,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#regularized-mp2
+    RegularlizedMp2,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#double-hybrid-dft-dh-dft
+    DoubleHybridDft,
+    TripleHybridDft, // todo: QC this one.
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#coupled-cluster-cc
+    CoupledCluster,
+    Xtb,
+    // todo: Support other semiemperical methods; XTB2 is just one.
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#semiempirical-methods-sqm
+    SemiEmpericalMethods,
+
+    // --- Gradient corrected functions (GGA) -----
+    // [Docs, Table 3.2](https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/DensityFunctionalTheory.html#gradient-corrected-functionals-meta-ggas)
+    BP86,
+    BLYP,
+    OLYP,
+    GLYP,
+    XLYP,
+    PW91,
+    MPWPW,
+    MPWLYP,
+    PBE,
+    RPBE,
+    REVPBE,
+    RPW86PBE,
+    PWP,
+    B97_3C,
+    B97M_V,
+    V97M_D3BJ,
+    B97M_D4,
+    SCANFUNC,
+    RSCAN,
+    R2SCAN,
+    TPSS,
+    REVTPSS,
+    R2SCAN_3C,
+    // --- End GGAs
+    // --- Global hybrid functions. [Docs Table 3.4](https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/DensityFunctionalTheory.html#global-hybrid-functionals)
+    B1LYP,
+    B3LYP,
+    B3LYP_G,
+    O3LYP,
+    X3LYP,
+    B1P86,
+    B3PW91,
+    PW1PW,
+    MPW1PW,
+    MPW1LYP,
+    PBE0,
+    REVPBE0,
+    REVPBE38,
+    BHANDHLYP,
+    M06,
+    M062X,
+    PW6B95,
+    TPSSH,
+    TPSS0,
+    R2SCANH,
+    R2SCAN0,
+    R2SCAN50,
+    PBEH_3C,
+    B3LYP_3C,
+    // --- End HFX
+
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/fod.html
+    FractionalOccupationDensity,
+    None, // todo: I believe this is right?
+}
+
+impl Method {
+    /// Prefixed with an !, starts the .inp file.
+    pub fn keyword(self) -> String {
+        match self {
+            Self::HartreeFock => "HF",
+            Self::Dft => "B3LYP",
+            Self::Mp2Perturbation => "RI-MP2", // Or "DLPNO-MP2"
+            Self::SpinComponentScaledMp2 => "RI-SCS-MP2",
+            Self::OrbitalOptimzedMp2 => "OO-RI-MP2",
+            Self::RegularlizedMp2 => "RI-MP2",
+            Self::DoubleHybridDft => "B2PLYP",
+            Self::TripleHybridDft => "B3LYP-D3(BJ)", // todo: QC this one
+            Self::CoupledCluster => "DLPNO-CCSD(T)",
+            Self::Xtb => "XTB", // todo?
+            Self::SemiEmpericalMethods => "XTB2",
+            // GGA
+            Self::BP86 => "BP86",
+            Self::BLYP => "BLYP",
+            Self::OLYP => "OLYP",
+            Self::GLYP => "GLYP",
+            Self::XLYP => "XLYP",
+            Self::PW91 => "PW91",
+            Self::MPWPW => "MPWPW",
+            Self::MPWLYP => "MPWLYP",
+            Self::PBE => "PBE",
+            Self::RPBE => "RPBE",
+            Self::REVPBE => "REVPBE",
+            Self::RPW86PBE => "RPW86PBE",
+            Self::PWP => "PWP",
+            Self::B97_3C => "B97-3C",
+            Self::B97M_V => "B97M-V",
+            Self::V97M_D3BJ => "V97M-D3BJ",
+            Self::B97M_D4 => "B97M-D4",
+            Self::SCANFUNC => "SCANFUNC",
+            Self::RSCAN => "RSCAN",
+            Self::R2SCAN => "R2SCAN",
+            Self::TPSS => "TPSS",
+            Self::REVTPSS => "REVTPSS",
+            Self::R2SCAN_3C => "R2SCAN-3C",
+            // end GGA
+            // Start Global Hybrid functionals
+            Self::B1LYP => "B1LYP",
+            Self::B3LYP => "B3LYP",
+            Self::B3LYP_G => "B3LYP-G",
+            Self::O3LYP => "O3LYP",
+            Self::X3LYP => "X3LYP",
+            Self::B1P86 => "B1P86",
+            Self::B3PW91 => "B3PW91",
+            Self::PW1PW => "PW1PW",
+            Self::MPW1PW => "MPW1PW",
+            Self::MPW1LYP => "MPW1LYP",
+            Self::PBE0 => "PBE0",
+            Self::REVPBE0 => "REVPBE0",
+            Self::REVPBE38 => "REVPBE38",
+            Self::BHANDHLYP => "BHANDHLYP",
+            Self::M06 => "M06",
+            Self::M062X => "M062X",
+            Self::PW6B95 => "PW6B95",
+            Self::TPSSH => "TPSSH",
+            Self::TPSS0 => "TPSS0",
+            Self::R2SCANH => "R2SCANH",
+            Self::R2SCAN0 => "R2SCAN0",
+            Self::R2SCAN50 => "R2SCAN50",
+            Self::PBEH_3C => "PBEH-3C",
+            Self::B3LYP_3C => "B3LYP-3C",
+            // End Global hybrid functionals
+            Self::FractionalOccupationDensity => "FOD",
+            Self::None => "",
+        }
+        .to_string()
+    }
+}
+
+/// Misc other keywords not including method and basis set.
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum Keyword {
+    /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/charges.html
+    MBIS,
+    SmdWater,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/solvator.html
+    AlpbWater,
+    OptimizeGeometry,
+    // OptimizeHydrogens,
+    TightOptimization,
+    Freq,
+    NumericalGradient,
+    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/disp.html
+    D4Dispersion,
+    /// AKA GOAT. https://www.faccts.de/docs/orca/6.0/tutorials/prop/goat.html
+    ConformerSearch,
+}
+
+impl Keyword {
+    /// Prefixed with an !, starts the .inp file.
+    pub fn keyword(self) -> String {
+        match self {
+            Self::MBIS => "MBIS",
+            Self::SmdWater => "SMD(WATER)",
+            Self::AlpbWater => "ALPB(WATER)",
+            Self::OptimizeGeometry => "OPT",
+            // Self::OptimizeHydrogens => "OPT",
+            Self::TightOptimization => "TIGHTOPT",
+            Self::Freq => "FREQ",
+            Self::NumericalGradient => "NUMGRAD",
+            Self::D4Dispersion => "D4",
+            Self::ConformerSearch => "GOAT",
+        }
+        .to_string()
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum LocalizationMethod {
+    #[default]
+    PipekMezey,
+    FosterBoys,
+}
+
+impl LocalizationMethod {
+    pub fn keyword(self) -> String {
+        match self {
+            Self::PipekMezey => "PM",
+            Self::FosterBoys => "FB",
+        }
+        .to_owned()
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BondLocalization {
+    pub method: LocalizationMethod,
+}
+
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum SolvatorClusterMode {
+    #[default]
+    None,
+    Stochastic,
+}
+
+#[derive(Clone, Debug)]
+pub struct Solvator {
+    num_mols: u16,
+    cluster_mode: SolvatorClusterMode,
+    droplet: bool,
+}
+
+impl Solvator {
+    pub fn make_inp(&self) -> String {
+        let mut result = String::new();
+        result.push_str(&format!("\n\n%solvator\n    nsolv {}\n", self.num_mols));
+
+        match self.cluster_mode {
+            SolvatorClusterMode::None => (),
+            SolvatorClusterMode::Stochastic => {
+                // todo: Impl Format for CLusterMOde etc.
+                result.push_str(&format!("    CLUSTERMODE {}", "STOCHASTIC"));
+            }
+        }
+        if self.droplet {
+            result.push_str(&format!("    DROPLET true"));
+        }
+        result.push_str("\nend\n");
+        
+        result
+    }
+}
+
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
+#[derive(Clone, Copy, PartialEq, Debug, Default)]
+pub enum ScfConvergenceTolerance{
+    /// Between medium and strong
+    #[default]
+    None,
+    Sloppy,
+    Loose,
+    Medium,
+    Strong,
+    Tight,
+    VeryTight,
+    Extreme,
+}
+
+impl ScfConvergenceTolerance {
+    pub fn keyword(self) -> String {
+        match self {
+            Self::None => "",
+            Self::Sloppy => "Sloppy",
+            Self::Loose => "Loose",
+            Self::Medium => "Medium",
+            Self::Strong => "Strong",
+            Self::Tight => "Tight",
+            Self::VeryTight => "VeryTight",
+            Self::Extreme => "Extreme",
+        }.to_string()
+    }
+}
+
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
+#[derive(Clone, Debug)]
+pub struct Scf {
+    // todo: Damping, level shifting etc. Lots more features to implement
+    pub convergence_tolerance: ScfConvergenceTolerance,
+    // todo: Allow custom values. See https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html Table 2.9
+}
+
+impl Scf {
+    pub fn make_inp(&self) -> String {
+        let mut result = "%scf\n    Convergence\n".to_string();
+        
+        result.push_str(&format!("        {}", self.convergence_tolerance.keyword()));
+        result.push_str("\nend");
+        
+        result
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OrcaInput {
+    pub method: Method,
+    pub basis_set: BasisSet,
+    pub keywords: Vec<Keyword>,
+    pub atoms: Vec<AtomGeneric>,
+    /// todo: Ref [this list of input blocks from the docs](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html);
+    pub solvator: Option<Solvator>,
+    pub bond_localization: Option<BondLocalization>,
+    pub scf: Option<Scf>,
+}
+
+impl OrcaInput {
+    // todo: Keywords?
+    pub fn new(method: Method, basis_set: BasisSet, atoms: &[AtomGeneric]) -> Self {
+        Self {
+            method,
+            basis_set,
+            atoms: atoms.to_vec(),
+            ..Self::default()
+        }
+    }
+
+    /// Create an .inp string for input into ORCA.
+    pub fn make_inp(&self) -> String {
+        let mut result = String::new();
+
+        result.push_str(&format!(
+            "!{} {}",
+            self.method.keyword(),
+            self.basis_set.keyword()
+        ));
+
+        for kw in &self.keywords {
+            result.push_str(&format!(" {}", kw.keyword()));
+        }
+
+        // todo: Handle this etc.
+        // if self.optimize_hydrogens {
+        //     result.push_str("\n\n%geom\n    optimizehydrogens true\nend\n\n");
+        // }
+
+        // todo: Generalization over these blocks A/R.
+        if let Some(solvator) = &self.solvator {
+            result.push('\n');
+            result.push_str(&solvator.make_inp());
+        }
+
+        if let Some(loc) = &self.bond_localization {
+            result.push_str(&format!("\n\n%LOC\n    LOCMET {}\n", loc.method.keyword()));
+            result.push_str("\nEND\n");
+        }
+
+        // todo: Generalization over these blocks A/R.
+        if let Some(scf) = &self.scf {
+            result.push('\n');
+            result.push_str(&scf.make_inp());
+        }
+
+        result.push_str("\n* xyz 0 1\n");
+
+        for atom in &self.atoms {
+            result.push_str(&format!(
+                "{:<2} {:>12.5} {:>12.5} {:>12.5}\n",
+                atom.element.to_letter(),
+                atom.posit.x,
+                atom.posit.y,
+                atom.posit.z
+            ));
+        }
+
+        result.push_str("*");
+
+        result
+    }
+
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        let mut file = File::create(path)?;
+        let text = self.make_inp();
+
+        write!(file, "{text}")
+    }
+
+    /// Run this command in Orca, and collect the output. Requires `orca` to be available
+    /// on the system PATH environment variable.
+    /// todo: Outputs a string for now; adjust this as required into a custom output struct
+    pub fn run(&self) -> io::Result<String> {
+        let dir = Path::new("orca_temp");
+        fs::create_dir_all(dir)?;
+
+        let file_name = "temp_orca_input.inp";
+        let path = Path::new(file_name);
+        self.save(&path)?;
+
+        let out = match Command::new("orca")
+            .current_dir(dir)
+            .args([file_name])
+            .output() {
+            Ok(out) => out,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                // Orca binary not found on PATH
+                fs::remove_file(path)?;
+                return Err(io::Error::new(
+                    ErrorKind::NotFound,
+                    "`orca` executable not found in the system PATH",
+                ));
+            }
+            Err(e) => return Err(e),
+        };
+
+        if !out.status.success() {
+            let stderr_str = String::from_utf8_lossy(&out.stderr);
+            fs::remove_file(path)?;
+            return Err(io::Error::other(format!(
+                "Problem reading out temporary orca file: {}",
+                stderr_str
+            )));
+        }
+
+        // todo: Do we want to clean up the temp dir?
+        fs::remove_file(path)?;
+
+        // Convert stdout bytes to String
+        let result =
+            String::from_utf8(out.stdout).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+
+        Ok(result)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum TerminationStatus {
+    Normal,
+    Error, // todo a/r
+}
+
+#[derive(Debug, Clone)]
+pub struct OrcaOutput {
+    termination_status: TerminationStatus,
+    // atoms: Vec<AtomGeneric>,
+}
+
+impl OrcaOutput {
+    /// Create output by parsing Orca's stdout text.
+    pub fn new(data: &str) -> Self {
+        let mut termination_status: TerminationStatus = TerminationStatus::Error;
+        if data.contains("****ORCA TERMINATED NORMALLY****") {
+            termination_status = TerminationStatus::Error
+        }
+
+        Self { termination_status }
+    }
+}
