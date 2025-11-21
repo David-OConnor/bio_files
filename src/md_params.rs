@@ -463,9 +463,22 @@ impl ForceFieldParams {
     /// A utility function that handles proper and improper dihedral data,
     /// tries both atom orders, and falls back to wildcard (“X”) matches on
     /// the outer atoms when an exact hit is not found.
-    pub fn get_bond(&self, atom_types: &(String, String)) -> Option<&BondStretchingParams> {
-        let a_variants = Self::wildcard_variants(&atom_types.0);
-        let b_variants = Self::wildcard_variants(&atom_types.1);
+    pub fn get_bond(
+        &self,
+        atom_types: &(String, String),
+        wildcard_allowed: bool,
+    ) -> Option<&BondStretchingParams> {
+        let (a_variants, b_variants) = if wildcard_allowed {
+            (
+                Self::wildcard_variants(&atom_types.0),
+                Self::wildcard_variants(&atom_types.1),
+            )
+        } else {
+            (
+                vec![atom_types.0.to_string()],
+                vec![atom_types.1.to_string()],
+            )
+        };
 
         // Priority: exact before partial before X
         for a in &a_variants {
@@ -490,10 +503,21 @@ impl ForceFieldParams {
     pub fn get_valence_angle(
         &self,
         atom_types: &(String, String, String),
+        wildcard_allowed: bool,
     ) -> Option<&AngleBendingParams> {
-        let a_variants = Self::wildcard_variants(&atom_types.0);
-        let b_variants = Self::wildcard_variants(&atom_types.1);
-        let c_variants = Self::wildcard_variants(&atom_types.2);
+        let (a_variants, b_variants, c_variants) = if wildcard_allowed {
+            (
+                Self::wildcard_variants(&atom_types.0),
+                Self::wildcard_variants(&atom_types.1),
+                Self::wildcard_variants(&atom_types.2),
+            )
+        } else {
+            (
+                vec![atom_types.0.to_string()],
+                vec![atom_types.1.to_string()],
+                vec![atom_types.2.to_string()],
+            )
+        };
 
         // Try combinations in both directions (a-b-c and c-b-a)
         for a in &a_variants {
@@ -521,11 +545,23 @@ impl ForceFieldParams {
         &self,
         atom_types: &(String, String, String, String),
         proper: bool,
+        wildcard_allowed: bool,
     ) -> Option<&Vec<DihedralParams>> {
-        let a_variants = Self::wildcard_variants(&atom_types.0);
-        let b_variants = Self::wildcard_variants(&atom_types.1);
-        let c_variants = Self::wildcard_variants(&atom_types.2);
-        let d_variants = Self::wildcard_variants(&atom_types.3);
+        let (a_variants, b_variants, c_variants, d_variants) = if wildcard_allowed {
+            (
+                Self::wildcard_variants(&atom_types.0),
+                Self::wildcard_variants(&atom_types.1),
+                Self::wildcard_variants(&atom_types.2),
+                Self::wildcard_variants(&atom_types.3),
+            )
+        } else {
+            (
+                vec![atom_types.0.to_string()],
+                vec![atom_types.1.to_string()],
+                vec![atom_types.2.to_string()],
+                vec![atom_types.3.to_string()],
+            )
+        };
 
         for a in &a_variants {
             for b in &b_variants {

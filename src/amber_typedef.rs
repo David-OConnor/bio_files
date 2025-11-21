@@ -12,16 +12,22 @@ pub struct WildAtom {
 
 #[derive(Debug)]
 pub struct AtomTypeDef {
-    pub name: String,            // f2: e.g. "c3", "ca"
-    pub residue: Option<String>, // f3: e.g. "AA", or None for "*"
-    // todo: Use Element instead of atomic number?
-    // pub atomic_number: Option<u8>,     // f4
-    pub element: Option<Element>,        // f4
-    pub attached_atoms: Option<u8>,      // f5
-    pub attached_h: Option<u8>,          // f6
-    pub ew_count: Option<u8>,            // f7
-    pub atomic_property: Option<String>, // f8: e.g. "[RG3]" or "[sb,db,AR2]"
-    pub env: Option<String>,             // f9: e.g. "(C3(C3))"
+    /// f2: Atom type. e.g. "c3", "ca"
+    pub name: String,
+    /// f3: Residue names, e.g. "AA", or None for "*"
+    pub residue: Option<String>,
+    /// f4: element (Atomic number in files)
+    pub element: Option<Element>,
+    /// f5: Number of attached atoms
+    pub attached_atoms: Option<u8>,
+    /// f6: Number of attached hydrogen atoms
+    pub attached_h: Option<u8>, // f6
+    /// f7: For hydrogen, number of the electron-withdrawal atoms connected
+    pub electron_withdrawal_count: Option<u8>,
+    /// f8: Atomic property. e.g. "[RG3]" or "[sb,db,AR2]"
+    pub atomic_property: Option<String>,
+    /// f9: Chemical environment definitions. e.g. "(C3(C3))"
+    pub chem_env: Option<String>,
 }
 
 fn parse_u8_field(s: &str) -> Option<u8> {
@@ -101,9 +107,9 @@ impl AmberDef {
                         element,
                         attached_atoms,
                         attached_h,
-                        ew_count,
+                        electron_withdrawal_count: ew_count,
                         atomic_property,
-                        env,
+                        chem_env: env,
                     });
                 }
                 _ => {}
