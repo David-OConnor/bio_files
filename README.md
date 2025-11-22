@@ -138,17 +138,17 @@ Small molecule save and load, Rust.
 use bio_files::{Sdf, Mol2};
 
 // ...
-let sdf_data = Sdf::load("./molecules/DB03496.sdf")?;
+let sdf_data = Sdf::load(Path::new("./molecules/DB03496.sdf"))?;
 
 sdf_data.atoms[0]; // (as above)
 sdf_data.atoms[0].posit;  // (as above, but lin_alg::Vec3))
 
-sdf_data.save("test.sdf")?;
+sdf_data.save(Path::new("test.sdf"))?;
 
 let mol2_data: Mol2 = sdf_data.into();
-mol2_data.save("test.mol2")?;
+mol2_data.save(Path::new("test.mol2"))?;
 
-let xyz_data = Xyz::load("./atom_posits.xyz")?;
+let xyz_data = Xyz::load(Path::new("./atom_posits.xyz"))?;
 
 
 // Loading Force field parameters:
@@ -157,7 +157,7 @@ let params = ForceFieldParams::load_dat(p)?;
 
 
 // Load electron density structure factors data, to be processed with a FFT:
-let p = Path::new("8s6p_validation_2fo-fc_map_coef.cif")
+let path = Path::new("8s6p_validation_2fo-fc_map_coef.cif");
 let data = CifStructureFactors::new_from_path(path)?;
 
 // These functions aren't included; an example of turning loaded structure factor data
@@ -166,7 +166,7 @@ let mut fft_planner = FftPlanner::new();
 let dm = density_map_from_mmcif(&data, &mut fft_planner)?;
 
 // Or if you have a Map file:
-let p = Path::new("8s6p.map")
+let p = Path::new("8s6p.map");
 let dm = DensityMap::load(path)?;
 
 // Load molecules from databases using identifiers:
