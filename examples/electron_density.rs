@@ -1,14 +1,11 @@
 //! This example demonstrates how to open and save electron density data. For example, map, MTZ or
 //! 2fo-fc mmCIF
 
-use std::io;
-use std::path::Path;
-use std::time::Instant;
-use bio_files::cif_sf::CifStructureFactors;
-use bio_files::{DensityMap, MapHeader};
+use std::{io, path::Path, time::Instant};
 
-use rustfft::{FftPlanner, num_complex::Complex};
+use bio_files::{DensityMap, MapHeader, cif_sf::CifStructureFactors};
 use ewald::fft3d_c2r;
+use rustfft::{FftPlanner, num_complex::Complex};
 
 fn wrap_idx(i: i32, n: usize) -> usize {
     let n_i32 = n as i32;

@@ -5,7 +5,6 @@ use std::path::Path;
 
 use bio_files::{MmCif, Mol2, Sdf, Xyz};
 
-
 fn main() {
     let sdf = Sdf::load(Path::new("./molecules/DB03496.sdf")).unwrap();
 
@@ -26,6 +25,4 @@ fn main() {
     let mol = Mol2::load_amber_geostd("CPB").unwrap();
 
     let peptide = MmCif::load_rcsb("8S6P").unwrap();
-
-
 }

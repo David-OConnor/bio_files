@@ -2,9 +2,7 @@
 
 use std::path::Path;
 
-use bio_files::md_params::ForceFieldParams;
-use bio_files::{MmCif, Mol2};
-
+use bio_files::{MmCif, Mol2, md_params::ForceFieldParams};
 use dynamics::{FfParamSet, prepare_peptide};
 
 fn load() {
@@ -33,7 +31,7 @@ fn load() {
         &param_set.peptide_ff_q_map.as_ref().unwrap(),
         7.0,
     )
-        .unwrap();
+    .unwrap();
 }
 
 fn main() {

@@ -246,7 +246,7 @@ impl Mol2 {
                 let mut element = match Element::from_letter(
                     &atom_name
                         .chars()
-                        .filter(|c| c.is_ascii_alphabetic())
+                        .take_while(|c| c.is_ascii_alphabetic())
                         .collect::<String>(),
                 ) {
                     Ok(l) => l,
@@ -256,7 +256,6 @@ impl Mol2 {
                             if atom_name.starts_with("BR") {
                                 Element::Bromine
                             } else {
-                                // It might be something like "c3", "c1" etc.; try the first letter only.
                                 Element::from_letter(&atom_name[0..1])?
                             }
                         } else {
@@ -265,9 +264,27 @@ impl Mol2 {
                     }
                 };
 
-                // A manual override. Not Calcium.
-                if atom_name == "CA" {
+                // Fixes for an awkward part of atom names and elements derived from them in Mol2.
+                // it seems "CL" start does mean Chlorine.
+                if atom_name.starts_with("C") && !atom_name.starts_with("Ca") && !atom_name.starts_with("Cu")
+                    && !atom_name.to_uppercase().starts_with("CL") {
                     element = Element::Carbon;
+                }
+
+                if atom_name.starts_with("H") && !atom_name.starts_with("Hg") {
+                    element = Element::Hydrogen;
+                }
+
+                if atom_name.starts_with("S") && !atom_name.starts_with("Se") {
+                    element = Element::Sulfur;
+                }
+
+                if atom_name.starts_with("FE") && !atom_name.starts_with("Fe") {
+                    element = Element::Fluorine;
+                }
+
+                if atom_name.starts_with("CL") {
+                    element = Element::Chlorine;
                 }
 
                 let x = cols[2].parse::<f64>().map_err(|_| {
