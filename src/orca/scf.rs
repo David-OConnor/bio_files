@@ -89,6 +89,32 @@ impl ScfGuessMode {
     }
 }
 
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/hftype.html#wavefunction-types-rhf-rks-uhf-uks-roks-and-more
+#[derive(Clone, Copy, PartialEq, Debug)]
+// todo: Add more config releatd to this A/R. Maybe wrapped variants.
+pub enum WaveFunctionType {
+    /// closed-shell (RKS for DFT)
+    Rhf,
+    /// unrestricted open-shell (UKS for DFT)
+    Uhf,
+    /// restricted open-shell (ROKS for DFT)
+    Rohf,
+    /// complete active space SCF
+    Casscf,
+}
+
+impl WaveFunctionType {
+    pub fn keyword(self) -> String {
+        match self {
+            Self::Rhf => "RHF",
+            Self::Uhf => "UHF",
+            Self::Rohf => "ROHF",
+            Self::Casscf => "CASSCF",
+        }
+        .to_string()
+    }
+}
+
 /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
 /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/integralhandling.html
 #[derive(Clone, Debug)]
@@ -96,6 +122,7 @@ pub struct Scf {
     // todo: Damping, level shifting etc. Lots more features to implement
     pub convergence_tolerance: ScfConvergenceTolerance,
     pub mode: ScfMode,
+    pub wave_function_type: Option<WaveFunctionType>,
     pub thresh: Option<f32>,
     pub t_cut: Option<f32>,
     pub direct_reset_freq: Option<u16>,
@@ -115,6 +142,10 @@ impl Scf {
             ("Convergence", self.convergence_tolerance.keyword()),
             ("SCFMode", self.mode.keyword()),
         ];
+
+        if let Some(v) = self.wave_function_type {
+            contents.push(("HFType", v.keyword()));
+        }
 
         if let Some(v) = self.thresh {
             contents.push(("Thresh", format!("{v:.6}")));

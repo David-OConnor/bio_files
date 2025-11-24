@@ -266,8 +266,11 @@ impl Mol2 {
 
                 // Fixes for an awkward part of atom names and elements derived from them in Mol2.
                 // it seems "CL" start does mean Chlorine.
-                if atom_name.starts_with("C") && !atom_name.starts_with("Ca") && !atom_name.starts_with("Cu")
-                    && !atom_name.to_uppercase().starts_with("CL") {
+                if atom_name.starts_with("C")
+                    && !atom_name.starts_with("Ca")
+                    && !atom_name.starts_with("Cu")
+                    && !atom_name.to_uppercase().starts_with("CL")
+                {
                     element = Element::Carbon;
                 }
 

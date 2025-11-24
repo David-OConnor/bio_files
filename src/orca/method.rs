@@ -2,6 +2,7 @@ use crate::orca::make_inp_block;
 
 /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
+// todo: Overlap between this and Functional
 pub enum Method {
     #[default]
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#hartree-fock-hf
@@ -157,6 +158,46 @@ impl Method {
     }
 }
 
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/dispersioncorrections.html#dispersion-corrections
+/// https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/dispersioncorrections.html#id41
+#[derive(Clone, Copy, PartialEq, Debug)]
+pub enum DispersionCorrection {
+    DftDopt,
+    D3S6,
+    D3S8,
+    D3A1,
+    D3A2,
+    D3RS6,
+    D3alpha6,
+    D4S6,
+    D4S8,
+    D4A1,
+    D4A2,
+    D4S9,
+    DFTDScaleC6,
+}
+
+impl DispersionCorrection {
+    // pub fn keyword(self) -> String {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::DftDopt => "DFTDOPT",
+            Self::D3S6 => "D3S6",
+            Self::D3S8 => "D3S8",
+            Self::D3A1 => "D3A1",
+            Self::D3A2 => "D3A2",
+            Self::D3RS6 => "D3RS6",
+            Self::D3alpha6 => "D3alpha6",
+            Self::D4S6 => "D4S6",
+            Self::D4S8 => "D4S8",
+            Self::D4A1 => "D4A1",
+            Self::D4A2 => "D4A2",
+            Self::D4S9 => "D4S9",
+            Self::DFTDScaleC6 => "DFTDScaleC6",
+        }
+    }
+}
+
 // todo: Rename etc as required, to distinguish method section
 // todo items from first-line ones.
 
@@ -182,13 +223,15 @@ impl FrozenCore {
 #[derive(Clone, Copy, PartialEq, Debug)]
 // todo: A/R
 pub enum Functional {
-    Bp86,
+    // Pbe,
+    // Bp86,
 }
 
 impl Functional {
     pub fn keyword(self) -> String {
         match self {
-            Self::Bp86 => "BP86",
+            // Pbe => "PBE",
+            // Self::Bp86 => "BP86",
         }
         .to_string()
     }
@@ -214,22 +257,23 @@ impl Correlation {
 pub struct MethodSection {
     // todo: How does `funcitonal` differ from `method` key? For example, I see
     // todo BP86 as both in docs examples.
-    pub functional: Option<Functional>,
+    // pub functional: Option<Functional>,
     pub correlation: Option<Correlation>,
     pub switch_to_soscf: Option<bool>,
     pub frozen_core: Option<FrozenCore>,
     // pub new_n_core: Option<()>
     pub check_frozen_core: Option<bool>,
     pub correct_frozen_core: Option<bool>,
+    pub dispersion_correction: Option<(DispersionCorrection, f32)>,
 }
 
 impl MethodSection {
     pub fn make_inp(&self) -> String {
         let mut contents = Vec::new();
 
-        if let Some(f) = self.functional {
-            contents.push(("functional", f.keyword()));
-        }
+        // if let Some(f) = self.functional {
+        //     contents.push(("functional", f.keyword()));
+        // }
 
         if let Some(c) = self.correlation {
             contents.push(("correlation", c.keyword()));
@@ -239,16 +283,20 @@ impl MethodSection {
             contents.push(("SwitchToSOSCF", format!("{v:?}")));
         }
 
-        if let Some(fc) = self.frozen_core {
-            contents.push(("FrozenCore", fc.keyword()));
+        if let Some(v) = self.frozen_core {
+            contents.push(("FrozenCore", v.keyword()));
         }
 
-        if let Some(fc) = self.check_frozen_core {
-            contents.push(("CheckFrozenCore", format!("{fc:?}")));
+        if let Some(v) = self.check_frozen_core {
+            contents.push(("CheckFrozenCore", format!("{v:?}")));
         }
 
-        if let Some(fc) = self.correct_frozen_core {
-            contents.push(("CorrectFrozenCore", format!("{fc:?}")));
+        if let Some(v) = self.correct_frozen_core {
+            contents.push(("CorrectFrozenCore", format!("{v:?}")));
+        }
+
+        if let Some((kw, v)) = self.dispersion_correction {
+            contents.push((kw.keyword(), format!("{v:?}")));
         }
 
         make_inp_block("method", &contents)

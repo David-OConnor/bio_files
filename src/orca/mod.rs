@@ -11,6 +11,7 @@
 //! It also has implications for writing vs ommiting items in the input string.
 
 pub mod basis_sets;
+pub mod geom;
 pub mod method;
 pub mod scf;
 pub mod solvation;
@@ -28,7 +29,7 @@ use method::{Method, MethodSection};
 use scf::Scf;
 use solvation::{Solvator, SolvatorImplicit};
 
-use crate::AtomGeneric;
+use crate::{AtomGeneric, orca::geom::Geom};
 
 /// A helper. The &str and String use reflects how we use this in practie,
 /// e.g. with &str literals vs format!().
@@ -103,6 +104,10 @@ pub enum Keyword {
     Gcp(GcpOption),
     /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/symmetry.html
     UseSymmetry,
+    /// https://www.faccts.de/docs/orca/6.1/manual/contents/structurereactivity/frequencies.html
+    AnFreq,
+    /// https://www.faccts.de/docs/orca/6.1/manual/contents/structurereactivity/frequencies.html
+    NumFreq,
 }
 
 impl Keyword {
@@ -119,6 +124,8 @@ impl Keyword {
             Self::ConformerSearch => "GOAT".to_string(),
             Self::Gcp(option) => format!("GCP({}", option.keyword()),
             Self::UseSymmetry => "UseSymmetry".to_string(),
+            Self::AnFreq => "AnFreq".to_string(),
+            Self::NumFreq => "NumFreq".to_string(),
         }
     }
 }
@@ -189,6 +196,7 @@ pub struct OrcaInput {
     pub solvator_implicit: Option<SolvatorImplicit>,
     pub bond_localization: Option<BondLocalization>,
     pub scf: Option<Scf>,
+    pub geom: Option<Geom>,
     pub symmetry: Option<Symmetry>,
     // todo: A/R: https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/stabilityanalysis.html
     // pub shark: Option<Shark>,
@@ -221,35 +229,40 @@ impl OrcaInput {
         }
 
         // --- Blocks ---
-        if let Some(m) = &self.method_section {
+        if let Some(v) = &self.method_section {
             result.push('\n');
-            result.push_str(&m.make_inp());
+            result.push_str(&v.make_inp());
         }
 
         // todo: Generalization over these blocks A/R with a macro.
-        if let Some(solvator) = &self.solvator {
+        if let Some(v) = &self.solvator {
             result.push('\n');
-            result.push_str(&solvator.make_inp());
+            result.push_str(&v.make_inp());
         }
 
-        if let Some(solvator) = &self.solvator_implicit {
+        if let Some(v) = &self.solvator_implicit {
             result.push('\n');
-            result.push_str(&solvator.make_inp());
+            result.push_str(&v.make_inp());
         }
 
-        if let Some(loc) = &self.bond_localization {
+        if let Some(v) = &self.bond_localization {
             result.push('\n');
-            result.push_str(&make_inp_block("loc", &[("locmet", loc.method.keyword())]));
+            result.push_str(&make_inp_block("loc", &[("locmet", v.method.keyword())]));
         }
 
-        if let Some(scf) = &self.scf {
+        if let Some(v) = &self.scf {
             result.push('\n');
-            result.push_str(&scf.make_inp());
+            result.push_str(&v.make_inp());
         }
 
-        if let Some(sym) = &self.symmetry {
+        if let Some(v) = &self.geom {
             result.push('\n');
-            result.push_str(&sym.make_inp());
+            result.push_str(&v.make_inp());
+        }
+
+        if let Some(v) = &self.symmetry {
+            result.push('\n');
+            result.push_str(&v.make_inp());
         }
 
         result.push_str("\n\n* xyz 0 1\n");
