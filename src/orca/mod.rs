@@ -11,6 +11,7 @@
 //! It also has implications for writing vs ommiting items in the input string.
 
 pub mod basis_sets;
+pub mod dynamics;
 pub mod geom;
 pub mod method;
 pub mod scf;
@@ -29,7 +30,10 @@ use method::{Method, MethodSection};
 use scf::Scf;
 use solvation::{Solvator, SolvatorImplicit};
 
-use crate::{AtomGeneric, orca::geom::Geom};
+use crate::{
+    AtomGeneric,
+    orca::{dynamics::Dynamics, geom::Geom},
+};
 
 /// A helper. The &str and String use reflects how we use this in practie,
 /// e.g. with &str literals vs format!().
@@ -116,7 +120,6 @@ impl Keyword {
         match self {
             Self::Mbis => "MBIS".to_string(),
             Self::OptimizeGeometry => "OPT".to_string(),
-            // Self::OptimizeHydrogens => "OPT",
             Self::TightOptimization => "TIGHTOPT".to_string(),
             Self::Freq => "FREQ".to_string(),
             Self::NumericalGradient => "NUMGRAD".to_string(),
@@ -198,6 +201,7 @@ pub struct OrcaInput {
     pub scf: Option<Scf>,
     pub geom: Option<Geom>,
     pub symmetry: Option<Symmetry>,
+    pub dynamics: Option<Dynamics>,
     // todo: A/R: https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/stabilityanalysis.html
     // pub shark: Option<Shark>,
 }
@@ -265,6 +269,11 @@ impl OrcaInput {
             result.push_str(&v.make_inp());
         }
 
+        if let Some(v) = &self.dynamics {
+            result.push('\n');
+            result.push_str(&v.make_inp());
+        }
+
         result.push_str("\n\n* xyz 0 1\n");
 
         // --- Atoms ---
@@ -299,8 +308,8 @@ impl OrcaInput {
         fs::create_dir_all(dir)?;
 
         let file_name = "temp_orca_input.inp";
-        let path = Path::new(file_name);
-        self.save(path)?;
+        let path = dir.join(Path::new(file_name));
+        self.save(&path)?;
 
         let out = match Command::new("orca")
             .current_dir(dir)
@@ -310,7 +319,8 @@ impl OrcaInput {
             Ok(out) => out,
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 // Orca binary not found on PATH
-                fs::remove_file(path)?;
+                fs::remove_dir(dir)?;
+
                 return Err(io::Error::new(
                     ErrorKind::NotFound,
                     "`orca` executable not found in the system PATH",
@@ -321,7 +331,8 @@ impl OrcaInput {
 
         if !out.status.success() {
             let stderr_str = String::from_utf8_lossy(&out.stderr);
-            fs::remove_file(path)?;
+            fs::remove_dir(dir)?;
+
             return Err(io::Error::other(format!(
                 "Problem reading out temporary orca file: {}",
                 stderr_str
@@ -330,7 +341,6 @@ impl OrcaInput {
 
         // Remove the entire temporary directory.
         fs::remove_dir(dir)?;
-        // fs::remove_file(path)?;
 
         // Convert stdout bytes to String
         let result =

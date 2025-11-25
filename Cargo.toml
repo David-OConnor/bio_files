@@ -1,6 +1,6 @@
 [package]
 name = "bio_files"
-version = "0.3.5"
+version = "0.3.6"
 edition = "2024"
 authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Save and load common biology file formats"
@@ -37,7 +37,7 @@ bincode = { version = "2.0.1", optional = true }
 rayon = "1.11.0"  # Optional [de]serializing
 
 [patch.crates-io]
-na_seq = { path = "../na_seq"}
+na_seq = { path = "../na_seq" }
 #lin_alg = { path = "../../lin_alg" }
 
 
