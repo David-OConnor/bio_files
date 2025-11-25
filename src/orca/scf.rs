@@ -1,6 +1,8 @@
+//! [Self-Consistent-Field (SCF)[https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html]
+
 use super::make_inp_block;
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
+/// [Convergence Tolerances](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html#convergence-tolerances)
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum ScfConvergenceTolerance {
     /// Between medium and strong
@@ -49,7 +51,7 @@ impl ScfMode {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/initialguess.html
+/// [Choice of Initial Guess](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/initialguess.html)
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ScfGuess {
     HCore,
@@ -72,7 +74,7 @@ impl ScfGuess {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/initialguess.html
+/// [Choice of Initial Guess](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/initialguess.html)
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ScfGuessMode {
     FMatrix,
@@ -89,7 +91,7 @@ impl ScfGuessMode {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/hftype.html#wavefunction-types-rhf-rks-uhf-uks-roks-and-more
+/// [Wavefunction Types](https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/hftype.html#wavefunction-types-rhf-rks-uhf-uks-roks-and-more)
 #[derive(Clone, Copy, PartialEq, Debug)]
 // todo: Add more config releatd to this A/R. Maybe wrapped variants.
 pub enum WaveFunctionType {
@@ -115,8 +117,8 @@ impl WaveFunctionType {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/integralhandling.html
+/// [Self-Consistent-Field](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html)
+/// [Integral  Handling](ttps://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/integralhandling.html)
 #[derive(Clone, Debug)]
 pub struct Scf {
     // todo: Damping, level shifting etc. Lots more features to implement
@@ -128,9 +130,9 @@ pub struct Scf {
     pub direct_reset_freq: Option<u16>,
     pub max_disk: Option<u16>,
     pub max_int_mem: Option<u16>,
-    /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/finEfield.html#dipolar-electric-fields
+    /// [Dipolar Electric Fields](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/finEfield.html#dipolar-electric-fields)
     pub e_field: Option<[f32; 3]>,
-    /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/finEfield.html#quadrupolar-electric-fields
+    /// [Quadrupolar Electric Fields](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/finEfield.html#quadrupolar-electric-fields)
     pub q_field: Option<[f32; 6]>, // todo: Allow custom values. See https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html Table 2.9
     pub guess: Option<ScfGuess>,
     pub guess_mode: Option<ScfGuessMode>,
@@ -178,6 +180,6 @@ impl Scf {
             contents.push(("GuessMode", v.keyword()));
         }
 
-        make_inp_block("scf", &contents)
+        make_inp_block("scf", &contents, &[])
     }
 }

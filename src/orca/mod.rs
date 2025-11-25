@@ -1,14 +1,28 @@
 #![allow(non_camel_case_types)]
 
-//! For interop with ORCA files. For example, `inp` and `out` files. Can construct inputs for ORCA,
-//! run these if ORCA is available in the system PATH, and display and parse the output.
+//! For interop with the [ORCA quantum chemistry software package](https://www.faccts.de/orca/). For example,
+//! This module constructs inputs for ORCA, and can either save them to disk, or run them directly
+//!  if ORCA is available in the system PATH. It can display and parse the output.
+//!
+//! The workflow when running commands directly:
+//!   - Create a temporary directly inside the working directory
+//!   - Save a `.inp` script to that dir
+//!   - Launch that script. Note that it will add temporary and output files to that dir
+//!   - Collect the output via `stdout` and `stderr`
+//!   - Delete the temporary directory
 //!
 //! This currently supports a limited subset of ORCA's functionality.
 //!
-//! We make heavy use of `Option` on input fields, allowing them to be None instead of setting
+//! We make use of `Option` on input fields, allowing them to be `None` instead of setting
 //! a default value. Fields marked as None  mean *use ORCA's defaults*; this is more maintainable
 //! and simpler for the user to understand than maintaining a duplicate set of default values.
-//! It also has implications for writing vs ommiting items in the input string.
+//! It also has implications for writing vs omiting items in the input string.
+//!
+//! Most structs and enums, and many fields, link to the relevant section of the [ORCA Manual](https://www.faccts.de/docs/orca/6.1/manual),
+//! in lieu of direct documentation.
+//!
+//! While the `bio-files` library in general works in Python via bindings, we have not enabled the Orca
+//! module in Python, because FACCTS provides its own [high-quality ORCA Python Interface library](https://www.faccts.de/docs/opi/1.0/docs/)
 
 pub mod basis_sets;
 pub mod dynamics;
@@ -37,8 +51,16 @@ use crate::{
 
 /// A helper. The &str and String use reflects how we use this in practie,
 /// e.g. with &str literals vs format!().
-fn make_inp_block(block_name: &str, contents: &[(&str, String)]) -> String {
-    let mut r = format!("%{block_name}\n");
+fn make_inp_block(block_name: &str, contents: &[(&str, String)], keywords: &[&str]) -> String {
+    let mut r = String::new();
+
+    r.push('%');
+    r.push_str(block_name);
+    for kw in keywords {
+        r.push(' ');
+        r.push_str(kw);
+    }
+    r.push('\n');
 
     for (k, v) in contents {
         r.push_str(&format!("    {} {}\n", k, v));
@@ -48,8 +70,8 @@ fn make_inp_block(block_name: &str, contents: &[(&str, String)]) -> String {
     r
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/counterpoise.html
-/// Table 2.52
+/// [Counterpoise Corrections](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/counterpoise.html?q=dftminis&n=0#counterpoise-corrections)
+/// See Table 2.52
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum GcpOption {
     HfMinis,
@@ -155,7 +177,7 @@ pub struct BondLocalization {
     pub method: LocalizationMethod,
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/symmetry.html
+/// [ORCA and Symmetry](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/symmetry.html)
 #[derive(Clone, Debug, Default)]
 pub struct Symmetry {
     pub sym_thresh: Option<f32>,
@@ -180,16 +202,18 @@ impl Symmetry {
             contents.push(("PreferC2v", v.clone()));
         }
 
-        make_inp_block("sym", &contents)
+        make_inp_block("sym", &contents, &[])
     }
 }
 
+/// [General Structure of the Input File](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html)
+/// Any fields marked as `Optional here`
 #[derive(Debug, Clone, Default)]
 pub struct OrcaInput {
-    /// For now, We keep `Method` separate from the optional `method_section` part;
-    /// the former is required, and writes to the first line. We could, alternatively,
-    /// have it write to the `method` key in the `%method` block we write to  in `method_section`.
-    pub method: Method, // Sets the first line
+    // For now, We keep `Method` separate from the optional `method_section` part;
+    // the former is required, and writes to the first line. We could, alternatively,
+    // have it write to the `method` key in the `%method` block we write to  in `method_section`.
+    pub method: Method,
     pub method_section: Option<MethodSection>, // Sets the %method section.
     pub basis_set: BasisSet,
     pub keywords: Vec<Keyword>,
@@ -251,7 +275,11 @@ impl OrcaInput {
 
         if let Some(v) = &self.bond_localization {
             result.push('\n');
-            result.push_str(&make_inp_block("loc", &[("locmet", v.method.keyword())]));
+            result.push_str(&make_inp_block(
+                "loc",
+                &[("locmet", v.method.keyword())],
+                &[],
+            ));
         }
 
         if let Some(v) = &self.scf {
@@ -319,7 +347,7 @@ impl OrcaInput {
             Ok(out) => out,
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 // Orca binary not found on PATH
-                fs::remove_dir(dir)?;
+                fs::remove_dir_all(dir)?;
 
                 return Err(io::Error::new(
                     ErrorKind::NotFound,
@@ -331,7 +359,7 @@ impl OrcaInput {
 
         if !out.status.success() {
             let stderr_str = String::from_utf8_lossy(&out.stderr);
-            fs::remove_dir(dir)?;
+            fs::remove_dir_all(dir)?;
 
             return Err(io::Error::other(format!(
                 "Problem reading out temporary orca file: {}",
@@ -340,7 +368,7 @@ impl OrcaInput {
         }
 
         // Remove the entire temporary directory.
-        fs::remove_dir(dir)?;
+        fs::remove_dir_all(dir)?;
 
         // Convert stdout bytes to String
         let result =

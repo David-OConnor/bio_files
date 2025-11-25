@@ -1,9 +1,10 @@
-//! https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html
+//! [Ab initio Molecular Dynamics](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html)
 
 use std::path::PathBuf;
 
 use crate::orca::make_inp_block;
 
+/// [Thermostat](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#thermostat)
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Thermostat {
     Berendensen,
@@ -24,7 +25,7 @@ impl Thermostat {
     }
 }
 
-/// [Command List](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#command-list)
+/// [Ab initio Molecular Dynamics Command List](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#command-list)
 #[derive(Clone, Debug)]
 pub struct Dynamics {
     /// [Timestep](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#timestep) fs
@@ -35,7 +36,7 @@ pub struct Dynamics {
     pub thermostat: Thermostat,
     /// Kelvin
     pub thermostat_temp: f32,
-    /// fs
+    /// fs. 10-100 is reasonable.
     pub thermostat_timecon: f32,
     /// [Dump](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#dump)
     pub traj_out_dir: PathBuf,
@@ -68,6 +69,6 @@ impl Dynamics {
             ("Run", self.steps.to_string()),
         ];
 
-        make_inp_block("md", &contents)
+        make_inp_block("md", &contents, &[])
     }
 }

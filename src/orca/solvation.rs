@@ -1,5 +1,5 @@
 //! Implicit and exlicit solvation
-//! https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html
+//! [Implicit Solvation](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html)
 
 use super::make_inp_block;
 
@@ -34,7 +34,7 @@ impl ImplicitSolvationSurfaceType {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html
+/// [Implicit Solvation](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html)
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum ImplicitSolvationModel {
     /// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html#the-conductor-like-polarizable-continuum-model-c-pcm
@@ -46,7 +46,7 @@ pub enum ImplicitSolvationModel {
     Alpb,
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html#complete-keyword-list-for-the-cpcm-block
+/// [Implicit Solvation: Keyword List](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html#complete-keyword-list-for-the-cpcm-block)
 #[derive(Clone, Debug)]
 pub struct SolvatorImplicit {
     pub model: ImplicitSolvationModel,
@@ -93,11 +93,11 @@ impl SolvatorImplicit {
         }
 
         match self.model {
-            ImplicitSolvationModel::Cpcm => make_inp_block("cpcm", &contents),
+            ImplicitSolvationModel::Cpcm => make_inp_block("cpcm", &contents, &[]),
             ImplicitSolvationModel::Smd => {
                 contents.push(("smd", "true".to_owned()));
 
-                make_inp_block("cpcm", &contents)
+                make_inp_block("cpcm", &contents, &[])
             }
             _ => unimplemented!(),
         }
@@ -117,7 +117,7 @@ impl ImplicitSolvationModel {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html
+/// [Implicit Solvation](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html)
 #[derive(Clone, Debug)]
 // todo: Consider renaming SolvatorExplicit?
 pub struct Solvator {
@@ -139,11 +139,11 @@ impl Solvator {
             contents.push(("droplet", "true".to_string()));
         }
 
-        make_inp_block("solvator", &contents)
+        make_inp_block("solvator", &contents, &[])
     }
 }
 
-/// [Table 2.56](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html#id42)
+/// [Implicit Solvation, Table 2.56](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/solvationmodels.html#id42)
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Solvent {
     // todo: Fill out and cite the source

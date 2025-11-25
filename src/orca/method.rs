@@ -1,6 +1,12 @@
+//! Experimental methods: HF, DFT, etc.
+
 use crate::orca::make_inp_block;
 
-/// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html
+/// [Single point energies](https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html)
+/// [Hartree Fock Theory](https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/hartreefock.html)
+/// [Density Functional Theory](https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/DensityFunctionalTheory.html)
+///  Note that this currently sets the first line of the ORCA input,
+/// not the %method% block.
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 // todo: Overlap between this and Functional
 pub enum Method {
@@ -252,7 +258,7 @@ impl Correlation {
     }
 }
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html
+/// [General structure of the Input File](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html)
 #[derive(Clone, Debug)]
 pub struct MethodSection {
     // todo: How does `funcitonal` differ from `method` key? For example, I see
@@ -299,6 +305,6 @@ impl MethodSection {
             contents.push((kw.keyword(), format!("{v:?}")));
         }
 
-        make_inp_block("method", &contents)
+        make_inp_block("method", &contents, &[])
     }
 }

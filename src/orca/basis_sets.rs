@@ -1,13 +1,12 @@
-//! A separate file, as these are quite lengthy!
+//! A separate module, as this set is quite lengthy!
 
 use std::fmt::{Display, Formatter};
 
 use BasisSet::*;
 
-/// https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/basisset.html
-/// See Table 2.12, 2.13 and further
-/// todo: Do we want to split this up into wrapped enums by category for organization,
-/// todo: or let downstream applications handle that?
+/// [See Table 2.12, 2.13 and further](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/basisset.html)
+// todo: Do we want to split this up into wrapped enums by category for organization,
+// todo: or let downstream applications handle that?
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum BasisSet {
     #[default]
