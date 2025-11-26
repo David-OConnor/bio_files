@@ -1,4 +1,4 @@
-//! [Self-Consistent-Field (SCF)[https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html]
+//! [Self-Consistent-Field (SCF)](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/scf.html)
 
 use super::make_inp_block;
 

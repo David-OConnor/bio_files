@@ -9,7 +9,6 @@ use BasisSet::*;
 // todo: or let downstream applications handle that?
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 pub enum BasisSet {
-    #[default]
     None,
     // --- Pople start
     Sto3G,
@@ -93,6 +92,7 @@ pub enum BasisSet {
     Qzvpp,
 
     // Ahlrichs def- family (H–Lr, def-ECP for Rb–Lr / Fr–Lr)
+    #[default]
     DefSvP,
     DefSvp,
     DefTzvp,

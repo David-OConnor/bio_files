@@ -1,8 +1,10 @@
 //! [Ab initio Molecular Dynamics](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html)
 
-use std::path::PathBuf;
+use std::io;
+use std::path::{Path, PathBuf};
 
 use crate::orca::make_inp_block;
+use crate::{Xyz, load_xyz_trajectory};
 
 /// [Thermostat](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#thermostat)
 #[derive(Clone, Copy, PartialEq, Debug)]
@@ -70,5 +72,18 @@ impl Dynamics {
         ];
 
         make_inp_block("md", &contents, &[])
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct DynamicsOutput {
+    pub text: String,
+    pub trajectory: Vec<Xyz>,
+}
+
+impl DynamicsOutput {
+    pub fn new(traj_path: &Path, text: String) -> io::Result<Self> {
+        let trajectory = load_xyz_trajectory(traj_path)?;
+        Ok(Self { text, trajectory })
     }
 }

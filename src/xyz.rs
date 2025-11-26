@@ -9,8 +9,6 @@ use lin_alg::f64::Vec3;
 
 use crate::AtomGeneric;
 
-// todo: Support trajectory files, e.g. ones with multiple segments of  XYZ.
-
 #[derive(Clone, Debug)]
 pub struct Xyz {
     pub atoms: Vec<AtomGeneric>,
@@ -124,4 +122,106 @@ impl Xyz {
 
         Ok(())
     }
+}
+
+/// xyz files can contain multiple sets, e.g. in a molecular dynamics
+/// trajectory.
+pub fn new_xyz_trajectory(text: &str) -> io::Result<Vec<Xyz>> {
+    let lines: Vec<&str> = text.lines().collect();
+
+    let mut items: Vec<Xyz> = Vec::new();
+    let mut i: usize = 0;
+
+    while i < lines.len() {
+        while i < lines.len() && lines[i].trim().is_empty() {
+            i += 1;
+        }
+        if i >= lines.len() {
+            break;
+        }
+
+        let n_atoms: usize = lines[i].trim().parse().map_err(|_| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid atom count on line {}", i + 1),
+            )
+        })?;
+        if n_atoms == 0 {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Invalid atom count (0) on line {}", i + 1),
+            ));
+        }
+
+        let comment_line = lines.get(i + 1).ok_or_else(|| {
+            io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Missing comment line after atom count on line {}", i + 1),
+            )
+        })?;
+
+        let mut atom_lines: Vec<&str> = Vec::with_capacity(n_atoms);
+        let mut j = i + 2;
+        while atom_lines.len() < n_atoms && j < lines.len() {
+            let l = lines[j];
+            if !l.trim().is_empty() {
+                atom_lines.push(l);
+            }
+            j += 1;
+        }
+
+        if atom_lines.len() != n_atoms {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!(
+                    "Unexpected EOF while reading atoms for frame starting at line {} (expected {}, got {})",
+                    i + 1,
+                    n_atoms,
+                    atom_lines.len()
+                ),
+            ));
+        }
+
+        let frame_text = format!(
+            "{n_atoms}\n{comment}\n{atoms}\n",
+            comment = comment_line,
+            atoms = atom_lines.join("\n")
+        );
+
+        items.push(Xyz::new(&frame_text)?);
+        i = j;
+    }
+
+    Ok(items)
+}
+
+pub fn load_xyz_trajectory(path: &Path) -> io::Result<Vec<Xyz>> {
+    let data_str = fs::read_to_string(path)?;
+    new_xyz_trajectory(&data_str)
+}
+
+pub fn save_xyz_trajectory(items: &[Xyz], path: &Path) -> io::Result<()> {
+    let mut file = File::create(path)?;
+
+    for (idx, item) in items.iter().enumerate() {
+        writeln!(file, "{}", item.atoms.len())?;
+        writeln!(file, "{}", item.comment)?;
+
+        for atom in &item.atoms {
+            writeln!(
+                file,
+                "{:<2} {:>17.10} {:>17.10} {:>17.10}",
+                atom.element.to_letter(),
+                atom.posit.x,
+                atom.posit.y,
+                atom.posit.z
+            )?;
+        }
+
+        if idx + 1 != items.len() {
+            writeln!(file)?;
+        }
+    }
+
+    Ok(())
 }

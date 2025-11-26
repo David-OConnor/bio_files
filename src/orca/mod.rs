@@ -28,6 +28,7 @@ pub mod basis_sets;
 pub mod dynamics;
 pub mod geom;
 pub mod method;
+mod plots;
 pub mod scf;
 pub mod solvation;
 
@@ -44,6 +45,8 @@ use method::{Method, MethodSection};
 use scf::Scf;
 use solvation::{Solvator, SolvatorImplicit};
 
+use crate::orca::dynamics::DynamicsOutput;
+use crate::orca::plots::Plots;
 use crate::{
     AtomGeneric,
     orca::{dynamics::Dynamics, geom::Geom},
@@ -226,6 +229,7 @@ pub struct OrcaInput {
     pub geom: Option<Geom>,
     pub symmetry: Option<Symmetry>,
     pub dynamics: Option<Dynamics>,
+    pub plots: Option<Plots>,
     // todo: A/R: https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/stabilityanalysis.html
     // pub shark: Option<Shark>,
 }
@@ -302,6 +306,11 @@ impl OrcaInput {
             result.push_str(&v.make_inp());
         }
 
+        if let Some(v) = &self.plots {
+            result.push('\n');
+            result.push_str(&v.make_inp());
+        }
+
         result.push_str("\n\n* xyz 0 1\n");
 
         // --- Atoms ---
@@ -330,8 +339,7 @@ impl OrcaInput {
     /// Run this command in Orca, and collect the output. Requires `orca` to be available
     /// on the system PATH environment variable.
     /// todo: Outputs a string for now; adjust this as required into a custom output struct
-    pub fn run(&self) -> io::Result<String> {
-        // pub fn run(&self) -> io::Result<OrcaOutput> {
+    pub fn run(&self) -> io::Result<OrcaOutput> {
         let dir = Path::new("orca_temp");
         fs::create_dir_all(dir)?;
 
@@ -367,14 +375,28 @@ impl OrcaInput {
             )));
         }
 
+        // Convert stdout bytes to String
+        let result_text =
+            String::from_utf8(out.stdout).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+
+        if !result_text.contains("****ORCA TERMINATED NORMALLY****") {
+            return Err(io::Error::other(format!(
+                "ORCA terminated abnormally: {result_text}"
+            )));
+        }
+
+        if let Some(md) = &self.dynamics {
+            let out = dir.join(&md.traj_out_dir);
+            let out = DynamicsOutput::new(&out, result_text)?;
+            // Remove the dir after we've processed the trajectory.
+            fs::remove_dir_all(dir)?;
+
+            return Ok(OrcaOutput::Dynamics(out));
+        }
         // Remove the entire temporary directory.
         fs::remove_dir_all(dir)?;
 
-        // Convert stdout bytes to String
-        let result =
-            String::from_utf8(out.stdout).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
-
-        Ok(result)
+        Ok(OrcaOutput::Text(result_text))
     }
 }
 
@@ -385,19 +407,22 @@ pub enum TerminationStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct OrcaOutput {
-    termination_status: TerminationStatus,
+pub enum OrcaOutput {
+    Text(String),
+    Dynamics(DynamicsOutput),
+    // todo: Add term status A/R, e.g. as part of each output type.
+    // termination_status: TerminationStatus,
     // atoms: Vec<AtomGeneric>,
 }
 
-impl OrcaOutput {
-    /// Create output by parsing Orca's stdout text.
-    pub fn new(data: &str) -> Self {
-        let mut termination_status: TerminationStatus = TerminationStatus::Error;
-        if data.contains("****ORCA TERMINATED NORMALLY****") {
-            termination_status = TerminationStatus::Error
-        }
-
-        Self { termination_status }
-    }
-}
+// impl OrcaOutput {
+//     /// Create output by parsing Orca's stdout text.
+//     pub fn new(data: &str) -> Self {
+//         let mut termination_status: TerminationStatus = TerminationStatus::Error;
+//         if data.contains("****ORCA TERMINATED NORMALLY****") {
+//             termination_status = TerminationStatus::Error
+//         }
+//
+//         Self { termination_status }
+//     }
+// }
