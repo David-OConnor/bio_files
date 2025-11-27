@@ -1,10 +1,11 @@
 //! [Ab initio Molecular Dynamics](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html)
 
-use std::io;
-use std::path::{Path, PathBuf};
+use std::{
+    io,
+    path::{Path, PathBuf},
+};
 
-use crate::orca::make_inp_block;
-use crate::{Xyz, load_xyz_trajectory};
+use crate::{Xyz, load_xyz_trajectory, orca::make_inp_block};
 
 /// [Thermostat](https://www.faccts.de/docs/orca/6.1/manual/contents/moleculardynamics/moldyn.html#thermostat)
 #[derive(Clone, Copy, PartialEq, Debug)]

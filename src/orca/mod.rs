@@ -25,6 +25,7 @@
 //! module in Python, because FACCTS provides its own [high-quality ORCA Python Interface library](https://www.faccts.de/docs/opi/1.0/docs/)
 
 pub mod basis_sets;
+pub mod charges;
 pub mod dynamics;
 pub mod geom;
 pub mod method;
@@ -45,11 +46,14 @@ use method::{Method, MethodSection};
 use scf::Scf;
 use solvation::{Solvator, SolvatorImplicit};
 
-use crate::orca::dynamics::DynamicsOutput;
-use crate::orca::plots::Plots;
 use crate::{
     AtomGeneric,
-    orca::{dynamics::Dynamics, geom::Geom},
+    orca::{
+        charges::ChargesOutput,
+        dynamics::{Dynamics, DynamicsOutput},
+        geom::Geom,
+        plots::Plots,
+    },
 };
 
 /// A helper. The &str and String use reflects how we use this in practie,
@@ -118,7 +122,8 @@ impl GcpOption {
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Keyword {
     /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
-    /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/charges.html
+    /// [Charge tutorial](https://www.faccts.de/docs/orca/5.0/tutorials/prop/charges.html)
+    /// [MBIS Charges](https://www.faccts.de/docs/orca/6.1/manual/contents/spectroscopyproperties/population.html?q=mbis&n=0#mbis-charges)
     Mbis,
     OptimizeGeometry,
     // OptimizeHydrogens,
@@ -392,6 +397,11 @@ impl OrcaInput {
             fs::remove_dir_all(dir)?;
 
             return Ok(OrcaOutput::Dynamics(out));
+        } else if self.keywords.contains(&Keyword::Mbis) {
+            let out = ChargesOutput::new(result_text)?;
+            fs::remove_dir_all(dir)?;
+
+            return Ok(OrcaOutput::Charges(out));
         }
         // Remove the entire temporary directory.
         fs::remove_dir_all(dir)?;
@@ -410,6 +420,7 @@ pub enum TerminationStatus {
 pub enum OrcaOutput {
     Text(String),
     Dynamics(DynamicsOutput),
+    Charges(ChargesOutput),
     // todo: Add term status A/R, e.g. as part of each output type.
     // termination_status: TerminationStatus,
     // atoms: Vec<AtomGeneric>,
