@@ -22,6 +22,7 @@ pub mod amber_typedef;
 mod bond_inference;
 pub mod cif_sf;
 mod mmcif_aux;
+pub mod mol_templates;
 pub mod prmtop;
 pub mod xyz;
 
@@ -207,9 +208,11 @@ pub struct AtomGeneric {
     /// This identifier will be unique within a given residue. For example, within an
     /// amino acid on a protein. Different residues will have different sets of these.
     /// e.g. "CG1", "CA", "O", "C", "HA", "CD", "C9" etc.
+    /// todo: This setup might be protein/aa specific.
     pub type_in_res: Option<AtomTypeInRes>,
-    /// There are too many variants of this (with different numbers) to use an enum effectively
-    pub type_in_res_lipid: Option<String>,
+    /// There are too many variants of this (with different numbers) for lipids, nucleic
+    /// acids etc to use an enum effectively.
+    pub type_in_res_general: Option<String>,
     /// Used by Amber and other force fields to apply the correct molecular dynamics parameters for
     /// this atom.
     /// E.g. "c6", "ca", "n3", "ha", "h0" etc, as seen in Mol2 files from AMBER.

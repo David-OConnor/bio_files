@@ -86,6 +86,22 @@ If you're looking for specific functionality, please open an Issue or PR on Gith
 
 Can generate and run [ORCA](https://www.faccts.de/orca/) commands, and parse the result. Example:
 
+## Loading building-block molecules from templates
+
+We can load amino acids, nucleic acids, and lipids from Amber template files. These are standard
+molecule segments used to build common biological molecules. Example usage:
+
+```rust
+use dynamics::{LIPID_21_LIB, AMINO_19, RNA_LIB, OL24_LIB};
+
+// Returns io::Result<HashMap<String, TemplateData>>
+let lipids = load_templates(LIPID_21_LIB).unwrap();
+let dna = load_templates(OL24_LIB).unwrap();
+let amino_acids = load_templates(AMINIO19_LIB).unwrap();
+```
+
+## Code examples
+
 ```rust
 use std::path::PathBuf;
 use bio_files::orca::{OrcaInput, Thermostat};
