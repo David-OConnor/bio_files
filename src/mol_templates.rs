@@ -57,8 +57,37 @@ enum Section {
 pub struct TemplateData {
     pub atoms: Vec<AtomGeneric>,
     pub bonds: Vec<BondGeneric>,
-    pub unit_connect: Option<UnitConnect>,
+    pub unit_connect: UnitConnect,
     pub res_connect: Vec<ResidueConnectRow>,
+}
+
+impl TemplateData {
+    /// Find the indices of a template that join it to previous ones. None for terminal templates.
+    pub fn attach_points(&self) -> io::Result<(Option<usize>, Option<usize>)> {
+        let head_i = match self.unit_connect.head {
+            Some(v) => Some(v as usize - 1),
+            None => None,
+        };
+        let tail_i = match self.unit_connect.tail {
+            Some(v) => Some(v as usize - 1),
+            None => None,
+        };
+
+        Ok((head_i, tail_i))
+    }
+
+    pub fn find_atom_i_by_name(&self, name: &str) -> Option<usize> {
+        self.atoms
+            .iter()
+            .enumerate()
+            .find(|(_, a)| a.type_in_res_general.as_deref() == Some(name))
+            .map(|(i, _)| i)
+    }
+    pub fn find_atom_by_name(&self, name: &str) -> Option<&AtomGeneric> {
+        self.atoms
+            .iter()
+            .find(|a| a.type_in_res_general.as_deref() == Some(name))
+    }
 }
 
 /// Creates a set of  atom and bonds for all items in a `.lib` template file, e.g. `lipid21.lib`,
@@ -136,15 +165,18 @@ pub fn load_templates(template_text: &str) -> io::Result<HashMap<String, Templat
                     })
                     .collect();
 
-                let unit_connect: Option<UnitConnect> = if work.connect_present {
+                let unit_connect = if work.connect_present {
                     let head = work.connect_vals.get(0).copied().unwrap_or(0);
                     let tail = work.connect_vals.get(1).copied().unwrap_or(0);
-                    Some(UnitConnect {
+                    UnitConnect {
                         head: if head == 0 { None } else { Some(head) },
                         tail: if tail == 0 { None } else { Some(tail) },
-                    })
+                    }
                 } else {
-                    None
+                    UnitConnect {
+                        head: None,
+                        tail: None,
+                    }
                 };
 
                 let res_connect = work.residue_connect.clone();
