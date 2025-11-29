@@ -437,7 +437,8 @@ pub struct ResidueGeneric {
     pub end: ResidueEnd,
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
+/// Can be used for amino acid, and nucleotide sequences.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Debug)]
 pub enum ResidueEnd {
     Internal,
     NTerminus,

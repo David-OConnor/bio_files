@@ -18,9 +18,9 @@ use std::{
     str::FromStr,
 };
 
-use na_seq::{AminoAcidGeneral, AtomTypeInRes};
+use na_seq::{AminoAcidGeneral, AtomTypeInRes, Nucleotide};
 
-use crate::LipidStandard;
+use crate::{LipidStandard, ResidueEnd};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
@@ -302,7 +302,7 @@ impl LjParams {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChargeParams {
+pub struct ChargeParamsProtein {
     /// For proteins. The residue-specific ID. We use this value to map forcefield type
     /// to atoms loaded from mmCIF etc; these will have this `type_in_res`, but not
     /// an Amber ff type. We apply the charge here to the atom based on its `type_in_res` and AA type,
@@ -316,10 +316,9 @@ pub struct ChargeParams {
     pub charge: f32,
 }
 
-/// See notes on `ChargeParams`; equivalent here.
+/// See notes on `ChargeParams`; equivalent here. For lipids, nucleic acids etc.
 #[derive(Clone, Debug)]
-pub struct ChargeParamsLipid {
-    // pub type_in_res: AtomTypeInLipid,
+pub struct ChargeParams {
     pub type_in_res: String,
     pub ff_type: String,
     pub charge: f32,
@@ -612,19 +611,152 @@ fn parse_float(v: &str) -> io::Result<f32> {
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, format!("Invalid float: {v}")))
 }
 
+/// Parse a lib (partial charge, FF type map), then convert keys to amino acids, and use our peptide-specific
+/// type-in-res enum instead of strings.
+pub fn parse_lib_peptide(
+    text: &str,
+) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParamsProtein>>> {
+    let parsed = parse_lib(text)?;
+
+    let mut result = HashMap::new();
+
+    for (tag, v) in parsed {
+        // This currently fails on alternate variants like ASSH for ASP that's protonated.
+        // other examples are LYS/LYN. todo: Impl if you need.
+        let Ok(aa) = AminoAcidGeneral::from_str(&tag) else {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "Unable to parse amino acid from lib",
+            ));
+        };
+
+        let mut v_prot = Vec::new();
+        for param in v {
+            v_prot.push(ChargeParamsProtein {
+                type_in_res: AtomTypeInRes::from_str(&param.type_in_res)?,
+                ff_type: param.ff_type,
+                charge: param.charge,
+            });
+        }
+
+        result.insert(aa, v_prot);
+    }
+
+    Ok(result)
+}
+
+/// Parse a lib (partial charge, FF type map), then convert keys to lipid standards.
+///
 /// Load charge data from Amber's `amino19.lib`, `aminoct12.lib`, `aminont12.lib`, and similar.
 /// This provides partial charges for all amino acids, as well as a mapping between atom type in residue,
 /// e.g. "C1", "NA" etc, to amber force field type, e.g. "XC".
 /// See [Amber RM](https://ambermd.org/doc12/Amber25.pdf), section 13.2: Residue naming conventions,
 /// for info on the protenation variants, and their 3-letter identifiers.
-pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParams>>> {
+pub fn parse_lib_lipid(text: &str) -> io::Result<HashMap<LipidStandard, Vec<ChargeParams>>> {
+    let parsed = parse_lib(text)?;
+
+    let mut result = HashMap::new();
+    for (tag, v) in parsed {
+        let Ok(s) = LipidStandard::from_str(&tag) else {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Unable to parse lipid from lib: {tag}"),
+            ));
+        };
+        result.insert(s, v);
+    }
+
+    Ok(result)
+}
+
+/// For DNA or RNA.
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NucleotideTemplate {
+    pub nt: Nucleotide,
+    pub end: ResidueEnd,
+}
+
+impl FromStr for NucleotideTemplate {
+    type Err = io::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // OL24.lib uses a "D" prefix we can skip.
+        // RNA.lib has no such prefix.
+        let s = s.to_owned().replace("D", "");
+
+        let first = match s.chars().next() {
+            Some(c) => c,
+            None => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Nucleotide in template too short: {s}"),
+                ));
+            }
+        };
+
+        let nt = match first {
+            'A' => Nucleotide::A,
+            'C' => Nucleotide::C,
+            'T' | 'U' => Nucleotide::T,
+            'G' => Nucleotide::G,
+            _ => {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidInput,
+                    format!("Unrecognized nucleotide in template: {s}"),
+                ));
+            }
+        };
+        let end = if s.ends_with('5') {
+            ResidueEnd::NTerminus
+        } else if s.ends_with('3') {
+            ResidueEnd::CTerminus
+        } else if s.ends_with('N') {
+            ResidueEnd::Hetero // "neutral" / not part of a chain?
+        } else {
+            ResidueEnd::Internal
+        };
+
+        Ok(Self { nt, end })
+    }
+}
+
+/// Parse a lib (partial charge, FF type map), then convert keys to nucleotides.
+/// Note: For RNA, assume T = U here? // todo
+pub fn parse_lib_nucleic_acid(
+    text: &str,
+) -> io::Result<HashMap<NucleotideTemplate, Vec<ChargeParams>>> {
+    let parsed = parse_lib(text)?;
+
+    let mut result = HashMap::new();
+    for (tag, v) in parsed {
+        // OHE is a special cap for RNA on a 5' terminal phosphate.
+        // Skip it for now.
+        if &tag == "OHE" {
+            continue;
+        }
+        let Ok(s) = NucleotideTemplate::from_str(&tag) else {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Unable to parse nucleotide from lib: {tag}"),
+            ));
+        };
+        result.insert(s, v);
+    }
+
+    Ok(result)
+}
+
+// todo: This is DRY with the parse_amino_charges fn above. Fix it. Too much repetition for too little diff.
+/// A general function for parsing partial charge, and maps of atom type to FF type/name.
+/// We post-process these with molecule-type specific keys.
+pub fn parse_lib(text: &str) -> io::Result<HashMap<String, Vec<ChargeParams>>> {
     enum Mode {
-        Scan,                              // not inside an atoms table
-        InAtoms { res: AminoAcidGeneral }, // currently reading atom lines for this residue
+        Scan,                    // not inside an atoms table
+        InAtoms { res: String }, // currently reading atom lines for this residue
     }
 
     let mut state = Mode::Scan;
-    let mut result: HashMap<AminoAcidGeneral, Vec<ChargeParams>> = HashMap::new();
+    let mut result: HashMap<String, Vec<ChargeParams>> = HashMap::new();
 
     let lines: Vec<&str> = text.lines().collect();
 
@@ -638,18 +770,11 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, V
             if let Some((tag, tail)) = rest.split_once('.') {
                 // We only care about "<RES>.unit.atoms table"
                 if tail.starts_with("unit.atoms table") {
-                    // This currently fails on alternate variants like ASSH for ASP that's protonated.
-                    // other examples are LYS/LYN. todo: Impl if you need.
-                    let Ok(aa) = AminoAcidGeneral::from_str(tag) else {
-                        return Err(io::Error::new(
-                            ErrorKind::InvalidData,
-                            "Unable to parse AA from lib",
-                        ));
+                    state = Mode::InAtoms {
+                        res: tag.to_owned(),
                     };
 
-                    state = Mode::InAtoms { res: aa };
-
-                    result.entry(aa).or_default(); // make sure map key exists
+                    result.entry(tag.to_owned()).or_default(); // make sure map key exists
                 }
             }
             continue;
@@ -688,89 +813,6 @@ pub fn parse_amino_charges(text: &str) -> io::Result<HashMap<AminoAcidGeneral, V
             let charge = parse_float(tokens.last().unwrap())?;
 
             result.get_mut(res).unwrap().push(ChargeParams {
-                type_in_res: AtomTypeInRes::from_str(&type_in_res)?,
-                ff_type,
-                charge,
-            });
-        }
-    }
-
-    Ok(result)
-}
-
-// todo: This is DRY with the parse_amino_charges fn above. Fix it. Too much repetition for too little diff.
-pub fn parse_lipid_charges(
-    text: &str,
-) -> io::Result<HashMap<LipidStandard, Vec<ChargeParamsLipid>>> {
-    enum Mode {
-        Scan,                           // not inside an atoms table
-        InAtoms { res: LipidStandard }, // currently reading atom lines for this residue
-    }
-
-    let mut state = Mode::Scan;
-    let mut result: HashMap<LipidStandard, Vec<ChargeParamsLipid>> = HashMap::new();
-
-    let lines: Vec<&str> = text.lines().collect();
-
-    for line in lines {
-        let ltrim = line.trim_start();
-
-        // Section headers
-        if let Some(rest) = ltrim.strip_prefix("!entry.") {
-            state = Mode::Scan;
-
-            if let Some((tag, tail)) = rest.split_once('.') {
-                // We only care about "<RES>.unit.atoms table"
-                if tail.starts_with("unit.atoms table") {
-                    let Ok(aa) = LipidStandard::from_str(tag) else {
-                        return Err(io::Error::new(
-                            ErrorKind::InvalidData,
-                            format!("Unable to parse lipid from lib: {tag}"),
-                        ));
-                    };
-
-                    state = Mode::InAtoms { res: aa };
-
-                    result.entry(aa).or_default(); // make sure map key exists
-                }
-            }
-            continue;
-        }
-
-        // If inside atoms table, parse data line
-        if let Mode::InAtoms { ref res } = state {
-            // tables end when we hit an empty line or a comment
-            if ltrim.is_empty() || ltrim.starts_with('!') {
-                state = Mode::Scan;
-                continue;
-            }
-
-            let mut tokens = Vec::<&str>::new();
-            let mut in_quote = false;
-            let mut start = 0usize;
-            let bytes = ltrim.as_bytes();
-            for (i, &b) in bytes.iter().enumerate() {
-                match b {
-                    b'"' => in_quote = !in_quote,
-                    b' ' | b'\t' if !in_quote => {
-                        if start < i {
-                            tokens.push(&ltrim[start..i]);
-                        }
-                        start = i + 1;
-                    }
-                    _ => {}
-                }
-            }
-            if start < ltrim.len() {
-                tokens.push(&ltrim[start..]);
-            }
-
-            let type_in_res = tokens[0].trim_matches('"').to_string();
-            let ff_type = tokens[1].trim_matches('"').to_string();
-            let charge = parse_float(tokens.last().unwrap())?;
-
-            result.get_mut(res).unwrap().push(ChargeParamsLipid {
-                // type_in_res: AtomTypeInLipid::from_str(&type_in_res)?,
                 type_in_res,
                 ff_type,
                 charge,
@@ -781,7 +823,9 @@ pub fn parse_lipid_charges(
     Ok(result)
 }
 
-pub fn load_amino_charges(path: &Path) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParams>>> {
+pub fn load_amino_charges(
+    path: &Path,
+) -> io::Result<HashMap<AminoAcidGeneral, Vec<ChargeParamsProtein>>> {
     let mut file = File::open(path)?;
     let mut buffer = Vec::new();
     file.read_to_end(&mut buffer)?;
@@ -789,5 +833,5 @@ pub fn load_amino_charges(path: &Path) -> io::Result<HashMap<AminoAcidGeneral, V
     let data_str: String = String::from_utf8(buffer)
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
-    parse_amino_charges(&data_str)
+    parse_lib_peptide(&data_str)
 }

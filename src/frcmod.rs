@@ -56,7 +56,7 @@ impl ForceFieldParamsVec {
                     section = Section::Improper;
                     continue;
                 }
-                "NONBON" | "NONB" => {
+                "NONBON" | "NONB" | "NONBOND" => {
                     section = Section::Nonbond;
                     continue;
                 }
