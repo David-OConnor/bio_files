@@ -32,7 +32,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 
 ### Planned:
 
-- MTZ (Exists in Daedalus; needs to be decoupled)
+- MTZ (Exists in ChemForma; needs to be decoupled)
 - DNA (Exists in PlasCAD; needs to be decoupled)
 
 ## Generic data types
@@ -75,7 +75,7 @@ an atom's in, in your derived Atom struct).
 This library provides an interface to building Orca inputs, executing commands, and parsing
 outputs. It uses Rust data structures to contrain input choices into valid ones when possible, and allows you to
 integrate Orca into Rust programs and libraries. For example,
-[Daedalus](https://github.com/david-oconnor/daedalus) uses it to minimize energy on organic
+[ChemForma](https://github.com/david-oconnorChemForma) uses it to minimize energy on organic
 molecules, and augment traditional MD technique with quantum mechanics.
 
 ORCA support in this library is limited to Rust only. If you wish to use Orca with Python,
@@ -104,17 +104,18 @@ let amino_acids = load_templates(AMINIO19_LIB).unwrap();
 
 ```rust
 use std::path::PathBuf;
-use bio_files::orca::{OrcaInput, Thermostat};
+use bio_files::orca::{OrcaInput, Thermostat, Method, Task, BasisSet};
 
 fn main() {
     let mut orca_inp = OrcaInput {
-        method: Method::HartreeFock,
+        task:
+        method: Method::PBE0,
         basis_set: BasisSet::Def2Svp,
         atoms,
         ..Default::default()
     };
 
-    orca_inp.keywords = vec![Keyword::Opt, Keyword::Freq];
+    orca_inp.keywords = vec![Keyword::D4Dispersion];
 
     println!("Orca input:\n{}\n", orca_inp.make_inp());
     // Save to disk if desired:
@@ -123,22 +124,25 @@ fn main() {
     println!("Running Orca...");
     let orca_out = orca_inp.run().unwrap();
 
-    println!("Orca OUT:\n{}\n", orca_out);
+    println!("Orca OUT:\n{:?}\n", orca_out);
 
     // To run an ab-initio dynamics sim:
+    let dyn = Dynamics {
+        timestep: 0.5,
+        init_vel: 310.,
+        thermostat: Thermostat::Csvr,
+        thermostat_temp: 310.,
+        thermostat_timecon: 10.,
+        traj_out_dir: PathBuf::from_str(
+            "traj.xyz").unwrap(),
+        steps: 200,
+    };
+
     let orca_inp = OrcaInput {
-        method: Method::Blyp,
+        task: Task::Dynamics(dyn),
+        method: Method::R2SCAN_c3,
         basis_set: BasisSet::Tzvp,
         atoms,
-        dynamics: Some(Dynamics {
-            timestep: 0.5,
-            init_vel: 310.,
-            thermostat: Thermostat::Csvr,
-            thermostat_temp: 310.,
-            thermostat_timecon: 10.,
-            traj_out_dir: PathBuf::from_str("traj.xyz").unwrap(),
-            steps: 200,
-        }),
         ..Default::default()
     };
 

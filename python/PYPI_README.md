@@ -5,7 +5,6 @@
 [![PyPI](https://img.shields.io/pypi/v/biology-files.svg)](https://pypi.org/project/biology-files)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.17445294.svg)](https://doi.org/10.5281/zenodo.17445294)
 
-
 This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
 on data structures that are specific to each file format; you will need to convert to and from the structures
 used by your application. The API docs, and examples below are sufficient to get started.
@@ -13,6 +12,7 @@ used by your application. The API docs, and examples below are sufficient to get
 Note: Install the pip version with `pip install biology-files` due to a name conflict.
 
 ### Supported formats:
+
 - mmCIF (Protein atom, residue, chain, and related data like secondary structure)
 - mmCIF (structure factors / 2fo-fc: Electron density data, raw)
 - Mol2 (Small molecules, e.g. ligands)
@@ -26,13 +26,13 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - GRO (Gromacs molecules)
 - TOP (Gromacs topology) - WIP
 
-
 ### Planned:
-- MTZ (Exists in Daedalus; needs to be decoupled)
+
+- MTZ (Exists in ChemForma; needs to be decoupled)
 - DNA (Exists in PlasCAD; needs to be decoupled)
 
-
 ## Generic data types
+
 This library includes a number of relatively generic data types which are returned by various load functions,
 and required to save data. These may be used in your application directly, or converted into a more specific
 format. Examples:
@@ -43,30 +43,33 @@ format. Examples:
 - [BondType](https://docs.rs/bio_files/latest/bio_files/enum.BondType.html)
 - [LipidStandard](https://docs.rs/bio_files/latest/bio_files/enum.LipidStandard.html)
 
-
-For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/).  We do not plan to support this format, due to this high quality library.
+For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/). We do not plan to support this format, due to
+this high quality library.
 
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
 It operates using structs with public fields, which you can explore
-using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods: `new()`,
+using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods:
+`new()`,
 `save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and
 `load()` accept `&Path`.
 The Force Field formats use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
 
-
 ## Serial numbers
+
 Serial numbers for atoms, residues, secondary structure, and chains are generally pulled directly from atom data files
-(mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as `Vec<u32>`, with the `u32` being the serial number.
+(mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as `Vec<u32>`, with the `u32` being the serial
+number.
 In your application, you may wish to adapt these generic types to custom ones that use index lookups
 instead of serial numbers. We use SNs here because they're more robust, and match the input files directly;
-add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the residue
+add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the
+residue
 an atom's in, in your derived Atom struct).
-
 
 ## Example use
 
 Small molecule save and load, Python.
+
 ```python
 from biology_files import Sdf
 
@@ -97,6 +100,7 @@ peptide = MmCif.load_rcsb("8S6P")
 ```
 
 Small molecule save and load, Rust.
+
 ```rust
 use bio_files::{Sdf, Mol2};
 
@@ -142,7 +146,6 @@ let peptide = MmCif::load_rcsb("8S6P")?;
 
 You can use similar syntax for mmCIF protein files.
 
-
 ## Amber force fields
 
 Reference the [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)
@@ -150,13 +153,13 @@ for details on how we parse its files, and how to use the results. In some cases
 the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals
 parameters. Structs and fields are documented with reference manual references.
 
-The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching parameters,
+The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching
+parameters,
 angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups
 for your application.
 
 Note that the above examples expect that your application has a struct representing the molecule that has
 `From<Mol2>`, and `to_mol2(&self)` (etc) methods. The details of these depend on the application. For example:
-
 
 ```rust
 impl From<Sdf> for Molecule {
@@ -172,6 +175,7 @@ impl From<Sdf> for Molecule {
 ```
 
 A practical example of parsing a molecule from a `mmCIF` as parsed from `bio_files` into an application-specific format:
+
 ```rust
 fn load() {
     let cif_data = mmcif::load("./1htm.cif");
@@ -225,7 +229,9 @@ impl TryFrom<MmCif> for Molecule {
 ```
 
 # A protein loading and prep example:
+
 Python:
+
 ```python
 use biology_files::{Mol2, MmCif, ForceFieldParams, FfParamSet, prepare_peptide, load_prmtop};
 
@@ -252,6 +258,7 @@ protein.atoms, protein.bonds = prepare_peptide(
 ```
 
 Rust:
+
 ```rust
 use bio_files::{MmCif, Mol2, ForceFieldParams, FfParamSet, prepare_peptide, load_prmtop};
 use std::path::Path;
@@ -288,6 +295,6 @@ fn load() {
 
 Note: The Python version is currently missing support for some formats, and not all fields are exposed.
 
-
 ### References
+
 - [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)

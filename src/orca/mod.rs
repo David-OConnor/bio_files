@@ -34,6 +34,7 @@ pub mod scf;
 pub mod solvation;
 
 use std::{
+    fmt::Display,
     fs,
     fs::File,
     io::{self, ErrorKind, Write},
@@ -42,6 +43,7 @@ use std::{
 };
 
 use basis_sets::BasisSet;
+use lin_alg::f64::Vec3;
 use method::{Method, MethodSection};
 use scf::Scf;
 use solvation::{Solvator, SolvatorImplicit};
@@ -49,7 +51,7 @@ use solvation::{Solvator, SolvatorImplicit};
 use crate::{
     AtomGeneric,
     orca::{
-        charges::ChargesOutput,
+        charges::{AtomChargeData, ChargesOutput},
         dynamics::{Dynamics, DynamicsOutput},
         geom::Geom,
         plots::Plots,
@@ -117,17 +119,77 @@ impl GcpOption {
     }
 }
 
+/// [Geometry optimization thresholds](https://www.faccts.de/docs/orca/6.1/manual/contents/structurereactivity/optimizations.html?q=tightopt&n=0#geometry-optimization-thresholds)
+/// Just the general ones, for their use as keywords. Only include this if intending to perform
+/// geometry optimization, for example, instead of calculating single-point energies.
+#[derive(Clone, Copy, Default, PartialEq, Debug)]
+pub enum GeomOptThresh {
+    Loose,
+    /// Default in Orca, e.g. if the keyword is omitted.
+    #[default]
+    Opt,
+    Tight,
+    VeryTight,
+}
+
+impl GeomOptThresh {
+    pub fn keyword(self) -> String {
+        match self {
+            Self::Loose => "LooseOpt".to_string(),
+            Self::Opt => "Opt".to_string(),
+            Self::Tight => "TightOpt".to_string(),
+            Self::VeryTight => "VeryTightOpt".to_string(),
+        }
+    }
+}
+
+impl Display for GeomOptThresh {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let v = match self {
+            Self::Loose => "Loose",
+            Self::Opt => "Opt",
+            Self::Tight => "Tight",
+            Self::VeryTight => "Very tight",
+        };
+
+        write!(f, "{}", v)
+    }
+}
+
+/// This seems to be implicit, but of critical importance: This controls the primary mode of operation.
+/// the nature of the computation's results depend on this.
+#[derive(Clone, Debug, Default)]
+pub enum Task {
+    /// The default ORCA mode of operation; no associated keyword.
+    #[default]
+    SinglePoint,
+    GeometryOptimization((GeomOptThresh, Option<Geom>)),
+    /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
+    /// [Charge tutorial](https://www.faccts.de/docs/orca/5.0/tutorials/prop/charges.html)
+    /// [MBIS Charges](https://www.faccts.de/docs/orca/6.1/manual/contents/spectroscopyproperties/population.html?q=mbis&n=0#mbis-charges)
+    MbisCharges,
+    MolDynamics(Dynamics),
+    // todo: Others A/R
+}
+
+impl Display for Task {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let v = match self {
+            Self::SinglePoint => "Single point energy",
+            Self::GeometryOptimization(_) => "Optimize geometry",
+            Self::MbisCharges => "MBIS charges",
+            Self::MolDynamics(_) => "Mol dynamics (Ab-initio)",
+        };
+
+        write!(f, "{v}")
+    }
+}
+
 /// Misc other keywords not including method and basis set.
 /// Note that we ommit some that are part of other fields we have, as with solvents.
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum Keyword {
-    /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
-    /// [Charge tutorial](https://www.faccts.de/docs/orca/5.0/tutorials/prop/charges.html)
-    /// [MBIS Charges](https://www.faccts.de/docs/orca/6.1/manual/contents/spectroscopyproperties/population.html?q=mbis&n=0#mbis-charges)
-    Mbis,
-    OptimizeGeometry,
-    // OptimizeHydrogens,
-    TightOptimization,
+    // Mbis,
     Freq,
     NumericalGradient,
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/disp.html
@@ -148,9 +210,7 @@ impl Keyword {
     /// Prefixed with an !, starts the .inp file.
     pub fn keyword(self) -> String {
         match self {
-            Self::Mbis => "MBIS".to_string(),
-            Self::OptimizeGeometry => "OPT".to_string(),
-            Self::TightOptimization => "TIGHTOPT".to_string(),
+            // Self::Mbis => "MBIS".to_string(),
             Self::Freq => "FREQ".to_string(),
             Self::NumericalGradient => "NUMGRAD".to_string(),
             Self::D4Dispersion => "D4".to_string(),
@@ -218,12 +278,15 @@ impl Symmetry {
 /// Any fields marked as `Optional here`
 #[derive(Debug, Clone, Default)]
 pub struct OrcaInput {
+    pub task: Task,
     // For now, We keep `Method` separate from the optional `method_section` part;
     // the former is required, and writes to the first line. We could, alternatively,
     // have it write to the `method` key in the `%method` block we write to  in `method_section`.
     pub method: Method,
     pub method_section: Option<MethodSection>, // Sets the %method section.
     pub basis_set: BasisSet,
+    // /// If None, calculate single point energies as the default mode.
+    // pub opt_mode: Option<GeomOptThresh>,
     pub keywords: Vec<Keyword>,
     pub atoms: Vec<AtomGeneric>,
     /// todo: Ref [this list of input blocks from the docs](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html);
@@ -231,9 +294,8 @@ pub struct OrcaInput {
     pub solvator_implicit: Option<SolvatorImplicit>,
     pub bond_localization: Option<BondLocalization>,
     pub scf: Option<Scf>,
-    pub geom: Option<Geom>,
-    pub symmetry: Option<Symmetry>,
-    pub dynamics: Option<Dynamics>,
+    pub symmetry: Option<Symmetry>, // todo: Combine into task?
+    // pub dynamics: Option<Dynamics>,
     pub plots: Option<Plots>,
     // todo: A/R: https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/stabilityanalysis.html
     // pub shark: Option<Shark>,
@@ -255,13 +317,36 @@ impl OrcaInput {
         let mut result = String::new();
 
         // --- Initial line ---
-        result.push_str(&format!(
-            "!{} {}",
-            self.method.keyword(),
-            self.basis_set.keyword()
-        ));
+        result.push_str(&format!("!{}", self.method.keyword()));
+
+        if !self.method.is_composite() {
+            result.push_str(&format!(" {}", self.basis_set.keyword()));
+        }
+
+        match &self.task {
+            Task::SinglePoint => {} // No action or keyword.
+            Task::GeometryOptimization((thresh, geom)) => {
+                // todo: Integrate our geom block here?
+                result.push_str(&format!(" {}", thresh.keyword()));
+
+                if let Some(v) = geom {
+                    result.push('\n');
+                    result.push_str(&v.make_inp());
+                }
+            }
+            Task::MbisCharges => {
+                result.push_str(" MBIS");
+            }
+            Task::MolDynamics(md) => {
+                result.push_str(&format!(" {}", md.make_inp()));
+            }
+        }
 
         for kw in &self.keywords {
+            if kw == &Keyword::D4Dispersion && self.method.is_composite() {
+                continue;
+            }
+
             result.push_str(&format!(" {}", kw.keyword()));
         }
 
@@ -296,17 +381,7 @@ impl OrcaInput {
             result.push_str(&v.make_inp());
         }
 
-        if let Some(v) = &self.geom {
-            result.push('\n');
-            result.push_str(&v.make_inp());
-        }
-
         if let Some(v) = &self.symmetry {
-            result.push('\n');
-            result.push_str(&v.make_inp());
-        }
-
-        if let Some(v) = &self.dynamics {
             result.push('\n');
             result.push_str(&v.make_inp());
         }
@@ -352,7 +427,7 @@ impl OrcaInput {
         let path = dir.join(Path::new(file_name));
         self.save(&path)?;
 
-        let out = match Command::new("orca")
+        let cmd_out = match Command::new("orca")
             .current_dir(dir)
             .args([file_name])
             .output()
@@ -370,19 +445,19 @@ impl OrcaInput {
             Err(e) => return Err(e),
         };
 
-        if !out.status.success() {
-            let stderr_str = String::from_utf8_lossy(&out.stderr);
+        if !cmd_out.status.success() {
+            let stderr_str = String::from_utf8_lossy(&cmd_out.stderr);
             fs::remove_dir_all(dir)?;
 
             return Err(io::Error::other(format!(
-                "Problem reading out temporary orca file: {}",
+                "Problem reading out temporary ORCA file: {}",
                 stderr_str
             )));
         }
 
         // Convert stdout bytes to String
-        let result_text =
-            String::from_utf8(out.stdout).map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+        let result_text = String::from_utf8(cmd_out.stdout)
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
 
         if !result_text.contains("****ORCA TERMINATED NORMALLY****") {
             return Err(io::Error::other(format!(
@@ -390,23 +465,30 @@ impl OrcaInput {
             )));
         }
 
-        if let Some(md) = &self.dynamics {
-            let out = dir.join(&md.traj_out_dir);
-            let out = DynamicsOutput::new(&out, result_text)?;
-            // Remove the dir after we've processed the trajectory.
-            fs::remove_dir_all(dir)?;
+        let result = match &self.task {
+            Task::SinglePoint => {
+                // todo
+                OrcaOutput::Text(result_text)
+            }
+            Task::MolDynamics(md) => {
+                let out = dir.join(&md.traj_out_dir);
+                let out = DynamicsOutput::new(&out, result_text)?;
+                OrcaOutput::Dynamics(out)
+            }
+            Task::MbisCharges => {
+                let out = ChargesOutput::new(result_text)?;
+                OrcaOutput::Charges(out)
+            }
+            Task::GeometryOptimization(_) => {
+                let out = GeometryOutput::new(result_text)?;
+                OrcaOutput::Geometry(out)
+            }
+        };
 
-            return Ok(OrcaOutput::Dynamics(out));
-        } else if self.keywords.contains(&Keyword::Mbis) {
-            let out = ChargesOutput::new(result_text)?;
-            fs::remove_dir_all(dir)?;
-
-            return Ok(OrcaOutput::Charges(out));
-        }
         // Remove the entire temporary directory.
         fs::remove_dir_all(dir)?;
 
-        Ok(OrcaOutput::Text(result_text))
+        Ok(result)
     }
 }
 
@@ -421,9 +503,9 @@ pub enum OrcaOutput {
     Text(String),
     Dynamics(DynamicsOutput),
     Charges(ChargesOutput),
-    // todo: Add term status A/R, e.g. as part of each output type.
+    /// E.g. from geometry optimization.
+    Geometry(GeometryOutput),
     // termination_status: TerminationStatus,
-    // atoms: Vec<AtomGeneric>,
 }
 
 // impl OrcaOutput {
@@ -437,3 +519,78 @@ pub enum OrcaOutput {
 //         Self { termination_status }
 //     }
 // }
+
+#[derive(Debug, Clone)]
+pub struct GeometryOutput {
+    pub text: String,
+    pub posits: Vec<Vec3>,
+}
+
+impl GeometryOutput {
+    pub fn new(text: String) -> io::Result<Self> {
+        let mut posits = Vec::new();
+
+        // 1. Find the start of the "FINAL ENERGY EVALUATION" section.
+        // We look for this first to ensure we aren't grabbing initial or intermediate steps.
+        let final_eval_marker = "*** FINAL ENERGY EVALUATION AT THE STATIONARY POINT ***";
+        let section_start = text.find(final_eval_marker).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "Final stationary point not reached yet",
+            )
+        })?;
+
+        // 2. Only search within the text AFTER that marker
+        let remaining_text = &text[section_start..];
+        let coord_header = "CARTESIAN COORDINATES (ANGSTROEM)";
+
+        let header_pos = remaining_text.find(coord_header).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::NotFound,
+                "Could not find coordinates in final section",
+            )
+        })?;
+
+        // 3. Iterate through lines starting from the coordinate header
+        let mut lines = remaining_text[header_pos..].lines();
+
+        // Skip the header line and the "-----------------" separator line
+        lines.next();
+        lines.next();
+
+        for line in lines {
+            let trimmed = line.trim();
+
+            // ORCA usually ends these blocks with a line of dashes or an empty line
+            if trimmed.is_empty() || trimmed.starts_with('-') {
+                break;
+            }
+
+            let parts: Vec<&str> = trimmed.split_whitespace().collect();
+
+            // Format: Symbol  X  Y  Z
+            if parts.len() >= 4 {
+                let x = parts[1]
+                    .parse::<f64>()
+                    .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+                let y = parts[2]
+                    .parse::<f64>()
+                    .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+                let z = parts[3]
+                    .parse::<f64>()
+                    .map_err(|e| io::Error::new(ErrorKind::InvalidData, e))?;
+
+                posits.push(Vec3 { x, y, z });
+            }
+        }
+
+        if posits.is_empty() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                "Coordinate block was empty or malformed",
+            ));
+        }
+
+        Ok(Self { text, posits })
+    }
+}

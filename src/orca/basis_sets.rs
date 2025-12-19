@@ -92,7 +92,6 @@ pub enum BasisSet {
     Qzvpp,
 
     // Ahlrichs def- family (H–Lr, def-ECP for Rb–Lr / Fr–Lr)
-    #[default]
     DefSvP,
     DefSvp,
     DefTzvp,
@@ -103,6 +102,7 @@ pub enum BasisSet {
     // Karlsruhe def2- family
     Def2Svp,
     Def2Svp_,
+    #[default]
     Def2Tzvp,
     Def2TzvpMinusF,
     Def2Tzvpp,

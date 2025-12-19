@@ -10,9 +10,10 @@ use crate::orca::make_inp_block;
 #[derive(Clone, Copy, PartialEq, Debug, Default)]
 // todo: Overlap between this and Functional
 pub enum Method {
-    #[default]
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#hartree-fock-hf
     HartreeFock,
+    /// https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/3cmethods.html?q=r2scan&n=0#hf-3c
+    Hf_3c,
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/single_point.html#density-functional-theory-dft
     /// todo: Multiple DFT functionals.
     Dft,
@@ -49,16 +50,18 @@ pub enum Method {
     REVPBE,
     RPW86PBE,
     PWP,
-    B97_3C,
+    B97_3c,
+    wB97x_3c,
     B97M_V,
     V97M_D3BJ,
-    B97M_D4,
+    B97M,
     SCANFUNC,
     RSCAN,
     R2SCAN,
     TPSS,
     REVTPSS,
-    R2SCAN_3C,
+    #[default]
+    r2SCAN_3c,
     // --- End GGAs
     // --- Global hybrid functions. [Docs Table 3.4](https://www.faccts.de/docs/orca/6.1/manual/contents/modelchemistries/DensityFunctionalTheory.html#global-hybrid-functionals)
     B1LYP,
@@ -80,11 +83,11 @@ pub enum Method {
     PW6B95,
     TPSSH,
     TPSS0,
-    R2SCANH,
-    R2SCAN0,
-    R2SCAN50,
-    PBEH_3C,
-    B3LYP_3C,
+    r2SCANH,
+    r2SCAN0,
+    r2SCAN50,
+    PBEh_3c,
+    B3LYP_3c,
     // --- End HFX
     /// https://www.faccts.de/docs/orca/6.0/tutorials/prop/fod.html
     FractionalOccupationDensity,
@@ -96,6 +99,7 @@ impl Method {
     pub fn keyword(self) -> String {
         match self {
             Self::HartreeFock => "HF",
+            Self::Hf_3c => "HF-3c",
             Self::Dft => "B3LYP",
             Self::Mp2Perturbation => "RI-MP2", // Or "DLPNO-MP2"
             Self::SpinComponentScaledMp2 => "RI-SCS-MP2",
@@ -120,16 +124,17 @@ impl Method {
             Self::REVPBE => "REVPBE",
             Self::RPW86PBE => "RPW86PBE",
             Self::PWP => "PWP",
-            Self::B97_3C => "B97-3C",
+            Self::B97_3c => "B97-3c",
+            Self::wB97x_3c => "wB97X-3c",
             Self::B97M_V => "B97M-V",
             Self::V97M_D3BJ => "V97M-D3BJ",
-            Self::B97M_D4 => "B97M-D4",
+            Self::B97M => "B97M",
             Self::SCANFUNC => "SCANFUNC",
             Self::RSCAN => "RSCAN",
             Self::R2SCAN => "R2SCAN",
             Self::TPSS => "TPSS",
             Self::REVTPSS => "REVTPSS",
-            Self::R2SCAN_3C => "R2SCAN-3C",
+            Self::r2SCAN_3c => "r2SCAN-3c",
             // end GGA
             // Start Global Hybrid functionals
             Self::B1LYP => "B1LYP",
@@ -151,16 +156,30 @@ impl Method {
             Self::PW6B95 => "PW6B95",
             Self::TPSSH => "TPSSH",
             Self::TPSS0 => "TPSS0",
-            Self::R2SCANH => "R2SCANH",
-            Self::R2SCAN0 => "R2SCAN0",
-            Self::R2SCAN50 => "R2SCAN50",
-            Self::PBEH_3C => "PBEH-3C",
-            Self::B3LYP_3C => "B3LYP-3C",
+            Self::r2SCANH => "r2SCANH",
+            Self::r2SCAN0 => "r2SCAN0",
+            Self::r2SCAN50 => "r2SCAN50",
+            Self::PBEh_3c => "PBEh-3c",
+            Self::B3LYP_3c => "B3LYP-3c",
             // End Global hybrid functionals
             Self::FractionalOccupationDensity => "FOD",
             Self::None => "",
         }
         .to_string()
+    }
+
+    /// [Manual 3.6: Composite methods) These methods don't use a separate basis set; they have small tailored
+    /// ones of their own.
+    pub fn is_composite(self) -> bool {
+        matches!(
+            self,
+            Self::Hf_3c
+                | Self::B97_3c
+                | Self::r2SCAN_3c
+                | Self::PBEh_3c
+                | Self::B3LYP_3c
+                | Self::wB97x_3c
+        )
     }
 }
 
@@ -261,7 +280,7 @@ impl Correlation {
 /// [General structure of the Input File](https://www.faccts.de/docs/orca/6.1/manual/contents/essentialelements/input.html)
 #[derive(Clone, Debug)]
 pub struct MethodSection {
-    // todo: How does `funcitonal` differ from `method` key? For example, I see
+    // todo: How does `functional` differ from `method` key? For example, I see
     // todo BP86 as both in docs examples.
     // pub functional: Option<Functional>,
     pub correlation: Option<Correlation>,

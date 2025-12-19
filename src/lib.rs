@@ -71,7 +71,7 @@ pub enum LipidStandard {
     Pc,
     /// Phosphatidylethanolamine headgroup (PE).
     Pe,
-    /// Phosphatidylglycerol headgroup (PG / PGR). Note: Daedalus currently uses "PG".
+    /// Phosphatidylglycerol headgroup (PG / PGR). Note: ChemForma currently uses "PG".
     Pgr,
     /// Phosphatidylglycerol sulfate / related PG variant (Amber tag: PGS).
     Pgs,
