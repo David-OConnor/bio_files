@@ -347,6 +347,7 @@ impl BondType {
     pub fn to_str_sdf(&self) -> String {
         match self {
             Self::Single | Self::Double | Self::Triple => *self,
+            Self::Aromatic => return "4".to_string(),
             _ => Self::Single,
         }
         .to_mol2_str()
