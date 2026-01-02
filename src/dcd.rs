@@ -1,4 +1,4 @@
-//! For reading and writing the DCD file format, for molecular dynamics simulations.
+//! For reading and writing the [DCD file format](https://docs.openmm.org/7.1.0/api-python/generated/simtk.openmm.app.dcdfile.DCDFile.html), for molecular dynamics simulations.
 //! This format is used, for example, by VMD.
 
 use std::{
