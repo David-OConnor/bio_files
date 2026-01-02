@@ -595,43 +595,38 @@ impl DensityMap {
 
         Ok(())
     }
-}
 
-// todo: Remove this once you have your own setup working.
-/// Converts electron density data in 2fo-fc or MTZ formats to our Density Map, via
-/// a map file intermediate.
-/// If `gemmi_path` i s None, `gemmi` must be available on the PATH env var.
-pub fn gemmi_sf_to_map(cif_path: &Path, gemmi_path: Option<&Path>) -> io::Result<DensityMap> {
-    let program = match gemmi_path {
-        Some(p) => p.join("gemmi").to_str().unwrap().to_string(),
-        None => "gemmi".to_string(),
-    };
+    /// Converts electron density data in 2fo-fc or MTZ formats to our Density Map, via
+    /// a map file intermediate.
+    /// If `gemmi_path` i s None, `gemmi` must be available on the PATH env var.
+    pub fn load_sf_or_mtz(path: &Path, gemmi_path: Option<&Path>) -> io::Result<Self> {
+        let temp_file = "temp_map.map";
 
-    println!("Running Gemmi..."); // todo: A/R
+        let program = match gemmi_path {
+            Some(p) => p.join("gemmi").to_str().unwrap().to_string(),
+            None => "gemmi".to_string(),
+        };
 
-    let out = Command::new(program)
-        .args(["sf2map", cif_path.to_str().unwrap(), "temp_map.map"])
-        .output()?;
-    println!("Complete");
+        let out = Command::new(program)
+            .args(["sf2map", path.to_str().unwrap(), temp_file])
+            .output()?;
 
-    if !out.status.success() {
-        let stderr_str = String::from_utf8_lossy(&out.stderr);
-        return Err(io::Error::other(format!(
-            "Problem parsing SF file: {}",
-            stderr_str
-        )));
+        if !out.status.success() {
+            let stderr_str = String::from_utf8_lossy(&out.stderr);
+            return Err(io::Error::other(format!(
+                "Problem parsing SF or MTZ file: {}",
+                stderr_str
+            )));
+        }
+
+        let map = Self::load(Path::new(temp_file))?;
+
+        fs::remove_file(Path::new(temp_file))?;
+
+        Ok(map)
     }
-
-    println!("Loading map file..."); // todo A/R
-    let map = DensityMap::load(Path::new("temp_map.map"))?;
-    println!("Complete");
-
-    fs::remove_file(Path::new("temp_map.map"))?;
-
-    Ok(map)
 }
 
-// todo: Remove this once you have your own setup working.
 /// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,
 /// loads the Map to string, then deletes both files.
 ///
@@ -648,7 +643,7 @@ pub fn density_from_2fo_fc_rcsb_gemmi(
     let path = Path::new("temp_map.cif");
 
     fs::write(path, map_2fo_fc)?;
-    let result = gemmi_sf_to_map(path, gemmi_path)?;
+    let result = DensityMap::load_sf_or_mtz(path, gemmi_path)?;
     fs::remove_file(path)?;
 
     Ok(result)

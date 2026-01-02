@@ -21,6 +21,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - SDF (Small molecules, e.g. ligands)
 - PDBQT (Small molecules, e.g. ligands. Includes docking-specific fields.)
 - Map (Electron density, e.g. from crystallography, Cryo EM. Processed using Fourier transforms)
+- MTZ: If [Gemmi](https://gemmi.readthedocs.io/en/latest/) is installed. (Electron density)
 - AB1 (Sequence tracing)
 - DAT (Amber force field data for small molecules)
 - FRCMOD (Amber force field patch data for small molecules)
@@ -29,10 +30,11 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - TOP (Gromacs topology) - WIP
 - ORCA Input and output files (quantum chemistry; HF, DFT etc)
 - XYZ (Minimal atom coordinate format)
+- DCD (MD trajectories)
+- XTC: If [MdTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories)
 
 ### Planned:
 
-- MTZ (Exists in ChemForma; needs to be decoupled)
 - DNA (Exists in PlasCAD; needs to be decoupled)
 
 ## Generic data types
@@ -220,6 +222,9 @@ let dm = density_map_from_mmcif( & data, & mut fft_planner) ?;
 let p = Path::new("8s6p.map");
 let dm = DensityMap::load(path) ?;
 
+// For MTZ files, or 2fo-fc:
+let dm = DensityMap::from_sf_or_mtz(path, None) ?;
+
 // Load molecules from databases using identifiers:
 let mol = Sdf::load_drugbank("DB00198") ?;
 let mol = Sdf::load_pubchem(12345) ?;
@@ -375,6 +380,26 @@ fn load() {
         7.0,
     )
         .unwrap();
+}
+```
+
+## MD trajectories example
+
+```rust
+use bio_files::dcd::DcdTrajectory;
+
+fn load() {
+    let traj = DcdTrajectory::load("traj.dcd").unwrap();
+
+    // Or, if you have MDTraj installed, load DCD files:
+    let traj = DcdTrajectory::load_xtc("traj.xtc").unwrap();
+
+    for frame in traj.frames {
+        println!("Time: {}", frame.time);
+        for posit in &frame.atom_posits {
+            // ... 
+        }
+    }
 }
 ```
 

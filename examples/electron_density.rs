@@ -159,6 +159,9 @@ fn main() {
     let mut fft_planner = FftPlanner::new();
     let dm = density_map_from_sf(&data, &mut fft_planner).unwrap();
 
+    // For MTZ files, or 2fo-fc:
+    let dm = DensityMap::load_sf_or_mtz(path, None).unwrap();
+
     // Or if you have a Map file:
     let path = Path::new("8s6p.map");
     let dm = DensityMap::load(path).unwrap();
