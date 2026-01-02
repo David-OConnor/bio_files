@@ -394,22 +394,24 @@ fn load() {
 use bio_files::dcd::DcdTrajectory;
 
 fn load() {
-    let traj = DcdTrajectory::load("traj.dcd").unwrap();
+    let path_dcd = Path::new("traj.dcd");
+    let path_xtc = Path::new("traj.xtc");
 
-    // Or, if you have MDTraj installed, load DCD files:
-    let traj = DcdTrajectory::load_xtc("traj.xtc").unwrap();
+    let traj = DcdTrajectory::load(path_dcd).unwrap();
+    // Or, if you have MDTraj installed, load XTC files:
+    let traj = DcdTrajectory::load_xtc(path_xtc).unwrap();
 
-    println!("Unit cell: {:?}", traj.unit_cell);
     for frame in traj.frames {
-        println!("Time: {}", frame.time);
+        println!("Time: {}", frame.time, "unit cell: {:?}", frame.unit_cell);
+        println!("Positions:");
         for posit in &frame.atom_posits {
             // ... 
         }
     }
 
     // To save:
-    DcdTrajectory::save("traj.dcd").unwrap();
-    DcdTrajectory::save_xtc("traj.xtc").unwrap();
+    DcdTrajectory::save(path_dcd).unwrap();
+    DcdTrajectory::save_xtc(path_xtc).unwrap();
 }
 ```
 

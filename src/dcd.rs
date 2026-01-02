@@ -68,6 +68,99 @@ pub struct DcdTrajectory {
 }
 
 impl DcdTrajectory {
+    pub fn load(path: &Path) -> io::Result<Self> {
+        let f = File::open(path)?;
+        let mut r = BufReader::new(f);
+
+        // Header
+        let hdr = read_record(&mut r)?;
+        if hdr.len() < 84 || &hdr[0..4] != b"CORD" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Not a CORD/DCD file",
+            ));
+        }
+        let mut icntrl = [0i32; 20];
+        for (i, item) in icntrl.iter_mut().enumerate() {
+            let off = 4 + i * 4;
+            *item = i32::from_le_bytes(hdr[off..off + 4].try_into().unwrap());
+        }
+        let nset_total = icntrl[0] as usize;
+
+        let has_unitcell = icntrl[19] != 0 && icntrl[10] != 0;
+
+        // Delta is at bytes 36..40 after the "CORD"
+        let delta = f32::from_le_bytes(hdr[4 + 36..4 + 40].try_into().unwrap()) as f64;
+
+        skip_title_record(&mut r)?;
+
+        // NATOM
+        let natom_block = read_record(&mut r)?;
+        if natom_block.len() != 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unexpected NATOM block size",
+            ));
+        }
+        let n_atoms = i32::from_le_bytes(natom_block[0..4].try_into().unwrap()) as usize;
+
+        let mut frames = Vec::with_capacity(nset_total);
+
+        let mut unit_cell = DcdUnitCell {
+            bounds_low: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            bounds_high: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+
+        for i in 0..nset_total {
+            if has_unitcell {
+                unit_cell = read_unit_cell_record(&mut r)?;
+            }
+
+            let xb = read_record(&mut r)?;
+            let yb = read_record(&mut r)?;
+            let zb = read_record(&mut r)?;
+
+            if xb.len() != 4 * n_atoms || yb.len() != 4 * n_atoms || zb.len() != 4 * n_atoms {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Coordinate block size mismatch",
+                ));
+            }
+
+            let xs = f32s_from_le_bytes(&xb)?;
+            let ys = f32s_from_le_bytes(&yb)?;
+            let zs = f32s_from_le_bytes(&zb)?;
+
+            let mut atom_posits = Vec::with_capacity(n_atoms);
+            for k in 0..n_atoms {
+                atom_posits.push(Vec3 {
+                    x: xs[k],
+                    y: ys[k],
+                    z: zs[k],
+                });
+            }
+
+            let istart = icntrl[1] as f64;
+            let nsavc = icntrl[2] as f64;
+
+            frames.push(DcdFrame {
+                time: (istart + (i as f64) * nsavc) * delta,
+                atom_posits,
+                unit_cell: unit_cell.clone(),
+            });
+        }
+
+        Ok(Self { frames })
+    }
+
     /// Create or append snapshots to a DCD file. This is a common trajectory/reporter format
     /// used by other software, including OpenMM and VMD.
     pub fn save(&self, path: &Path) -> io::Result<()> {
@@ -309,100 +402,7 @@ impl DcdTrajectory {
         f.flush()
     }
 
-    pub fn load(path: &Path) -> io::Result<Self> {
-        let f = File::open(path)?;
-        let mut r = BufReader::new(f);
-
-        // Header
-        let hdr = read_record(&mut r)?;
-        if hdr.len() < 84 || &hdr[0..4] != b"CORD" {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Not a CORD/DCD file",
-            ));
-        }
-        let mut icntrl = [0i32; 20];
-        for (i, item) in icntrl.iter_mut().enumerate() {
-            let off = 4 + i * 4;
-            *item = i32::from_le_bytes(hdr[off..off + 4].try_into().unwrap());
-        }
-        let nset_total = icntrl[0] as usize;
-
-        let has_unitcell = icntrl[19] != 0 && icntrl[10] != 0;
-
-        // Delta is at bytes 36..40 after the "CORD"
-        let delta = f32::from_le_bytes(hdr[4 + 36..4 + 40].try_into().unwrap()) as f64;
-
-        skip_title_record(&mut r)?;
-
-        // NATOM
-        let natom_block = read_record(&mut r)?;
-        if natom_block.len() != 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Unexpected NATOM block size",
-            ));
-        }
-        let n_atoms = i32::from_le_bytes(natom_block[0..4].try_into().unwrap()) as usize;
-
-        let mut frames = Vec::with_capacity(nset_total);
-
-        let mut unit_cell = DcdUnitCell {
-            bounds_low: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-            bounds_high: Vec3 {
-                x: 0.0,
-                y: 0.0,
-                z: 0.0,
-            },
-        };
-
-        for i in 0..nset_total {
-            if has_unitcell {
-                unit_cell = read_unit_cell_record(&mut r)?;
-            }
-
-            let xb = read_record(&mut r)?;
-            let yb = read_record(&mut r)?;
-            let zb = read_record(&mut r)?;
-
-            if xb.len() != 4 * n_atoms || yb.len() != 4 * n_atoms || zb.len() != 4 * n_atoms {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Coordinate block size mismatch",
-                ));
-            }
-
-            let xs = f32s_from_le_bytes(&xb)?;
-            let ys = f32s_from_le_bytes(&yb)?;
-            let zs = f32s_from_le_bytes(&zb)?;
-
-            let mut atom_posits = Vec::with_capacity(n_atoms);
-            for k in 0..n_atoms {
-                atom_posits.push(Vec3 {
-                    x: xs[k],
-                    y: ys[k],
-                    z: zs[k],
-                });
-            }
-
-            let istart = icntrl[1] as f64;
-            let nsavc = icntrl[2] as f64;
-
-            frames.push(DcdFrame {
-                time: (istart + (i as f64) * nsavc) * delta,
-                atom_posits,
-                unit_cell: unit_cell.clone(),
-            });
-        }
-
-        Ok(Self { frames })
-    }
-
-    /// Converts from a GROMACS XTC file. `[MDTjac](https://www.mdtraj.org/1.9.8.dev0/index.html) must
+    /// Converts from a GROMACS XTC file. [MDTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) must
     /// be installed, and available on the system path. Install with `pip install mdtraj`.
     pub fn load_xtc(path: &Path) -> io::Result<Self> {
         let temp_file = "temp_dcd.dcd";
