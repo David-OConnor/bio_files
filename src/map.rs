@@ -625,6 +625,59 @@ impl DensityMap {
 
         Ok(map)
     }
+
+    /// Saves this density map as either:
+    /// - MTZ (if `out_path` ends with `.mtz`), or
+    /// - SF-mmCIF (otherwise; typically `.cif` / `.mmcif`)
+    ///
+    /// via an intermediate CCP4 map file and the `gemmi map2sf` command.
+    ///
+    /// If `gemmi_path` is None, `gemmi` must be available on PATH.
+    pub fn save_sf_or_mtz(&self, path: &Path, gemmi_path: Option<&Path>) -> io::Result<()> {
+        let ext = path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|s| s.to_ascii_lowercase())
+            .ok_or_else(|| io::Error::other("Output path must have a file extension"))?;
+
+        // We only special-case MTZ; everything else is treated as SF-mmCIF output by gemmi.
+        // (Gemmi itself uses: "mtz extension => MTZ, otherwise mmCIF".)
+        if ext != "mtz" && ext != "cif" && ext != "mmcif" && ext != "sf" {
+            return Err(io::Error::other(format!(
+                "Unsupported output extension: .{ext} (expected .mtz, .cif, .mmcif, or .sf)"
+            )));
+        }
+
+        let temp_map = "temp_map.map";
+
+        // Write intermediate CCP4 map using our own writer.
+        self.save(Path::new(temp_map))?;
+
+        // Run gemmi map2sf to produce map coefficients (2mFo-DFc style).
+        let program = match gemmi_path {
+            Some(p) => p.join("gemmi").to_str().unwrap().to_string(),
+            None => "gemmi".to_string(),
+        };
+
+        // Common convention for 2mFo-DFc map coefficients is FWT/PHWT.
+        // (This is what most MTZs from refinement carry for the "2Fo-Fc" map.)
+        let out = Command::new(program)
+            .args(["map2sf", temp_map, path.to_str().unwrap(), "FWT", "PHWT"])
+            .output()?;
+
+        // Always try to delete the temp map, even on error.
+        let _ = fs::remove_file(Path::new(temp_map));
+
+        if !out.status.success() {
+            let stderr_str = String::from_utf8_lossy(&out.stderr);
+            return Err(io::Error::other(format!(
+                "Problem writing SF or MTZ file via gemmi map2sf: {}",
+                stderr_str
+            )));
+        }
+
+        Ok(())
+    }
 }
 
 /// Downloads a 2fo_fc file from RCSB, saves it to disk. Calls Gemmi to convert it to a Map file,

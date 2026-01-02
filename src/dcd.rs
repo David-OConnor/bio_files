@@ -213,7 +213,7 @@ impl DcdTrajectory {
         let mut ys = vec![0.; n_atoms];
         let mut zs = vec![0.; n_atoms];
 
-        for snap in self.frames {
+        for snap in &self.frames {
             let mut i = 0;
             let mut push = |v: &Vec<Vec3>| {
                 for p in v {
@@ -302,7 +302,6 @@ impl DcdTrajectory {
             frames.push(DcdFrame {
                 time: (i as f64) * delta,
                 atom_posits,
-                ..Default::default()
             });
         }
 
@@ -331,6 +330,35 @@ impl DcdTrajectory {
         fs::remove_file(Path::new(temp_file))?;
 
         Ok(map)
+    }
+
+    /// Saves this trajectory as a GROMACS XTC file via an intermediate DCD file.
+    ///
+    /// Requires `mdconvert` from MDTraj to be installed and on PATH:
+    /// `pip install mdtraj`
+    pub fn save_xtc(&self, out_path: &Path) -> io::Result<()> {
+        let temp_file = "temp_dcd.dcd";
+
+        // Write intermediate DCD using our own writer.
+        self.save(Path::new(temp_file))?;
+
+        // Convert DCD -> XTC using mdconvert.
+        let out = Command::new("mdconvert")
+            .args([temp_file, "-o", out_path.to_str().unwrap()])
+            .output()?;
+
+        // Always try to remove temp file, even on error.
+        let _ = fs::remove_file(Path::new(temp_file));
+
+        if !out.status.success() {
+            let stderr_str = String::from_utf8_lossy(&out.stderr);
+            return Err(io::Error::other(format!(
+                "Problem writing XTC file via mdconvert: {}",
+                stderr_str
+            )));
+        }
+
+        Ok(())
     }
 }
 

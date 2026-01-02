@@ -31,7 +31,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - ORCA Input and output files (quantum chemistry; HF, DFT etc)
 - XYZ (Minimal atom coordinate format)
 - DCD (MD trajectories)
-- XTC: If [MdTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories)
+- XTC: If [MDTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories)
 
 ### Planned:
 
@@ -225,6 +225,11 @@ let dm = DensityMap::load(path) ?;
 // For MTZ files, or 2fo-fc:
 let dm = DensityMap::from_sf_or_mtz(path, None) ?;
 
+// Saving a density map:
+dm.save(Path::new("8s6p.map")) ?;
+// Uses the file extension `.mmcif` or `.mtz` to determine which format to save as.
+dm.save_sf_or_mtz(Path::new("8s6p.mtz")) ?;
+
 // Load molecules from databases using identifiers:
 let mol = Sdf::load_drugbank("DB00198") ?;
 let mol = Sdf::load_pubchem(12345) ?;
@@ -394,12 +399,17 @@ fn load() {
     // Or, if you have MDTraj installed, load DCD files:
     let traj = DcdTrajectory::load_xtc("traj.xtc").unwrap();
 
+
     for frame in traj.frames {
         println!("Time: {}", frame.time);
         for posit in &frame.atom_posits {
             // ... 
         }
     }
+
+    // To save:
+    DcdTrajectory::save("traj.dcd").unwrap();
+    DcdTrajectory::save_xtc("traj.xtc").unwrap();
 }
 ```
 

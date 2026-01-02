@@ -165,4 +165,9 @@ fn main() {
     // Or if you have a Map file:
     let path = Path::new("8s6p.map");
     let dm = DensityMap::load(path).unwrap();
+
+    // Saving a density map:
+    dm.save(Path::new("8s6p.map")).unwrap();
+    // Uses the file extension `.mmcif` or `.mtz` to determine which format to save as.
+    dm.save_sf_or_mtz(Path::new("8s6p.mtz")).unwrap();
 }
