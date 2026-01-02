@@ -399,7 +399,7 @@ fn load() {
     // Or, if you have MDTraj installed, load DCD files:
     let traj = DcdTrajectory::load_xtc("traj.xtc").unwrap();
 
-
+    println!("Unit cell: {:?}", traj.unit_cell);
     for frame in traj.frames {
         println!("Time: {}", frame.time);
         for posit in &frame.atom_posits {

@@ -12,18 +12,57 @@ use std::{
 
 use lin_alg::f32::Vec3;
 
-use crate::DensityMap;
+#[derive(Clone, Debug)]
+pub struct DcdUnitCell {
+    pub bounds_low: Vec3,
+    pub bounds_high: Vec3,
+}
 
+impl DcdUnitCell {
+    fn to_dcd_six(&self) -> [f64; 6] {
+        let a = (self.bounds_high.x - self.bounds_low.x) as f64;
+        let b = (self.bounds_high.y - self.bounds_low.y) as f64;
+        let c = (self.bounds_high.z - self.bounds_low.z) as f64;
+
+        // Orthorhombic: angles are 90 degrees.
+        // Use the common X-PLOR ordering on disk: [A, gamma, B, beta, alpha, C].
+        // For 90/90/90 the permutations don’t change meaning.
+        [a, 90.0, b, 90.0, 90.0, c]
+    }
+
+    fn from_dcd_six(six: [f64; 6]) -> Self {
+        // We only store bounds_low/high, but DCD stores lengths/angles, not an origin.
+        // So we reconstruct a box from (0,0,0) to (A,B,C).
+        let a = six[0] as f32;
+        let b = six[2] as f32;
+        let c = six[5] as f32;
+
+        Self {
+            bounds_low: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            bounds_high: Vec3 { x: a, y: b, z: c },
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct DcdFrame {
     /// fs
     pub time: f64,
     /// Å
     pub atom_posits: Vec<Vec3>,
+    /// Also called Periodic box. This is often the bounds of the simulation, with solvents wrapping
+    /// around periodic boundary conditions, and long-range forces computed across this.
+    pub unit_cell: DcdUnitCell,
 }
 
 /// Represents a molecular dynamics trajectory, and contains fields specific to DCD files.
 /// This is a minimal structure that mainly keeps track of atom positions. It doesn't include velocities,
 /// or data like energy, pressure, and temperature.
+#[derive(Clone, Debug)]
 pub struct DcdTrajectory {
     pub frames: Vec<DcdFrame>,
 }
@@ -55,7 +94,7 @@ impl DcdTrajectory {
             .read(true)
             .write(true)
             .create(true)
-            .truncate(true) // todo: QC this.
+            // .truncate(true) // todo: QC this.
             .open(path)?;
 
         let file_len = f.metadata()?.len();
@@ -80,7 +119,10 @@ impl DcdTrajectory {
             icntrl[1] = istart;
             icntrl[2] = nsavc;
             icntrl[8] = 0;
-            icntrl[10] = 0;
+
+            // Writing 1 to index 10 this means "extra block present", and is required when we
+            // pass the unit cell.
+            icntrl[10] = 1;
             icntrl[11] = 0;
             icntrl[19] = 1;
 
@@ -109,6 +151,12 @@ impl DcdTrajectory {
             // verify header and NATOM; compute current NSET; then append and bump NSET
             f.seek(SeekFrom::Start(0))?;
             let l1 = read_u32_le(&mut f)?;
+            if l1 < 84 || l1 > 1024 * 1024 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unreasonable DCD header size",
+                ));
+            }
             let mut hdr = vec![0u8; l1 as usize];
 
             f.read_exact(&mut hdr)?;
@@ -128,16 +176,16 @@ impl DcdTrajectory {
             }
             let cur_nset = icntrl[0];
 
-            // Skip the title
-            let l2 = read_u32_le(&mut f)?;
-            f.seek(SeekFrom::Current(l2 as i64))?;
-            let l2e = read_u32_le(&mut f)?;
-            if l2e != l2 {
+            let has_unitcell = icntrl[19] != 0 && icntrl[10] != 0;
+            if !has_unitcell {
                 return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "corrupt title block",
+                    io::ErrorKind::InvalidInput,
+                    "existing DCD does not have unit cell blocks enabled (icntrl[10]==0)",
                 ));
             }
+
+            // Skip the title
+            skip_title_record(&mut f)?;
 
             // Read NATOM
             let l3 = read_u32_le(&mut f)?;
@@ -175,7 +223,7 @@ impl DcdTrajectory {
 
             for frame in &self.frames {
                 let mut i = 0usize;
-                let mut push = |v: &Vec<Vec3>| {
+                let mut push = |v: &[Vec3]| {
                     for p in v {
                         xs[i] = p.x;
                         ys[i] = p.y;
@@ -192,6 +240,7 @@ impl DcdTrajectory {
                 let zb =
                     unsafe { core::slice::from_raw_parts(zs.as_ptr() as *const u8, zs.len() * 4) };
 
+                write_unit_cell_record(&mut f, &frame.unit_cell)?;
                 write_record(&mut f, xb)?;
                 write_record(&mut f, yb)?;
                 write_record(&mut f, zb)?;
@@ -202,8 +251,30 @@ impl DcdTrajectory {
                 .checked_add(self.frames.len() as i32)
                 .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "NSET overflow"))?;
 
-            f.seek(SeekFrom::Start(8))?;
+            // We are at arbitrary place; seek to start and re-read first record marker.
+            f.seek(SeekFrom::Start(0))?;
+            let l1 = read_u32_le(&mut f)? as u64;
+            if l1 < 84 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "unexpected DCD header record length",
+                ));
+            }
+
+            let mut magic = [0u8; 4];
+            f.read_exact(&mut magic)?;
+            if &magic != b"CORD" {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "not a CORD/DCD file",
+                ));
+            }
+
+            // file offset of NSET: 4-byte leading length + 4 bytes of "CORD"
+            let nset_off = 8u64;
+            f.seek(SeekFrom::Start(nset_off))?;
             f.write_all(&new_nset.to_le_bytes())?;
+
             f.flush()?;
 
             return Ok(());
@@ -213,9 +284,9 @@ impl DcdTrajectory {
         let mut ys = vec![0.; n_atoms];
         let mut zs = vec![0.; n_atoms];
 
-        for snap in &self.frames {
+        for frame in &self.frames {
             let mut i = 0;
-            let mut push = |v: &Vec<Vec3>| {
+            let mut push = |v: &[Vec3]| {
                 for p in v {
                     xs[i] = p.x;
                     ys[i] = p.y;
@@ -223,12 +294,13 @@ impl DcdTrajectory {
                     i += 1;
                 }
             };
-            push(&snap.atom_posits);
+            push(&frame.atom_posits);
 
             let xb = unsafe { core::slice::from_raw_parts(xs.as_ptr() as *const u8, xs.len() * 4) };
             let yb = unsafe { core::slice::from_raw_parts(ys.as_ptr() as *const u8, ys.len() * 4) };
             let zb = unsafe { core::slice::from_raw_parts(zs.as_ptr() as *const u8, zs.len() * 4) };
 
+            write_unit_cell_record(&mut f, &frame.unit_cell)?;
             write_record(&mut f, xb)?;
             write_record(&mut f, yb)?;
             write_record(&mut f, zb)?;
@@ -256,11 +328,12 @@ impl DcdTrajectory {
         }
         let nset_total = icntrl[0] as usize;
 
+        let has_unitcell = icntrl[19] != 0 && icntrl[10] != 0;
+
         // Delta is at bytes 36..40 after the "CORD"
         let delta = f32::from_le_bytes(hdr[4 + 36..4 + 40].try_into().unwrap()) as f64;
 
-        // Title (ignored)
-        let _ = read_record(&mut r)?;
+        skip_title_record(&mut r)?;
 
         // NATOM
         let natom_block = read_record(&mut r)?;
@@ -274,7 +347,24 @@ impl DcdTrajectory {
 
         let mut frames = Vec::with_capacity(nset_total);
 
+        let mut unit_cell = DcdUnitCell {
+            bounds_low: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+            bounds_high: Vec3 {
+                x: 0.0,
+                y: 0.0,
+                z: 0.0,
+            },
+        };
+
         for i in 0..nset_total {
+            if has_unitcell {
+                unit_cell = read_unit_cell_record(&mut r)?;
+            }
+
             let xb = read_record(&mut r)?;
             let yb = read_record(&mut r)?;
             let zb = read_record(&mut r)?;
@@ -299,9 +389,13 @@ impl DcdTrajectory {
                 });
             }
 
+            let istart = icntrl[1] as f64;
+            let nsavc = icntrl[2] as f64;
+
             frames.push(DcdFrame {
-                time: (i as f64) * delta,
+                time: (istart + (i as f64) * nsavc) * delta,
                 atom_posits,
+                unit_cell: unit_cell.clone(),
             });
         }
 
@@ -314,13 +408,13 @@ impl DcdTrajectory {
         let temp_file = "temp_dcd.dcd";
 
         let out = Command::new("mdconvert")
-            .args(["-o", path.to_str().unwrap(), temp_file])
+            .args(["-o", temp_file, path.to_str().unwrap()])
             .output()?;
 
         if !out.status.success() {
             let stderr_str = String::from_utf8_lossy(&out.stderr);
             return Err(io::Error::other(format!(
-                "Problem parsing DCD file: {}",
+                "Problem parsing XTC file: {}",
                 stderr_str
             )));
         }
@@ -406,4 +500,57 @@ fn f32s_from_le_bytes(b: &[u8]) -> io::Result<Vec<f32>> {
         out.push(f32::from_le_bytes(b[j..j + 4].try_into().unwrap()));
     }
     Ok(out)
+}
+
+fn write_unit_cell_record<W: Write>(w: &mut W, unit_cell: &DcdUnitCell) -> io::Result<()> {
+    let six = unit_cell.to_dcd_six();
+
+    let mut payload = [0u8; 48];
+    for (i, v) in six.iter().enumerate() {
+        let b = v.to_le_bytes();
+        payload[i * 8..i * 8 + 8].copy_from_slice(&b);
+    }
+
+    write_record(w, &payload)
+}
+
+fn read_unit_cell_record<R: Read>(r: &mut R) -> io::Result<DcdUnitCell> {
+    let b = read_record(r)?;
+    if b.len() != 48 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unexpected unit cell record size (expected 48 bytes)",
+        ));
+    }
+
+    let mut six = [0f64; 6];
+    for i in 0..6 {
+        let j = i * 8;
+        six[i] = f64::from_le_bytes(b[j..j + 8].try_into().unwrap());
+    }
+
+    Ok(DcdUnitCell::from_dcd_six(six))
+}
+
+fn skip_title_record<R: Read>(r: &mut R) -> io::Result<()> {
+    let b = read_record(r)?;
+    if b.len() < 4 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "title record too short",
+        ));
+    }
+    let ntitle = i32::from_le_bytes(b[0..4].try_into().unwrap());
+    if ntitle < 0 {
+        return Err(io::Error::new(io::ErrorKind::InvalidData, "invalid NTITLE"));
+    }
+    // Expected size is 4 + 80*ntitle. Some writers may pad; you can allow >=.
+    let expected = 4usize + (ntitle as usize) * 80;
+    if b.len() < expected {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "truncated title record",
+        ));
+    }
+    Ok(())
 }
