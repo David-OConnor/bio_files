@@ -306,6 +306,16 @@ impl Display for BondType {
 }
 
 impl BondType {
+    pub fn order(self) -> f32 {
+        match self {
+            Self::Aromatic => 1.5,
+            Self::Double => 2.,
+            Self::Triple => 3.,
+            Self::Quadruple => 4.,
+            _ => 1.,
+        }
+    }
+
     /// A shorthand, visual string.
     pub fn to_visual_str(&self) -> String {
         match self {
