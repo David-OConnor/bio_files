@@ -304,7 +304,9 @@ impl Sdf {
 
                     // OpenFF format.
                     if key == "atom.dprop.PartialCharge" {
-                        let charges: Vec<_> = vals.join(" ").split_whitespace().collect();
+                        let joined = vals.join(" ");
+                        let charges: Vec<&str> = joined.split_whitespace().collect();
+
                         for (i, q) in charges.into_iter().enumerate() {
                             if i < atoms.len() {
                                 atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
