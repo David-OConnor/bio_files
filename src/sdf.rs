@@ -11,6 +11,7 @@ use std::{
     str::FromStr,
 };
 
+use bio_apis::pubchem::StructureSearchNamespace;
 use bio_apis::{drugbank, pdbe, pubchem};
 use lin_alg::f64::Vec3;
 use na_seq::Element;
@@ -486,8 +487,8 @@ impl Sdf {
     }
 
     /// Download from PubChem from a CID.
-    pub fn load_pubchem(cid: u32) -> io::Result<Self> {
-        let data_str = pubchem::load_sdf(cid)
+    pub fn load_pubchem(id_type: StructureSearchNamespace, id: &str) -> io::Result<Self> {
+        let data_str = pubchem::load_sdf(id_type, id)
             .map_err(|e| io::Error::other(format!("Error loading: {e:?}")))?;
         Self::new(&data_str)
     }

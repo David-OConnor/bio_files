@@ -83,14 +83,16 @@ impl TemplateData {
             .find(|(_, a)| a.type_in_res_general.as_deref() == Some(name))
             .map(|(i, _)| i)
     }
+
+    /// Finds the index of an atom in the `atoms` vector based on its serial number.
+    pub fn find_atom_i_by_sn(&self, sn: u32) -> Option<usize> {
+        self.atoms.iter().position(|a| a.serial_number == sn)
+    }
+    
     pub fn find_atom_by_name(&self, name: &str) -> Option<&AtomGeneric> {
         self.atoms
             .iter()
             .find(|a| a.type_in_res_general.as_deref() == Some(name))
-    }
-    /// Finds the index of an atom in the `atoms` vector based on its serial number.
-    pub fn find_atom_i_by_sn(&self, sn: u32) -> Option<usize> {
-        self.atoms.iter().position(|a| a.serial_number == sn)
     }
 }
 
