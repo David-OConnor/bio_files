@@ -26,6 +26,8 @@ pub enum PharmacophoreType {
     Donor,
     Cation,
     Rings,
+    Hydrophobe,
+    Anion,
 }
 
 impl PharmacophoreType {
@@ -35,6 +37,8 @@ impl PharmacophoreType {
             "donor" => Some(Self::Donor),
             "cation" => Some(Self::Cation),
             "rings" | "ring" => Some(Self::Rings),
+            "hydrophobe" => Some(Self::Hydrophobe),
+            "anion" => Some(Self::Anion),
             _ => None,
         }
     }
@@ -45,6 +49,8 @@ impl PharmacophoreType {
             Self::Donor => "donor",
             Self::Cation => "cation",
             Self::Rings => "rings",
+            Self::Hydrophobe => "hydrophobe",
+            Self::Anion => "anion",
         }
     }
 }
@@ -67,6 +73,27 @@ pub struct Sdf {
     pub chains: Vec<ChainGeneric>,
     pub residues: Vec<ResidueGeneric>,
     pub pharmacophore_features: Vec<PharmacaphoreFeatures>,
+}
+
+/// Workaround for some SDFs we've seen on PubChem. Applies to both counts, and bond
+/// rows.
+fn split_atom_bond_col(col: &str) -> io::Result<(usize, usize)> {
+    if col.len() < 3 {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("Atom/bond count column too short to split: {col}"),
+        ));
+    }
+
+    let n_atoms = col[..3]
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms"))?;
+
+    let n_bonds = col[3..]
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds"))?;
+
+    Ok((n_atoms, n_bonds))
 }
 
 impl Sdf {
@@ -112,10 +139,11 @@ impl Sdf {
 
         // Typically, the first number is the number of atoms (natoms)
         // and the second number is the number of bonds (nbonds).
-        let n_atoms = counts_cols[0].parse::<usize>().map_err(|_| {
+        let mut n_atoms = counts_cols[0].parse::<usize>().map_err(|_| {
             io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms")
         })?;
-        let n_bonds = counts_cols[1].parse::<usize>().map_err(|_| {
+
+        let mut n_bonds = counts_cols[1].parse::<usize>().map_err(|_| {
             io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds")
         })?;
 
@@ -126,15 +154,35 @@ impl Sdf {
         //
 
         let first_atom_line = 4;
-        let last_atom_line = first_atom_line + n_atoms;
-        let first_bond_line = last_atom_line;
-        let last_bond_line = first_bond_line + n_bonds;
+        let mut last_atom_line = first_atom_line + n_atoms;
+        let mut first_bond_line = last_atom_line;
+        let mut last_bond_line = first_bond_line + n_bonds;
 
         if lines.len() < last_atom_line {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "Not enough lines for the declared atom block",
-            ));
+            // We have observed that sometimes the space between atom and bond counts is omitted,
+            // from PubChem molecules that have triple-digit counts, so we will assume that here.
+            let atom_bond_count = counts_cols[0];
+
+            // If atom 0 is 3 digits, there is no space in these cases. So could be 4-6 total len.
+            if atom_bond_count.len() >= 4 {
+                (n_atoms, n_bonds) = split_atom_bond_col(atom_bond_count)?;
+
+                last_atom_line = first_atom_line + n_atoms;
+                first_bond_line = last_atom_line;
+                last_bond_line = first_bond_line + n_bonds;
+
+                if lines.len() < last_atom_line {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        "Not enough lines for the declared atom block (after 3/3 split.)",
+                    ));
+                }
+            } else {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    "Not enough lines for the declared atom block",
+                ));
+            }
         }
 
         let mut atoms = Vec::with_capacity(n_atoms);
@@ -185,14 +233,24 @@ impl Sdf {
                 ));
             }
 
-            let atom_0_sn = cols[0].parse::<u32>().map_err(|_| {
+            let mut atom_0_sn = cols[0].parse::<u32>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 0")
             })?;
-            let atom_1_sn = cols[1].parse::<u32>().map_err(|_| {
+            let mut atom_1_sn = cols[1].parse::<u32>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1")
             })?;
 
-            let bond_type = BondType::from_str(cols[2])?;
+            // See note above on atom/bond counts. We observe the same thing from PubChem in some
+            // cases for the atom SNs listed in bond lines; space omitted if len of atom0 is 3.
+            let bond_type = if cols[2] == "0" {
+                let (atom_0, atom_1) = split_atom_bond_col(cols[0])?;
+                atom_0_sn = atom_0 as u32;
+                atom_1_sn = atom_1 as u32;
+
+                BondType::from_str(cols[1])?
+            } else {
+                BondType::from_str(cols[2])?
+            };
 
             bonds.push(BondGeneric {
                 atom_0_sn,
