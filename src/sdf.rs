@@ -165,6 +165,8 @@ impl Sdf {
             // If atom 0 is 3 digits, there is no space in these cases. So could be 4-6 total len.
             if atom_bond_count.len() >= 4 {
                 (n_atoms, n_bonds) = split_atom_bond_col(atom_bond_count)?;
+                // Note: We have observed cases where we need to split at atom 2, i.e. if
+                // the count is 5 digits long. So it will still fail if the space is ommitted.
 
                 last_atom_line = first_atom_line + n_atoms;
                 first_bond_line = last_atom_line;
@@ -175,9 +177,9 @@ impl Sdf {
                         ErrorKind::InvalidData,
                         format!(
                             "Not enough lines for the declared atom block (after 3/3 split.) \
-                        Lines: {}, expected: {}",
+                        Lines: {}, expected: {} atoms",
                             lines.len(),
-                            last_atom_line
+                            last_atom_line - 4
                         ),
                     ));
                 }
