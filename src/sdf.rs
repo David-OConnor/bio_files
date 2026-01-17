@@ -75,24 +75,100 @@ pub struct Sdf {
 }
 
 /// Workaround for some SDFs we've seen on PubChem. Applies to both counts, and bond
-/// rows.
-fn split_atom_bond_col(col: &str) -> io::Result<(usize, usize)> {
-    if col.len() < 3 {
+/// rows. This variant is safer for the atom count where atom and bond counts are likely
+/// to have the same number of digits; things are trickier with bonds.
+///
+/// This still causes trouble when, for example, atom count is 3-digit and bond count is 2-digit,
+/// for example.
+fn split_atom_bond_count_col(col: &str, split: usize) -> io::Result<(usize, usize)> {
+    if col.len() < split {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
             format!("Atom/bond count column too short to split: {col}"),
         ));
     }
 
-    let n_atoms = col[..3]
+    // // todo temp
+    // println!(
+    //     "Split: {split}, part 0: {} part 1: {}",
+    //     &col[..split],
+    //     &col[split..]
+    // );
+
+    let n_atoms = col[..split]
         .parse::<usize>()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms"))?;
 
-    let n_bonds = col[3..]
+    let n_bonds = col[split..]
         .parse::<usize>()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds"))?;
 
     Ok((n_atoms, n_bonds))
+}
+
+/// Similar to our atom_bond_count split function, but takes into account the nearby
+/// lines to make an educated guess; otherwise
+///
+/// Both of these split functions are from observed problems on PubChem where spaces are omitted
+/// in bond and atom/bond count lines.
+fn split_bond_indices_line(
+    col: &str,
+    prev: Option<&str>,
+    _next: Option<&str>, // We don't strictly need 'next' if we trust 'prev' + validity
+    max_atom_index: usize,
+) -> io::Result<(usize, usize)> {
+    // 1. Identify all Chemically Valid Splits
+    // A split is valid ONLY if both resulting numbers are <= max_atom_index.
+    let mut valid_splits = Vec::new();
+
+    for i in 1..col.len() {
+        let s1 = &col[..i];
+        let s2 = &col[i..];
+
+        if let (Ok(n1), Ok(n2)) = (s1.parse::<usize>(), s2.parse::<usize>()) {
+            // Hard Constraint: Atoms must exist
+            if n1 <= max_atom_index && n2 <= max_atom_index && n1 > 0 && n2 > 0 {
+                valid_splits.push((n1, n2));
+            }
+        }
+    }
+
+    // 2. Decision Logic
+    match valid_splits.len() {
+        // Case A: No valid splits found. The data is corrupt or the column is garbage.
+        0 => Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!("No valid bond split found for '{col}' with max atom {max_atom_index}"),
+        )),
+
+        // Case B: Exactly one valid split.
+        // We don't care about sorting/context here. This is the only chemical possibility.
+        // This fixes your '55114' case: (55, 114) is valid, (551, 14) is not.
+        1 => Ok(valid_splits[0]),
+
+        // Case C: Ambiguity! Multiple splits are chemically valid.
+        // Example: "1234" with 200 atoms could be (1, 234-No), (12, 34-Yes), (123, 4-Yes).
+        // NOW we use the context (prev) to guess which one is correct.
+        _ => {
+            let p_val = prev.and_then(|s| s.parse::<usize>().ok()).unwrap_or(0);
+
+            // Find the split where the first atom (n1) is closest to the previous line's atom.
+            // In a sorted list, n1 should be >= prev and close to it.
+            valid_splits.sort_by_key(|(n1, _)| {
+                let diff = if *n1 >= p_val {
+                    n1 - p_val
+                } else {
+                    // If n1 < prev, it's out of order. Penalize it heavily so we prefer sorted options.
+                    // But don't make it impossible, just unlikely.
+                    (p_val - n1) + 10000
+                };
+                diff
+            });
+
+            // Return the "closest" valid split
+            Ok(valid_splits[0])
+        }
+    }
 }
 
 impl Sdf {
@@ -164,7 +240,7 @@ impl Sdf {
 
             // If atom 0 is 3 digits, there is no space in these cases. So could be 4-6 total len.
             if atom_bond_count.len() >= 4 {
-                (n_atoms, n_bonds) = split_atom_bond_col(atom_bond_count)?;
+                (n_atoms, n_bonds) = split_atom_bond_count_col(atom_bond_count, 3)?;
                 // Note: We have observed cases where we need to split at atom 2, i.e. if
                 // the count is 5 digits long. So it will still fail if the space is ommitted.
 
@@ -249,9 +325,36 @@ impl Sdf {
             // See note above on atom/bond counts. We observe the same thing from PubChem in some
             // cases for the atom SNs listed in bond lines; space omitted if len of atom0 is 3.
             let bond_type = if cols[2] == "0" {
-                let (atom_0, atom_1) = split_atom_bond_col(cols[0])?;
+                let prev = if i != first_bond_line {
+                    let line_p = lines[i - 1];
+                    let cols_p: Vec<&str> = line_p.split_whitespace().collect();
+                    Some(cols_p[0])
+                } else {
+                    None
+                };
+                let next = if i != last_bond_line - 1 {
+                    let line_p = lines[i + 1];
+                    let cols_p: Vec<&str> = line_p.split_whitespace().collect();
+                    Some(cols_p[0])
+                } else {
+                    None
+                };
+
+                let (atom_0, atom_1) = split_bond_indices_line(cols[0], prev, next, atoms.len())?;
                 atom_0_sn = atom_0 as u32;
                 atom_1_sn = atom_1 as u32;
+
+                if atom_0_sn as usize > atoms.len() || atom_1_sn as usize > atoms.len() {
+                    return Err(io::Error::new(
+                        ErrorKind::InvalidData,
+                        format!(
+                            "Bond indices out of bounds, during split: {}. Atom len: {}. A0: {atom_0_sn} A1: {atom_1_sn}",
+                            cols[0],
+                            atoms.len(),
+                        ),
+                    ));
+                }
+                // }
 
                 BondType::from_str(cols[1])?
             } else {
