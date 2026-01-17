@@ -88,7 +88,7 @@ impl TemplateData {
     pub fn find_atom_i_by_sn(&self, sn: u32) -> Option<usize> {
         self.atoms.iter().position(|a| a.serial_number == sn)
     }
-    
+
     pub fn find_atom_by_name(&self, name: &str) -> Option<&AtomGeneric> {
         self.atoms
             .iter()

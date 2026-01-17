@@ -11,8 +11,7 @@ use std::{
     str::FromStr,
 };
 
-use bio_apis::pubchem::StructureSearchNamespace;
-use bio_apis::{drugbank, pdbe, pubchem};
+use bio_apis::{drugbank, pdbe, pubchem, pubchem::StructureSearchNamespace};
 use lin_alg::f64::Vec3;
 use na_seq::Element;
 
@@ -174,7 +173,12 @@ impl Sdf {
                 if lines.len() < last_atom_line {
                     return Err(io::Error::new(
                         ErrorKind::InvalidData,
-                        "Not enough lines for the declared atom block (after 3/3 split.)",
+                        format!(
+                            "Not enough lines for the declared atom block (after 3/3 split.) \
+                        Lines: {}, expected: {}",
+                            lines.len(),
+                            last_atom_line
+                        ),
                     ));
                 }
             } else {
