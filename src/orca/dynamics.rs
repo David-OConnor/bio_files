@@ -50,7 +50,7 @@ pub struct Dynamics {
 impl Dynamics {
     /// Note: We can ommit units from the strings in favor of default units, if we wish.
     pub fn make_inp(&self) -> String {
-        let mut contents = vec![
+        let contents = vec![
             ("Timestep", format!("{:.1}_fs", self.timestep)),
             ("Initvel", format!("{:.1}_K", self.init_vel)),
             (

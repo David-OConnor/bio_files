@@ -52,8 +52,7 @@ impl ChargesOutput {
         };
 
         // Scan until we hit the header line for the atomic charges table.
-        let mut in_header = true;
-        while let Some(line) = lines.next() {
+        for line in lines.by_ref() {
             let t = line.trim();
 
             if t.starts_with("Convergence threshold (charges)") {
@@ -72,12 +71,7 @@ impl ChargesOutput {
                 if let Some(last) = t.split_whitespace().last() {
                     total_beta = Some(parse_f64(last)?);
                 }
-            } else if in_header
-                && t.starts_with("ATOM")
-                && t.contains("CHARGE")
-                && t.contains("POPULATION")
-            {
-                in_header = false;
+            } else if t.starts_with("ATOM") && t.contains("CHARGE") && t.contains("POPULATION") {
                 break;
             }
         }

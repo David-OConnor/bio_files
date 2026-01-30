@@ -155,14 +155,13 @@ fn split_bond_indices_line(
             // Find the split where the first atom (n1) is closest to the previous line's atom.
             // In a sorted list, n1 should be >= prev and close to it.
             valid_splits.sort_by_key(|(n1, _)| {
-                let diff = if *n1 >= p_val {
+                if *n1 >= p_val {
                     n1 - p_val
                 } else {
                     // If n1 < prev, it's out of order. Penalize it heavily so we prefer sorted options.
                     // But don't make it impossible, just unlikely.
                     (p_val - n1) + 10000
-                };
-                diff
+                }
             });
 
             // Return the "closest" valid split
@@ -271,6 +270,7 @@ impl Sdf {
 
         let mut pharmacophore_features: Vec<PharmacaphoreFeatures> = Vec::new();
 
+        #[allow(clippy::needless_range_loop)]
         for i in first_atom_line..last_atom_line {
             let line = lines[i];
             let cols: Vec<&str> = line.split_whitespace().collect();

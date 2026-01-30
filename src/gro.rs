@@ -94,6 +94,7 @@ impl Gro {
             Element::from_letter(&one)
         }
 
+        #[allow(clippy::needless_range_loop)]
         for i in first_atom_line..last_atom_line {
             let line = lines[i];
 

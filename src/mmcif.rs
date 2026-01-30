@@ -13,7 +13,6 @@ use std::{
     io::{ErrorKind, Write},
     path::Path,
     str::FromStr,
-    time::Instant,
 };
 
 use bio_apis::rcsb;
@@ -274,7 +273,7 @@ impl MmCif {
 
         // let mut cursor = Cursor::new(text);
 
-        let ss_load = Instant::now();
+        // let ss_load = Instant::now();
         // todo: Integraet this so it's not taking a second line loop through the whole file.
         // todo: It'll be faster this way.
         // todo: Regardless of that, this SS loading is going very slowly. Fix it.

@@ -170,10 +170,10 @@ impl DcdTrajectory {
 
         let first = &self.frames[0];
 
-        let mut n_atoms = first.atom_posits.len();
+        let n_atoms = first.atom_posits.len();
 
         for s in self.frames.iter().skip(1) {
-            let mut n2 = s.atom_posits.len();
+            let n2 = s.atom_posits.len();
 
             if n2 != n_atoms {
                 return Err(io::Error::new(
@@ -187,7 +187,7 @@ impl DcdTrajectory {
             .read(true)
             .write(true)
             .create(true)
-            // .truncate(true) // todo: QC this.
+            .truncate(false)
             .open(path)?;
 
         let file_len = f.metadata()?.len();
@@ -244,7 +244,7 @@ impl DcdTrajectory {
             // verify header and NATOM; compute current NSET; then append and bump NSET
             f.seek(SeekFrom::Start(0))?;
             let l1 = read_u32_le(&mut f)?;
-            if l1 < 84 || l1 > 1024 * 1024 {
+            if !(84..=1024 * 1024).contains(&l1) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "unreasonable DCD header size",
@@ -524,9 +524,9 @@ fn read_unit_cell_record<R: Read>(r: &mut R) -> io::Result<DcdUnitCell> {
     }
 
     let mut six = [0f64; 6];
-    for i in 0..6 {
+    for (i, v) in six.iter_mut().enumerate() {
         let j = i * 8;
-        six[i] = f64::from_le_bytes(b[j..j + 8].try_into().unwrap());
+        *v = f64::from_le_bytes(b[j..j + 8].try_into().unwrap());
     }
 
     Ok(DcdUnitCell::from_dcd_six(six))

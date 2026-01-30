@@ -7,7 +7,7 @@ pub struct Plots {}
 
 impl Plots {
     pub fn make_inp(&self) -> String {
-        let mut contents = vec![];
+        let contents = vec![];
 
         make_inp_block("plots", &contents, &[])
     }

@@ -9,6 +9,7 @@ use crate::{BackboneSS, SecondaryStructure};
 
 // todo: Save SS to CIF.
 
+#[allow(unused)]
 #[derive(Clone, Copy, PartialEq, Debug)]
 enum LoopKind {
     None,
@@ -17,7 +18,7 @@ enum LoopKind {
     SheetRange,
 }
 
-pub fn load_ss<R: Read + Seek>(mut data: R) -> io::Result<Vec<BackboneSS>> {
+pub fn _load_ss<R: Read + Seek>(mut data: R) -> io::Result<Vec<BackboneSS>> {
     data.seek(SeekFrom::Start(0))?;
     let rdr = BufReader::new(data);
 

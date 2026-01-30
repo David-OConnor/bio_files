@@ -245,22 +245,22 @@ impl FrozenCore {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Debug)]
-// todo: A/R
-pub enum Functional {
-    // Pbe,
-    // Bp86,
-}
-
-impl Functional {
-    pub fn keyword(self) -> String {
-        match self {
-            // Pbe => "PBE",
-            // Self::Bp86 => "BP86",
-        }
-        .to_string()
-    }
-}
+// #[derive(Clone, Copy, PartialEq, Debug)]
+// // todo: A/R
+// pub enum Functional {
+//     // Pbe,
+//     // Bp86,
+// }
+//
+// impl Functional {
+//     pub fn keyword(self) -> String {
+//         match self {
+//             // Pbe => "PBE",
+//             // Self::Bp86 => "BP86",
+//         }
+//         .to_string()
+//     }
+// }
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 // todo: A/R

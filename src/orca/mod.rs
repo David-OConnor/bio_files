@@ -51,7 +51,7 @@ use solvation::{Solvator, SolvatorImplicit};
 use crate::{
     AtomGeneric,
     orca::{
-        charges::{AtomChargeData, ChargesOutput},
+        charges::ChargesOutput,
         dynamics::{Dynamics, DynamicsOutput},
         geom::Geom,
         plots::Plots,

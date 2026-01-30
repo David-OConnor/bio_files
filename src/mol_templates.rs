@@ -64,14 +64,8 @@ pub struct TemplateData {
 impl TemplateData {
     /// Find the indices of a template that join it to previous ones. None for terminal templates.
     pub fn attach_points(&self) -> io::Result<(Option<usize>, Option<usize>)> {
-        let head_i = match self.unit_connect.head {
-            Some(v) => Some(v as usize - 1),
-            None => None,
-        };
-        let tail_i = match self.unit_connect.tail {
-            Some(v) => Some(v as usize - 1),
-            None => None,
-        };
+        let head_i = self.unit_connect.head.map(|v| v as usize - 1);
+        let tail_i = self.unit_connect.tail.map(|v| v as usize - 1);
 
         Ok((head_i, tail_i))
     }
@@ -172,7 +166,7 @@ pub fn load_templates(template_text: &str) -> io::Result<HashMap<String, Templat
                     .collect();
 
                 let unit_connect = if work.connect_present {
-                    let head = work.connect_vals.get(0).copied().unwrap_or(0);
+                    let head = work.connect_vals.first().copied().unwrap_or(0);
                     let tail = work.connect_vals.get(1).copied().unwrap_or(0);
                     UnitConnect {
                         head: if head == 0 { None } else { Some(head) },
