@@ -548,3 +548,59 @@ impl FromStr for ExperimentalMethod {
         Ok(method)
     }
 }
+
+/// We use this with SDF and Mol2 files.
+/// Based on the storage format used by PubChem in SDF files. Each item contains all atom indices that are
+/// part of that pharmacophore type. This is atom-centered; it doesn't use absolute positions.
+/// (Ring centers etc)
+#[derive(Clone, Debug)]
+pub struct PharmacophoreFeatureGeneric {
+    /// 1-based atom indices (serial numbers)
+    pub atom_sns: Vec<u32>,
+    pub type_: PharmacophoreTypeGeneric,
+}
+
+/// Atom-
+/// Based on ones observed from PubChem.
+#[derive(Clone, PartialEq, Debug)]
+pub enum PharmacophoreTypeGeneric {
+    Acceptor,
+    Donor,
+    Cation,
+    Rings,
+    Hydrophobic,
+    Hydrophilic,
+    Anion,
+    Aromatic, // Haven't directly observed
+    Other(String),
+}
+
+impl PharmacophoreTypeGeneric {
+    fn from_pubchem_str(s: &str) -> Option<Self> {
+        match s.trim().to_ascii_lowercase().as_str() {
+            "acceptor" => Some(Self::Acceptor),
+            "donor" => Some(Self::Donor),
+            "cation" => Some(Self::Cation),
+            "rings" | "ring" => Some(Self::Rings),
+            "hydrophobe" | "hydrophobic" => Some(Self::Hydrophobic),
+            "hydrophilic" => Some(Self::Hydrophilic),
+            "anion" => Some(Self::Anion),
+            "aromatic" => Some(Self::Aromatic),
+            _ => Some(Self::Other(s.to_string())),
+        }
+    }
+
+    fn to_pubchem_str(&self) -> String {
+        match self {
+            Self::Acceptor => "acceptor".to_string(),
+            Self::Donor => "donor".to_string(),
+            Self::Cation => "cation".to_string(),
+            Self::Rings => "rings".to_string(),
+            Self::Hydrophobic => "hydrophobe".to_string(),
+            Self::Hydrophilic => "hydrophilic".to_string(),
+            Self::Anion => "anion".to_string(),
+            Self::Aromatic => "aromatic".to_string(),
+            Self::Other(s) => s.clone(),
+        }
+    }
+}

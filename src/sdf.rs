@@ -16,49 +16,9 @@ use lin_alg::f64::Vec3;
 use na_seq::Element;
 
 use crate::{
-    AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, ResidueEnd, ResidueGeneric, ResidueType,
+    AtomGeneric, BondGeneric, BondType, ChainGeneric, Mol2, PharmacophoreFeatureGeneric,
+    PharmacophoreTypeGeneric, ResidueEnd, ResidueGeneric, ResidueType,
 };
-
-#[derive(Clone, Copy, PartialEq, Debug)]
-pub enum PharmacophoreType {
-    Acceptor,
-    Donor,
-    Cation,
-    Rings,
-    Hydrophobe,
-    Anion,
-}
-
-impl PharmacophoreType {
-    fn from_pubchem_str(s: &str) -> Option<Self> {
-        match s.trim().to_ascii_lowercase().as_str() {
-            "acceptor" => Some(Self::Acceptor),
-            "donor" => Some(Self::Donor),
-            "cation" => Some(Self::Cation),
-            "rings" | "ring" => Some(Self::Rings),
-            "hydrophobe" => Some(Self::Hydrophobe),
-            "anion" => Some(Self::Anion),
-            _ => None,
-        }
-    }
-
-    fn to_pubchem_str(self) -> &'static str {
-        match self {
-            Self::Acceptor => "acceptor",
-            Self::Donor => "donor",
-            Self::Cation => "cation",
-            Self::Rings => "rings",
-            Self::Hydrophobe => "hydrophobe",
-            Self::Anion => "anion",
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct PharmacaphoreFeatures {
-    pub atom_sns: Vec<u32>,       // 1-based atom indices (SDF serial numbers)
-    pub type_: PharmacophoreType, // e.g. "acceptor", "cation", "rings"
-}
 
 /// It's a format used for small organic molecules, and is a common format on online databases
 /// like PubChem and Drugbank. This struct will likely
@@ -71,7 +31,7 @@ pub struct Sdf {
     pub bonds: Vec<BondGeneric>,
     pub chains: Vec<ChainGeneric>,
     pub residues: Vec<ResidueGeneric>,
-    pub pharmacophore_features: Vec<PharmacaphoreFeatures>,
+    pub pharmacophore_features: Vec<PharmacophoreFeatureGeneric>,
 }
 
 /// Workaround for some SDFs we've seen on PubChem. Applies to both counts, and bond
@@ -268,7 +228,7 @@ impl Sdf {
 
         let mut atoms = Vec::with_capacity(n_atoms);
 
-        let mut pharmacophore_features: Vec<PharmacaphoreFeatures> = Vec::new();
+        let mut pharmacophore_features: Vec<PharmacophoreFeatureGeneric> = Vec::new();
 
         #[allow(clippy::needless_range_loop)]
         for i in first_atom_line..last_atom_line {
@@ -448,31 +408,31 @@ impl Sdf {
                     let key = &line[l + 1..r];
                     idx += 1;
 
-                    let mut vals: Vec<&str> = Vec::new();
+                    let mut rows_pharm: Vec<&str> = Vec::new();
                     while idx < lines.len() {
                         let v = lines[idx];
                         let v_trim = v.trim_end();
                         if v_trim.is_empty() || v_trim == "$$$$" || v_trim.starts_with("> <") {
                             break;
                         }
-                        vals.push(v_trim);
+                        rows_pharm.push(v_trim);
                         idx += 1;
                     }
                     if key == "PUBCHEM_PHARMACOPHORE_FEATURES" {
-                        match parse_pubchem_pharmacophore_features(&vals) {
+                        match parse_pharmacophore_features(&rows_pharm) {
                             Ok(v) => pharmacophore_features = v,
                             Err(e) => {
-                                md.insert(key.to_string(), vals.join("\n"));
+                                md.insert(key.to_string(), rows_pharm.join("\n"));
                                 eprintln!("Failed to parse PUBCHEM_PHARMACOPHORE_FEATURES: {e}");
                             }
                         }
                     } else {
-                        md.insert(key.to_string(), vals.join("\n"));
+                        md.insert(key.to_string(), rows_pharm.join("\n"));
                     }
 
                     // OpenFF format.
                     if key == "atom.dprop.PartialCharge" {
-                        let joined = vals.join(" ");
+                        let joined = rows_pharm.join(" ");
                         let charges: Vec<&str> = joined.split_whitespace().collect();
 
                         for (i, q) in charges.into_iter().enumerate() {
@@ -484,18 +444,18 @@ impl Sdf {
 
                     // Pubchem format.
                     if key == "PUBCHEM_MMFF94_PARTIAL_CHARGES" {
-                        if vals.is_empty() {
+                        if rows_pharm.is_empty() {
                             eprintln!("No values for PUBCHEM_MMFF94_PARTIAL_CHARGES");
                         } else {
-                            let n = vals[0].trim().parse::<usize>().unwrap_or(0);
-                            if vals.len().saturating_sub(1) != n {
+                            let n = rows_pharm[0].trim().parse::<usize>().unwrap_or(0);
+                            if rows_pharm.len().saturating_sub(1) != n {
                                 eprintln!(
                                     "Charge count mismatch: expected {}, got {}",
                                     n,
-                                    vals.len().saturating_sub(1)
+                                    rows_pharm.len().saturating_sub(1)
                                 );
                             }
-                            for line in vals.iter().skip(1).take(n) {
+                            for line in rows_pharm.iter().skip(1).take(n) {
                                 let mut it = line.split_whitespace();
                                 let i1 = it.next().and_then(|s| s.parse::<usize>().ok());
                                 let q = it.next().and_then(|s| s.parse::<f32>().ok());
@@ -630,7 +590,7 @@ impl Sdf {
         }
 
         if !self.pharmacophore_features.is_empty() {
-            let v = format_pubchem_pharmacophore_features(&self.pharmacophore_features);
+            let v = format_pharmacophore_features(&self.pharmacophore_features);
             write_metadata("PUBCHEM_PHARMACOPHORE_FEATURES", &v, &mut file)?;
         }
 
@@ -690,12 +650,14 @@ fn write_metadata(key: &str, val: &str, file: &mut File) -> io::Result<()> {
     Ok(())
 }
 
-fn parse_pubchem_pharmacophore_features(vals: &[&str]) -> io::Result<Vec<PharmacaphoreFeatures>> {
-    if vals.is_empty() {
+pub(crate) fn parse_pharmacophore_features(
+    rows: &[&str],
+) -> io::Result<Vec<PharmacophoreFeatureGeneric>> {
+    if rows.is_empty() {
         return Ok(Vec::new());
     }
 
-    let n = vals[0].trim().parse::<usize>().map_err(|_| {
+    let n = rows[0].trim().parse::<usize>().map_err(|_| {
         io::Error::new(
             ErrorKind::InvalidData,
             "Bad PUBCHEM_PHARMACOPHORE_FEATURES count",
@@ -704,23 +666,23 @@ fn parse_pubchem_pharmacophore_features(vals: &[&str]) -> io::Result<Vec<Pharmac
 
     let mut out = Vec::with_capacity(n);
 
-    for line in vals.iter().skip(1).take(n) {
-        let toks: Vec<&str> = line.split_whitespace().collect();
-        if toks.len() < 2 {
+    for line in rows.iter().skip(1).take(n) {
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 2 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
                 "Bad PUBCHEM_PHARMACOPHORE_FEATURES line",
             ));
         }
 
-        let k = toks[0].parse::<usize>().map_err(|_| {
+        let k = cols[0].parse::<usize>().map_err(|_| {
             io::Error::new(
                 ErrorKind::InvalidData,
                 "Bad PUBCHEM_PHARMACOPHORE_FEATURES atom-count",
             )
         })?;
 
-        if toks.len() < 1 + k + 1 {
+        if cols.len() < 1 + k + 1 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
                 "PUBCHEM_PHARMACOPHORE_FEATURES line missing atoms/type",
@@ -728,7 +690,7 @@ fn parse_pubchem_pharmacophore_features(vals: &[&str]) -> io::Result<Vec<Pharmac
         }
 
         let mut atom_sns = Vec::with_capacity(k);
-        for t in toks.iter().skip(1).take(k) {
+        for t in cols.iter().skip(1).take(k) {
             let sn = t.parse::<u32>().map_err(|_| {
                 io::Error::new(
                     ErrorKind::InvalidData,
@@ -738,21 +700,21 @@ fn parse_pubchem_pharmacophore_features(vals: &[&str]) -> io::Result<Vec<Pharmac
             atom_sns.push(sn);
         }
 
-        let type_str = toks[1 + k..].join(" ");
-        let type_ = PharmacophoreType::from_pubchem_str(&type_str).ok_or_else(|| {
+        let type_str = cols[1 + k..].join(" ");
+        let type_ = PharmacophoreTypeGeneric::from_pubchem_str(&type_str).ok_or_else(|| {
             io::Error::new(
                 ErrorKind::InvalidData,
                 format!("Unknown pharmacophore type: {type_str}"),
             )
         })?;
 
-        out.push(PharmacaphoreFeatures { atom_sns, type_ });
+        out.push(PharmacophoreFeatureGeneric { atom_sns, type_ });
     }
 
     Ok(out)
 }
 
-fn format_pubchem_pharmacophore_features(features: &[PharmacaphoreFeatures]) -> String {
+pub(crate) fn format_pharmacophore_features(features: &[PharmacophoreFeatureGeneric]) -> String {
     let mut s = String::new();
     s.push_str(&format!("{}\n", features.len()));
 
@@ -762,7 +724,7 @@ fn format_pubchem_pharmacophore_features(features: &[PharmacaphoreFeatures]) -> 
             s.push_str(&format!(" {sn}"));
         }
         s.push(' ');
-        s.push_str(f.type_.to_pubchem_str());
+        s.push_str(&f.type_.clone().to_pubchem_str());
         s.push('\n');
     }
 

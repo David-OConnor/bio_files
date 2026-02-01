@@ -16,7 +16,13 @@ use bio_apis::amber_geostd;
 use lin_alg::f64::Vec3;
 use na_seq::{AtomTypeInRes, Element};
 
-use crate::{AtomGeneric, BondGeneric, BondType, Sdf};
+use crate::{
+    AtomGeneric, BondGeneric, BondType, PharmacophoreFeatureGeneric, Sdf,
+    sdf::{format_pharmacophore_features, parse_pharmacophore_features},
+};
+
+// For our custom format addition.
+const PHARMACOPHORE_TAG: &str = "@<BIO_FILES>PHARMACOPHORE";
 
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum MolType {
@@ -134,6 +140,10 @@ pub struct Mol2 {
     pub bonds: Vec<BondGeneric>,
     pub mol_type: MolType,
     pub charge_type: ChargeType,
+    /// Note: I have not observed these in Mol2 files in the wild, but
+    /// we are using them in Molchanica; setting up in a simimlar way to
+    /// how they're stored in SDF.
+    pub pharmacophore_features: Vec<PharmacophoreFeatureGeneric>,
     pub comment: Option<String>,
 }
 
@@ -166,9 +176,11 @@ impl Mol2 {
 
         let mut atoms = Vec::new();
         let mut bonds = Vec::new();
+        let mut pharmacophore_rows = Vec::new();
 
         let mut in_atom_section = false;
         let mut in_bond_section = false;
+        let mut in_bond_pharmacophore_section = false;
 
         for line in &lines {
             if line.trim().is_empty() {
@@ -179,12 +191,14 @@ impl Mol2 {
             if upper.contains("<TRIPOS>ATOM") {
                 in_atom_section = true;
                 in_bond_section = false;
+                in_bond_pharmacophore_section = false;
                 continue;
             }
 
             if upper.contains("<TRIPOS>BOND") {
                 in_atom_section = false;
                 in_bond_section = true;
+                in_bond_pharmacophore_section = false;
                 continue;
             }
 
@@ -195,6 +209,7 @@ impl Mol2 {
                 //      3 PRO    29 RESIDUE           4 A     PRO     2
                 in_atom_section = false;
                 in_bond_section = false;
+                in_bond_pharmacophore_section = false;
                 continue;
             }
 
@@ -206,6 +221,14 @@ impl Mol2 {
                 // 56 280 58 59 281 60 61 62 63 64 65 671 672 673 674 332 675 676 484 485 677 678 284 333 24 480 481 26 282 482 334 483 28 486 283 30 31 285 335 487 286 337 338 336 493 494 495 496 27 497 25 499 500 331 279 498 29
                 in_atom_section = false;
                 in_bond_section = false;
+                in_bond_pharmacophore_section = false;
+                continue;
+            }
+
+            if upper.contains(PHARMACOPHORE_TAG) {
+                in_atom_section = false;
+                in_bond_section = false;
+                in_bond_pharmacophore_section = true;
                 continue;
             }
 
@@ -371,6 +394,10 @@ impl Mol2 {
                     atom_1_sn,
                 });
             }
+
+            if in_bond_pharmacophore_section {
+                pharmacophore_rows.push(line.to_owned());
+            }
         }
 
         // Note: This may not be the identifier we think of.
@@ -387,6 +414,12 @@ impl Mol2 {
 
         let metadata = HashMap::new(); // todo: A/R
 
+        let pharmacophore_features = if pharmacophore_rows.is_empty() {
+            Vec::new()
+        } else {
+            parse_pharmacophore_features(&pharmacophore_rows)?
+        };
+
         Ok(Self {
             ident,
             metadata,
@@ -395,6 +428,7 @@ impl Mol2 {
             atoms,
             bonds,
             comment,
+            pharmacophore_features,
         })
     }
 
@@ -457,8 +491,6 @@ impl Mol2 {
 
         writeln!(file, "@<TRIPOS>BOND")?;
 
-        // todo: Where do we save metadata?
-
         for (i, bond) in self.bonds.iter().enumerate() {
             writeln!(
                 file,
@@ -469,6 +501,14 @@ impl Mol2 {
                 bond.bond_type.to_mol2_str(),
             )?;
         }
+
+        if !self.pharmacophore_features.is_empty() {
+            writeln!(file, "{PHARMACOPHORE_TAG}")?;
+            let v = format_pharmacophore_features(&self.pharmacophore_features);
+            write!(file, "{v}")?;
+        }
+
+        // todo: Metadata?
 
         Ok(())
     }
@@ -495,6 +535,7 @@ impl From<Sdf> for Mol2 {
             bonds: m.bonds.clone(),
             mol_type: MolType::Small,
             charge_type: ChargeType::None,
+            pharmacophore_features: m.pharmacophore_features,
             comment: None,
         }
     }
