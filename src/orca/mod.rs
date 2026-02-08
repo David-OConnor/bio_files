@@ -51,7 +51,7 @@ use solvation::{Solvator, SolvatorImplicit};
 use crate::{
     AtomGeneric,
     orca::{
-        charges::ChargesOutput,
+        charges::{ChargesOutput, MbisChargesCfg},
         dynamics::{Dynamics, DynamicsOutput},
         geom::Geom,
         plots::Plots,
@@ -167,7 +167,7 @@ pub enum Task {
     /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
     /// [Charge tutorial](https://www.faccts.de/docs/orca/5.0/tutorials/prop/charges.html)
     /// [MBIS Charges](https://www.faccts.de/docs/orca/6.1/manual/contents/spectroscopyproperties/population.html?q=mbis&n=0#mbis-charges)
-    MbisCharges,
+    MbisCharges(MbisChargesCfg),
     MolDynamics(Dynamics),
     // todo: Others A/R
 }
@@ -177,7 +177,7 @@ impl Display for Task {
         let v = match self {
             Self::SinglePoint => "Single point energy",
             Self::GeometryOptimization(_) => "Optimize geometry",
-            Self::MbisCharges => "MBIS charges",
+            Self::MbisCharges(_) => "MBIS charges",
             Self::MolDynamics(_) => "Mol dynamics (Ab-initio)",
         };
 
@@ -334,8 +334,13 @@ impl OrcaInput {
                     result.push_str(&v.make_inp());
                 }
             }
-            Task::MbisCharges => {
+            Task::MbisCharges(cfg) => {
                 result.push_str(" MBIS");
+
+                if cfg.octopole || cfg.quadrupole || cfg.dipole {
+                    result.push('\n');
+                    result.push_str(&cfg.make_inp());
+                }
             }
             Task::MolDynamics(md) => {
                 result.push_str(&format!(" {}", md.make_inp()));
@@ -475,7 +480,7 @@ impl OrcaInput {
                 let out = DynamicsOutput::new(&out, result_text)?;
                 OrcaOutput::Dynamics(out)
             }
-            Task::MbisCharges => {
+            Task::MbisCharges(_) => {
                 let out = ChargesOutput::new(result_text)?;
                 OrcaOutput::Charges(out)
             }
