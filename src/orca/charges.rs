@@ -10,7 +10,7 @@ use lin_alg::f64::Vec3;
 use crate::orca::make_inp_block;
 
 /// Note: these fields currently do not do anything; all are returned.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MbisChargesCfg {
     pub dipole: bool,
     pub quadrupole: bool,
