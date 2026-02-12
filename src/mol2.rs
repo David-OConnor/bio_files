@@ -181,6 +181,8 @@ impl Mol2 {
         let mut in_atom_section = false;
         let mut in_bond_section = false;
         let mut in_bond_pharmacophore_section = false;
+        let mut metadata = HashMap::new();
+        let mut pending_metadata_key: Option<String> = None;
 
         for line in &lines {
             if line.trim().is_empty() {
@@ -192,6 +194,7 @@ impl Mol2 {
                 in_atom_section = true;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = false;
+                pending_metadata_key = None;
                 continue;
             }
 
@@ -199,6 +202,7 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = true;
                 in_bond_pharmacophore_section = false;
+                pending_metadata_key = None;
                 continue;
             }
 
@@ -210,6 +214,7 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = false;
+                pending_metadata_key = None;
                 continue;
             }
 
@@ -229,6 +234,21 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = true;
+                pending_metadata_key = None;
+                continue;
+            }
+
+            // Our custom metadata parsing. Match all @ lines that don't match one above.
+            if line.starts_with('@') && !upper.contains("<TRIPOS>") {
+                in_atom_section = false;
+                in_bond_section = false;
+                in_bond_pharmacophore_section = false;
+                pending_metadata_key = Some(line.trim_start_matches('@').to_owned());
+                continue;
+            }
+
+            if let Some(key) = pending_metadata_key.take() {
+                metadata.insert(key, line.to_string());
                 continue;
             }
 
@@ -412,8 +432,6 @@ impl Mol2 {
             Some(lines[5].to_owned())
         };
 
-        let metadata = HashMap::new(); // todo: A/R
-
         let pharmacophore_features = if pharmacophore_rows.is_empty() {
             Vec::new()
         } else {
@@ -508,7 +526,11 @@ impl Mol2 {
             write!(file, "{v}")?;
         }
 
-        // todo: Metadata?
+        // Unofficial way of writing metadata
+        for (k, v) in &self.metadata {
+            writeln!(file, "\n@{k}")?;
+            writeln!(file, "{v}")?;
+        }
 
         Ok(())
     }

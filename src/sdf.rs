@@ -48,13 +48,6 @@ fn split_atom_bond_count_col(col: &str, split: usize) -> io::Result<(usize, usiz
         ));
     }
 
-    // // todo temp
-    // println!(
-    //     "Split: {split}, part 0: {} part 1: {}",
-    //     &col[..split],
-    //     &col[split..]
-    // );
-
     let n_atoms = col[..split]
         .parse::<usize>()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms"))?;
@@ -511,10 +504,14 @@ impl Sdf {
 
         // Format the counts line. We loosely mimic typical spacing,
         // though it's not strictly required to line up exactly.
+        let w = natoms.max(nbonds).to_string().len().max(3) + 1; // +1 keeps a guaranteed gap between the two fields
+
         writeln!(
             file,
-            "{:>3}{:>3}  0  0  0  0           0999 V2000",
-            natoms, nbonds
+            "{:>w$}{:>w$}  0  0  0  0           0999 V2000",
+            natoms,
+            nbonds,
+            w = w,
         )?;
 
         for atom in &self.atoms {
@@ -532,13 +529,24 @@ impl Sdf {
             )?;
         }
 
+        // For formatting the bond atom SNs correctly
+        let max_sn = self
+            .bonds
+            .iter()
+            .flat_map(|b| [b.atom_0_sn, b.atom_1_sn])
+            .max()
+            .unwrap_or(0);
+
+        let w = max_sn.to_string().len().max(3) + 1; // +1 ensures a gap even at max width
+
         for bond in &self.bonds {
             writeln!(
                 file,
-                "{:>3}{:>3}{:>3}  0  0  0  0",
+                "{:>w$}{:>w$}{:>3}  0  0  0  0",
                 bond.atom_0_sn,
                 bond.atom_1_sn,
-                bond.bond_type.to_str_sdf()
+                bond.bond_type.to_str_sdf(),
+                w = w,
             )?;
         }
 

@@ -193,33 +193,33 @@ impl ChargesOutput {
         let mbis_text = &text[start..];
 
         // Dipoles
-        if let Some(after) = section_after(mbis_text, "MBIS ATOMIC DIPOLE MOMENT (A.U.):") {
-            if let Some(mut rows) = parse_table_rows(after, |t| {
+        if let Some(after) = section_after(mbis_text, "MBIS ATOMIC DIPOLE MOMENT (A.U.):")
+            && let Some(mut rows) = parse_table_rows(after, |t| {
                 t.starts_with("ATOM") && t.contains("X") && t.contains("Y") && t.contains("Z")
-            }) {
-                for line in rows.by_ref() {
-                    let t = line.trim();
-                    if t.is_empty() {
-                        break;
-                    }
-                    // "0 O 0.000000 -0.000000 -0.165797"
-                    let parts: Vec<_> = t.split_whitespace().collect();
-                    if parts.len() < 5 {
-                        continue;
-                    }
-                    let x = parse_f64(parts[2])?;
-                    let y = parse_f64(parts[3])?;
-                    let z = parse_f64(parts[4])?;
-
-                    // If Vec3::new doesn't exist in your lin_alg, replace with your constructor.
-                    dipole.push(Vec3::new(x, y, z));
+            })
+        {
+            for line in rows.by_ref() {
+                let t = line.trim();
+                if t.is_empty() {
+                    break;
                 }
+                // "0 O 0.000000 -0.000000 -0.165797"
+                let parts: Vec<_> = t.split_whitespace().collect();
+                if parts.len() < 5 {
+                    continue;
+                }
+                let x = parse_f64(parts[2])?;
+                let y = parse_f64(parts[3])?;
+                let z = parse_f64(parts[4])?;
+
+                // If Vec3::new doesn't exist in your lin_alg, replace with your constructor.
+                dipole.push(Vec3::new(x, y, z));
             }
         }
 
         // Quadrupoles
-        if let Some(after) = section_after(mbis_text, "MBIS ATOMIC QUADRUPOLE MOMENT (A.U.):") {
-            if let Some(mut rows) = parse_table_rows(after, |t| {
+        if let Some(after) = section_after(mbis_text, "MBIS ATOMIC QUADRUPOLE MOMENT (A.U.):")
+            && let Some(mut rows) = parse_table_rows(after, |t| {
                 t.starts_with("ATOM")
                     && t.contains("XX")
                     && t.contains("YY")
@@ -227,38 +227,38 @@ impl ChargesOutput {
                     && t.contains("XY")
                     && t.contains("XZ")
                     && t.contains("YZ")
-            }) {
-                for line in rows.by_ref() {
-                    let t = line.trim();
-                    if t.is_empty() {
-                        break;
-                    }
-                    // "0 O -4.750163 -5.099543 -4.972574 -0.000000 -0.000000 -0.000000"
-                    let parts: Vec<_> = t.split_whitespace().collect();
-                    if parts.len() < 8 {
-                        continue;
-                    }
-                    let xx = parse_f64(parts[2])?;
-                    let yy = parse_f64(parts[3])?;
-                    let zz = parse_f64(parts[4])?;
-                    let xy = parse_f64(parts[5])?;
-                    let xz = parse_f64(parts[6])?;
-                    let yz = parse_f64(parts[7])?;
-                    quadrupole.push(Quadrupole {
-                        xx,
-                        yy,
-                        zz,
-                        xy,
-                        xz,
-                        yz,
-                    });
+            })
+        {
+            for line in rows.by_ref() {
+                let t = line.trim();
+                if t.is_empty() {
+                    break;
                 }
+                // "0 O -4.750163 -5.099543 -4.972574 -0.000000 -0.000000 -0.000000"
+                let parts: Vec<_> = t.split_whitespace().collect();
+                if parts.len() < 8 {
+                    continue;
+                }
+                let xx = parse_f64(parts[2])?;
+                let yy = parse_f64(parts[3])?;
+                let zz = parse_f64(parts[4])?;
+                let xy = parse_f64(parts[5])?;
+                let xz = parse_f64(parts[6])?;
+                let yz = parse_f64(parts[7])?;
+                quadrupole.push(Quadrupole {
+                    xx,
+                    yy,
+                    zz,
+                    xy,
+                    xz,
+                    yz,
+                });
             }
         }
 
         // Octopoles
-        if let Some(after) = section_after(mbis_text, "MBIS ATOMIC OCTUPOLE MOMENT (A.U.):") {
-            if let Some(mut rows) = parse_table_rows(after, |t| {
+        if let Some(after) = section_after(mbis_text, "MBIS ATOMIC OCTUPOLE MOMENT (A.U.):")
+            && let Some(mut rows) = parse_table_rows(after, |t| {
                 t.starts_with("ATOM")
                     && t.contains("XXX")
                     && t.contains("YYY")
@@ -270,40 +270,40 @@ impl ChargesOutput {
                     && t.contains("XZZ")
                     && t.contains("YYZ")
                     && t.contains("YZZ")
-            }) {
-                for line in rows.by_ref() {
-                    let t = line.trim();
-                    if t.is_empty() {
-                        break;
-                    }
-                    // "0 O xxx yyy zzz xxy xxz xyy xyz xzz yyz yzz"
-                    let parts: Vec<_> = t.split_whitespace().collect();
-                    if parts.len() < 12 {
-                        continue;
-                    }
-                    let xxx = parse_f64(parts[2])?;
-                    let yyy = parse_f64(parts[3])?;
-                    let zzz = parse_f64(parts[4])?;
-                    let xxy = parse_f64(parts[5])?;
-                    let xxz = parse_f64(parts[6])?;
-                    let xyy = parse_f64(parts[7])?;
-                    let xyz = parse_f64(parts[8])?;
-                    let xzz = parse_f64(parts[9])?;
-                    let yyz = parse_f64(parts[10])?;
-                    let yzz = parse_f64(parts[11])?;
-                    octopole.push(Octopole {
-                        xxx,
-                        yyy,
-                        zzz,
-                        xxy,
-                        xxz,
-                        xyy,
-                        xyz,
-                        xzz,
-                        yyz,
-                        yzz,
-                    });
+            })
+        {
+            for line in rows.by_ref() {
+                let t = line.trim();
+                if t.is_empty() {
+                    break;
                 }
+                // "0 O xxx yyy zzz xxy xxz xyy xyz xzz yyz yzz"
+                let parts: Vec<_> = t.split_whitespace().collect();
+                if parts.len() < 12 {
+                    continue;
+                }
+                let xxx = parse_f64(parts[2])?;
+                let yyy = parse_f64(parts[3])?;
+                let zzz = parse_f64(parts[4])?;
+                let xxy = parse_f64(parts[5])?;
+                let xxz = parse_f64(parts[6])?;
+                let xyy = parse_f64(parts[7])?;
+                let xyz = parse_f64(parts[8])?;
+                let xzz = parse_f64(parts[9])?;
+                let yyz = parse_f64(parts[10])?;
+                let yzz = parse_f64(parts[11])?;
+                octopole.push(Octopole {
+                    xxx,
+                    yyy,
+                    zzz,
+                    xxy,
+                    xxz,
+                    xyy,
+                    xyz,
+                    xzz,
+                    yyz,
+                    yzz,
+                });
             }
         }
 
