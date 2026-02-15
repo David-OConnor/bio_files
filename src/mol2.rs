@@ -7,7 +7,7 @@ use std::{
     fmt, fs,
     fs::File,
     io,
-    io::{ErrorKind, Write},
+    io::{ErrorKind, Write, BufWriter},
     path::Path,
     str::FromStr,
 };
@@ -450,17 +450,14 @@ impl Mol2 {
         })
     }
 
-    pub fn save(&self, path: &Path) -> io::Result<()> {
-        //todo: Fix this so it outputs mol2 instead of sdf.
-        let mut file = File::create(path)?;
-
+    pub fn write_to(&self, w: &mut impl Write) -> io::Result<()> {
         // There is a subtlety here. Add that to your parser as well. There are two values
-        // todo in the files we have; this top ident is not the DB id.
-        writeln!(file, "@<TRIPOS>MOLECULE")?;
-        writeln!(file, "{}", self.ident)?;
-        writeln!(file, "{} {}", self.atoms.len(), self.bonds.len())?;
-        writeln!(file, "{}", self.mol_type.to_str())?;
-        writeln!(file, "{}", self.charge_type)?;
+        // todo in the ws we have; this top ident is not the DB id.
+        writeln!(w, "@<TRIPOS>MOLECULE")?;
+        writeln!(w, "{}", self.ident)?;
+        writeln!(w, "{} {}", self.atoms.len(), self.bonds.len())?;
+        writeln!(w, "{}", self.mol_type.to_str())?;
+        writeln!(w, "{}", self.charge_type)?;
 
         // //  todo: Multi-line comments are supported by Mol2
         // let comment = match &self.comment {
@@ -469,13 +466,13 @@ impl Mol2 {
         // };
 
         // **** Means a non-optional field is empty.
-        // writeln!(file, "{comment}")?;
+        // writeln!(w, "{comment}")?;
         // Optional line (comments, molecule weight, etc.)
 
-        writeln!(file)?;
-        writeln!(file)?;
+        writeln!(w)?;
+        writeln!(w)?;
 
-        writeln!(file, "@<TRIPOS>ATOM")?;
+        writeln!(w, "@<TRIPOS>ATOM")?;
         for atom in &self.atoms {
             let type_in_res = match &atom.type_in_res {
                 Some(n) => n.to_string(),
@@ -493,7 +490,7 @@ impl Mol2 {
             // for res in &self.
 
             writeln!(
-                file,
+                w,
                 "{:>7} {:<8} {:>10.4} {:>10.4} {:>10.4} {:<6} {:>5} {:<8} {:>9.6}",
                 atom.serial_number,
                 type_in_res,
@@ -507,11 +504,11 @@ impl Mol2 {
             )?;
         }
 
-        writeln!(file, "@<TRIPOS>BOND")?;
+        writeln!(w, "@<TRIPOS>BOND")?;
 
         for (i, bond) in self.bonds.iter().enumerate() {
             writeln!(
-                file,
+                w,
                 "{:>6}{:>6}{:>6} {:<3}",
                 i + 1,
                 bond.atom_0_sn,
@@ -521,18 +518,25 @@ impl Mol2 {
         }
 
         if !self.pharmacophore_features.is_empty() {
-            writeln!(file, "{PHARMACOPHORE_TAG}")?;
+            writeln!(w, "{PHARMACOPHORE_TAG}")?;
             let v = format_pharmacophore_features(&self.pharmacophore_features);
-            write!(file, "{v}")?;
+            write!(w, "{v}")?;
         }
 
         // Unofficial way of writing metadata
         for (k, v) in &self.metadata {
-            writeln!(file, "\n@{k}")?;
-            writeln!(file, "{v}")?;
+            writeln!(w, "\n@{k}")?;
+            writeln!(w, "{v}")?;
         }
 
         Ok(())
+    }
+
+    pub fn save(&self, path: &Path) -> io::Result<()> {
+        //todo: Fix this so it outputs mol2 instead of sdf.
+        let file = File::create(path)?;
+        let mut w = BufWriter::new(file);
+       self.write_to(&mut w)
     }
 
     pub fn load(path: &Path) -> io::Result<Self> {
