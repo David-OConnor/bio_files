@@ -1,16 +1,23 @@
 [package]
 name = "bio_files"
-version = "0.4.6"
+version = "0.4.7"
 edition = "2024"
 authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Save and load common biology file formats"
 keywords = ["mol2", "sdf", "molecule", "biology"]
 categories = [
     "science",
+    #
     "science::bioinformatics",
     "science::bioinformatics::genomics",
     "science::bioinformatics::proteomics",
     "science::bioinformatics::sequence-analysis",
+    #
+    "science::computational-biology",
+    "science::computational-biology::structural-modeling",
+    #
+    "science::computational-chemistry",
+    "science::computational-chemistry::cheminformatics",
 ]
 repository = "https://github.com/David-OConnor/bio_files"
 documentation = "https://docs.rs/bio_files"
