@@ -6,17 +6,10 @@ authors = ["David O'Connor <the_alchemist@fastmail.com>"]
 description = "Save and load common biology file formats"
 keywords = ["mol2", "sdf", "molecule", "biology"]
 categories = [
-    "science",
-    #
-    "science::bioinformatics",
     "science::bioinformatics::genomics",
     "science::bioinformatics::proteomics",
     "science::bioinformatics::sequence-analysis",
-    #
-    "science::computational-biology",
     "science::computational-biology::structural-modeling",
-    #
-    "science::computational-chemistry",
     "science::computational-chemistry::cheminformatics",
 ]
 repository = "https://github.com/David-OConnor/bio_files"
