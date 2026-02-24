@@ -7,7 +7,7 @@ use std::{
     fmt, fs,
     fs::File,
     io,
-    io::{ErrorKind, Write, BufWriter},
+    io::{BufWriter, ErrorKind, Write},
     path::Path,
     str::FromStr,
 };
@@ -183,6 +183,7 @@ impl Mol2 {
         let mut in_bond_pharmacophore_section = false;
         let mut metadata = HashMap::new();
         let mut pending_metadata_key: Option<String> = None;
+        let mut pending_metadata_lines: Vec<String> = Vec::new();
 
         for line in &lines {
             if line.trim().is_empty() {
@@ -194,7 +195,10 @@ impl Mol2 {
                 in_atom_section = true;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = false;
-                pending_metadata_key = None;
+                if let Some(key) = pending_metadata_key.take() {
+                    metadata.insert(key, pending_metadata_lines.join("\n"));
+                    pending_metadata_lines.clear();
+                }
                 continue;
             }
 
@@ -202,7 +206,10 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = true;
                 in_bond_pharmacophore_section = false;
-                pending_metadata_key = None;
+                if let Some(key) = pending_metadata_key.take() {
+                    metadata.insert(key, pending_metadata_lines.join("\n"));
+                    pending_metadata_lines.clear();
+                }
                 continue;
             }
 
@@ -214,7 +221,10 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = false;
-                pending_metadata_key = None;
+                if let Some(key) = pending_metadata_key.take() {
+                    metadata.insert(key, pending_metadata_lines.join("\n"));
+                    pending_metadata_lines.clear();
+                }
                 continue;
             }
 
@@ -234,7 +244,10 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = true;
-                pending_metadata_key = None;
+                if let Some(key) = pending_metadata_key.take() {
+                    metadata.insert(key, pending_metadata_lines.join("\n"));
+                    pending_metadata_lines.clear();
+                }
                 continue;
             }
 
@@ -243,12 +256,16 @@ impl Mol2 {
                 in_atom_section = false;
                 in_bond_section = false;
                 in_bond_pharmacophore_section = false;
-                pending_metadata_key = Some(line.trim_start_matches('@').to_owned());
+                if let Some(key) = pending_metadata_key.take() {
+                    metadata.insert(key, pending_metadata_lines.join("\n"));
+                    pending_metadata_lines.clear();
+                }
+                pending_metadata_key = Some(line.trim_start_matches('@').trim().to_owned());
                 continue;
             }
 
-            if let Some(key) = pending_metadata_key.take() {
-                metadata.insert(key, line.to_string());
+            if pending_metadata_key.is_some() {
+                pending_metadata_lines.push(line.to_string());
                 continue;
             }
 
@@ -420,6 +437,11 @@ impl Mol2 {
             }
         }
 
+        // Flush any trailing custom metadata section.
+        if let Some(key) = pending_metadata_key.take() {
+            metadata.insert(key, pending_metadata_lines.join("\n"));
+        }
+
         // Note: This may not be the identifier we think of.
         let ident = lines[1].to_owned();
         let mol_type = MolType::from_str(lines[3])?;
@@ -536,7 +558,7 @@ impl Mol2 {
         //todo: Fix this so it outputs mol2 instead of sdf.
         let file = File::create(path)?;
         let mut w = BufWriter::new(file);
-       self.write_to(&mut w)
+        self.write_to(&mut w)
     }
 
     pub fn load(path: &Path) -> io::Result<Self> {

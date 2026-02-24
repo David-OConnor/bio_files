@@ -18,9 +18,11 @@ enum LoopKind {
     SheetRange,
 }
 
-pub fn _load_ss<R: Read + Seek>(mut data: R) -> io::Result<Vec<BackboneSS>> {
-    data.seek(SeekFrom::Start(0))?;
-    let rdr = BufReader::new(data);
+// pub fn load_ss<R: Read + Seek>(mut data: R) -> io::Result<Vec<BackboneSS>> {
+// pub fn load_ss<R: Read + Seek>(text: &str) -> io::Result<Vec<BackboneSS>> {
+pub fn load_ss(text: &str) -> io::Result<Vec<BackboneSS>> {
+    // data.seek(SeekFrom::Start(0))?;
+    // let rdr = BufReader::new(data);
 
     // Caches
     let mut ca_xyz: HashMap<(String, i32), u32> = HashMap::new();
@@ -33,8 +35,9 @@ pub fn _load_ss<R: Read + Seek>(mut data: R) -> io::Result<Vec<BackboneSS>> {
     // atom-site column indices (filled on first row)
     let mut a_idx = (None, None, None, None, None, None, None); // asym, seq, atom, x,y,z, id
 
-    for line in rdr.lines() {
-        let line = line?;
+    let lines: Vec<&str> = text.lines().collect();
+    for line in lines {
+        // let line = line?;
         let t = line.trim();
         if t.is_empty() {
             continue;
