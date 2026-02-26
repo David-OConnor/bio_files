@@ -188,7 +188,7 @@ peptide = MmCif.load_rcsb("8S6P")
 Small molecule save and load, Rust.
 
 ```rust
-use bio_files::{Sdf, Mol2};
+use bio_files::{Sdf, SdfFormat, Mol2};
 
 // ...
 let sdf_data = Sdf::load(Path::new("./molecules/DB03496.sdf")) ?;
@@ -196,7 +196,7 @@ let sdf_data = Sdf::load(Path::new("./molecules/DB03496.sdf")) ?;
 sdf_data.atoms[0]; // (as above)
 sdf_data.atoms[0].posit;  // (as above, but lin_alg::Vec3))
 
-sdf_data.save(Path::new("test.sdf")) ?;
+sdf_data.save(Path::new("test.sdf"), SdfFormat::V2000) ?;
 
 let mol2_data: Mol2 = sdf_data.into();
 mol2_data.save(Path::new("test.mol2")) ?;

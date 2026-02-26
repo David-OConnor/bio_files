@@ -34,6 +34,16 @@ pub struct Sdf {
     pub pharmacophore_features: Vec<PharmacophoreFeatureGeneric>,
 }
 
+/// https://en.wikipedia.org/wiki/Chemical_table_file
+#[derive(Clone, Copy, Debug, Default)]
+pub enum SdfFormat {
+    #[default]
+    /// Example: DrugBank, PubChem
+    V2000,
+    /// Example: Chemdraw
+    V3000,
+}
+
 /// Workaround for some SDFs we've seen on PubChem. Applies to both counts, and bond
 /// rows. This variant is safer for the atom count where atom and bond counts are likely
 /// to have the same number of digits; things are trickier with bonds.
@@ -123,8 +133,424 @@ fn split_bond_indices_line(
     }
 }
 
+/// Parse V2000 atom and bond blocks. Returns `(atoms, bonds, last_bond_line)`.
+/// `last_bond_line` is used as a fallback start index for metadata if `M  END` is absent.
+fn parse_v2000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGeneric>, usize)> {
+    let counts_line = lines[3];
+    let counts_cols: Vec<&str> = counts_line.split_whitespace().collect();
+
+    if counts_cols.len() < 2 {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "Counts line doesn't have enough fields",
+        ));
+    }
+
+    let mut n_atoms = counts_cols[0]
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms"))?;
+
+    let mut n_bonds = counts_cols[1]
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds"))?;
+
+    let first_atom_line = 4;
+    let mut last_atom_line = first_atom_line + n_atoms;
+    let mut first_bond_line = last_atom_line;
+    let mut last_bond_line = first_bond_line + n_bonds;
+
+    if lines.len() < last_atom_line {
+        // We have observed that sometimes the space between atom and bond counts is omitted,
+        // from PubChem molecules that have triple-digit counts, so we will assume that here.
+        let atom_bond_count = counts_cols[0];
+
+        // If atom 0 is 3 digits, there is no space in these cases. So could be 4-6 total len.
+        if atom_bond_count.len() >= 4 {
+            (n_atoms, n_bonds) = split_atom_bond_count_col(atom_bond_count, 3)?;
+            // Note: We have observed cases where we need to split at atom 2, i.e. if
+            // the count is 5 digits long. So it will still fail if the space is ommitted.
+
+            last_atom_line = first_atom_line + n_atoms;
+            first_bond_line = last_atom_line;
+            last_bond_line = first_bond_line + n_bonds;
+
+            if lines.len() < last_atom_line {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "Not enough lines for the declared atom block (after 3/3 split.) \
+                        Lines: {}, expected: {} atoms",
+                        lines.len(),
+                        last_atom_line - 4
+                    ),
+                ));
+            }
+        } else {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "Not enough lines for the declared atom block",
+            ));
+        }
+    }
+
+    let mut atoms = Vec::with_capacity(n_atoms);
+
+    #[allow(clippy::needless_range_loop)]
+    for i in first_atom_line..last_atom_line {
+        let line = lines[i];
+        let cols: Vec<&str> = line.split_whitespace().collect();
+
+        if cols.len() < 4 {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Atom line {i} does not have enough columns"),
+            ));
+        }
+
+        let x = cols[0]
+            .parse::<f64>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate"))?;
+        let y = cols[1]
+            .parse::<f64>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse Y coordinate"))?;
+        let z = cols[2]
+            .parse::<f64>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate"))?;
+        let element = cols[3];
+
+        atoms.push(AtomGeneric {
+            // SDF doesn't explicitly include incices.
+            serial_number: (i - first_atom_line) as u32 + 1,
+            posit: Vec3 { x, y, z }, // or however you store coordinates
+            element: Element::from_letter(element)?,
+            hetero: true,
+            ..Default::default()
+        });
+    }
+
+    let mut bonds = Vec::with_capacity(n_bonds);
+    for i in first_bond_line..last_bond_line {
+        let line = lines[i];
+        let cols: Vec<&str> = line.split_whitespace().collect();
+
+        if cols.len() < 3 {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("Bond line {i} does not have enough columns"),
+            ));
+        }
+
+        let mut atom_0_sn = cols[0]
+            .parse::<u32>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 0"))?;
+        let mut atom_1_sn = cols[1]
+            .parse::<u32>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1"))?;
+
+        // See note above on atom/bond counts. We observe the same thing from PubChem in some
+        // cases for the atom SNs listed in bond lines; space omitted if len of atom0 is 3.
+        let bond_type = if cols[2] == "0" {
+            let prev = if i != first_bond_line {
+                let line_p = lines[i - 1];
+                let cols_p: Vec<&str> = line_p.split_whitespace().collect();
+                Some(cols_p[0])
+            } else {
+                None
+            };
+            let next = if i != last_bond_line - 1 {
+                let line_p = lines[i + 1];
+                let cols_p: Vec<&str> = line_p.split_whitespace().collect();
+                Some(cols_p[0])
+            } else {
+                None
+            };
+
+            let (atom_0, atom_1) = split_bond_indices_line(cols[0], prev, next, atoms.len())?;
+            atom_0_sn = atom_0 as u32;
+            atom_1_sn = atom_1 as u32;
+
+            if atom_0_sn as usize > atoms.len() || atom_1_sn as usize > atoms.len() {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!(
+                        "Bond indices out of bounds, during split: {}. Atom len: {}. A0: {atom_0_sn} A1: {atom_1_sn}",
+                        cols[0],
+                        atoms.len(),
+                    ),
+                ));
+            }
+
+            BondType::from_str(cols[1])?
+        } else {
+            BondType::from_str(cols[2])?
+        };
+
+        bonds.push(BondGeneric {
+            atom_0_sn,
+            atom_1_sn,
+            bond_type,
+        })
+    }
+
+    Ok((atoms, bonds, last_bond_line))
+}
+
+/// Parse V3000 atom and bond blocks from the CTAB section.
+fn parse_v3000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGeneric>)> {
+    // Find BEGIN CTAB
+    let ctab_begin = lines
+        .iter()
+        .position(|l| l.trim() == "M  V30 BEGIN CTAB")
+        .ok_or_else(|| {
+            io::Error::new(ErrorKind::InvalidData, "V3000: no M  V30 BEGIN CTAB found")
+        })?;
+
+    // Find COUNTS line: "M  V30 COUNTS na nb nsg n3d chiral"
+    let counts_idx = lines[ctab_begin..]
+        .iter()
+        .position(|l| {
+            let t = l.trim();
+            t.starts_with("M  V30 COUNTS") || t.starts_with("M V30 COUNTS")
+        })
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "V3000: no COUNTS line"))?
+        + ctab_begin;
+
+    let counts_cols: Vec<&str> = lines[counts_idx].split_whitespace().collect();
+    // ["M", "V30", "COUNTS", na, nb, nsg, n3d, chiral, ...]
+    if counts_cols.len() < 5 {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "V3000 COUNTS line too short",
+        ));
+    }
+    let n_atoms = counts_cols[3]
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: could not parse atom count"))?;
+    let n_bonds = counts_cols[4]
+        .parse::<usize>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: could not parse bond count"))?;
+
+    // Find ATOM block
+    let atom_begin = lines[ctab_begin..]
+        .iter()
+        .position(|l| l.trim() == "M  V30 BEGIN ATOM")
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "V3000: no BEGIN ATOM"))?
+        + ctab_begin
+        + 1; // +1: skip the BEGIN ATOM line itself
+
+    let atom_end = lines[atom_begin..]
+        .iter()
+        .position(|l| l.trim() == "M  V30 END ATOM")
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "V3000: no END ATOM"))?
+        + atom_begin;
+
+    let mut atoms = Vec::with_capacity(n_atoms);
+    for i in atom_begin..atom_end {
+        let line = lines[i];
+        // Format: "M  V30 idx elem x y z map_no [KEY=VAL ...]"
+        // After split_whitespace: ["M", "V30", idx, elem, x, y, z, map_no, ...]
+        //                           0    1      2    3     4  5  6    7
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 7 {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("V3000 atom line {i} too short (got {} cols)", cols.len()),
+            ));
+        }
+
+        let serial_number = cols[2]
+            .parse::<u32>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad atom serial number"))?;
+        let element_str = cols[3];
+        let x = cols[4]
+            .parse::<f64>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad X coordinate"))?;
+        let y = cols[5]
+            .parse::<f64>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad Y coordinate"))?;
+        let z = cols[6]
+            .parse::<f64>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad Z coordinate"))?;
+
+        atoms.push(AtomGeneric {
+            serial_number,
+            posit: Vec3 { x, y, z },
+            element: Element::from_letter(element_str)?,
+            hetero: true,
+            ..Default::default()
+        });
+    }
+
+    // Find BOND block
+    let bond_begin = lines[ctab_begin..]
+        .iter()
+        .position(|l| l.trim() == "M  V30 BEGIN BOND")
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "V3000: no BEGIN BOND"))?
+        + ctab_begin
+        + 1;
+
+    let bond_end = lines[bond_begin..]
+        .iter()
+        .position(|l| l.trim() == "M  V30 END BOND")
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "V3000: no END BOND"))?
+        + bond_begin;
+
+    let mut bonds = Vec::with_capacity(n_bonds);
+    for i in bond_begin..bond_end {
+        let line = lines[i];
+        // Format: "M  V30 idx bond_type atom1 atom2 [KEY=VAL ...]"
+        // After split_whitespace: ["M", "V30", idx, bond_type, atom1, atom2, ...]
+        //                           0    1      2       3         4      5
+        let cols: Vec<&str> = line.split_whitespace().collect();
+        if cols.len() < 6 {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                format!("V3000 bond line {i} too short (got {} cols)", cols.len()),
+            ));
+        }
+
+        let bond_type = BondType::from_str(cols[3])?;
+        let atom_0_sn = cols[4]
+            .parse::<u32>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad bond atom 0"))?;
+        let atom_1_sn = cols[5]
+            .parse::<u32>()
+            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad bond atom 1"))?;
+
+        bonds.push(BondGeneric {
+            atom_0_sn,
+            atom_1_sn,
+            bond_type,
+        });
+    }
+
+    Ok((atoms, bonds))
+}
+
+/// Parse metadata data fields (the `> <KEY>` sections after `M  END`) and apply any
+/// partial-charge fields to `atoms` in place.
+///
+/// `fallback_start` is the line index to begin scanning from if `M  END` is not found
+/// (used as a V2000 compatibility measure; pass `lines.len()` for V3000).
+fn parse_metadata_section(
+    lines: &[&str],
+    atoms: &mut Vec<AtomGeneric>,
+    fallback_start: usize,
+) -> io::Result<(HashMap<String, String>, Vec<PharmacophoreFeatureGeneric>)> {
+    let mut metadata: HashMap<String, String> = HashMap::new();
+    let mut pharmacophore_features: Vec<PharmacophoreFeatureGeneric> = Vec::new();
+
+    // Look for molecule identifiers in the data fields.
+    for (i, line) in lines.iter().enumerate() {
+        if line.contains("> <PUBCHEM_COMPOUND_CID>")
+            && let Some(value_line) = lines.get(i + 1)
+        {
+            let value = value_line.trim();
+            let _ = value.parse::<u32>(); // retain for future use
+        }
+        if line.contains("> <DATABASE_ID>")
+            && let Some(value_line) = lines.get(i + 1)
+        {
+            let value = value_line.trim();
+            let _ = (!value.is_empty()).then(|| value.to_string()); // retain for future use
+        }
+    }
+
+    let mut idx = if let Some(m_end) = lines.iter().position(|l| l.trim() == "M  END") {
+        m_end + 1
+    } else {
+        fallback_start
+    };
+
+    while idx < lines.len() {
+        let line = lines[idx].trim();
+        if line == "$$$$" {
+            break;
+        }
+        if line.starts_with('>')
+            && let (Some(l), Some(r)) = (line.find('<'), line.rfind('>'))
+            && r > l + 1
+        {
+            let key = &line[l + 1..r];
+            idx += 1;
+
+            let mut rows_pharm: Vec<&str> = Vec::new();
+            while idx < lines.len() {
+                let v = lines[idx];
+                let v_trim = v.trim_end();
+                if v_trim.is_empty() || v_trim == "$$$$" || v_trim.starts_with("> <") {
+                    break;
+                }
+                rows_pharm.push(v_trim);
+                idx += 1;
+            }
+            if key == "PUBCHEM_PHARMACOPHORE_FEATURES" {
+                match parse_pharmacophore_features(&rows_pharm) {
+                    Ok(v) => pharmacophore_features = v,
+                    Err(e) => {
+                        metadata.insert(key.to_string(), rows_pharm.join("\n"));
+                        eprintln!("Failed to parse PUBCHEM_PHARMACOPHORE_FEATURES: {e}");
+                    }
+                }
+            } else {
+                metadata.insert(key.to_string(), rows_pharm.join("\n"));
+            }
+
+            // OpenFF format.
+            if key == "atom.dprop.PartialCharge" {
+                let joined = rows_pharm.join(" ");
+                let charges: Vec<&str> = joined.split_whitespace().collect();
+
+                for (i, q) in charges.into_iter().enumerate() {
+                    if i < atoms.len() {
+                        atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
+                    }
+                }
+            }
+
+            // Pubchem format.
+            if key == "PUBCHEM_MMFF94_PARTIAL_CHARGES" {
+                if rows_pharm.is_empty() {
+                    eprintln!("No values for PUBCHEM_MMFF94_PARTIAL_CHARGES");
+                } else {
+                    let n = rows_pharm[0].trim().parse::<usize>().unwrap_or(0);
+                    if rows_pharm.len().saturating_sub(1) != n {
+                        eprintln!(
+                            "Charge count mismatch: expected {}, got {}",
+                            n,
+                            rows_pharm.len().saturating_sub(1)
+                        );
+                    }
+                    for line in rows_pharm.iter().skip(1).take(n) {
+                        let mut it = line.split_whitespace();
+                        let i1 = it.next().and_then(|s| s.parse::<usize>().ok());
+                        let q = it.next().and_then(|s| s.parse::<f32>().ok());
+
+                        if let (Some(i1), Some(q)) = (i1, q) {
+                            if (1..=atoms.len()).contains(&i1) {
+                                atoms[i1 - 1].partial_charge = Some(q); // 1-based -> 0-based
+                            } else {
+                                eprintln!(
+                                    "Atom index {} out of range (n_atoms={})",
+                                    i1,
+                                    atoms.len()
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            continue;
+        }
+        idx += 1;
+    }
+
+    Ok((metadata, pharmacophore_features))
+}
+
 impl Sdf {
-    /// From a string of an SDF text file.
+    /// From a string of an SDF text file. Automatically detects V2000 or V3000 format.
     pub fn new(text: &str) -> io::Result<Self> {
         let lines: Vec<&str> = text.lines().collect();
 
@@ -132,7 +558,8 @@ impl Sdf {
         //   1) A title or identifier
         //   2) Usually blank or comments
         //   3) Often blank or comments
-        //   4) "counts" line: e.g. " 50  50  0  ..." for V2000
+        //   4) "counts" line: e.g. " 50  50  0  ..." for V2000,
+        //      or "  0  0  0     0  0              0 V3000" for V3000
         if lines.len() < 4 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
@@ -140,231 +567,31 @@ impl Sdf {
             ));
         }
 
-        // todo: Incorporate more cols A/R.
-        // After element:
-        // Mass difference (0, unless an isotope)
-        // Charge (+1 for cation etc)
-        // Stereo, valence, other flags
-
-        // todo: Do bonds too
-        // first atom index
-        // second atom index
-        // 1 for single, 2 for double etc
-        // 0 for no stereochemistry, 1=up, 6=down etc
-        // Other properties: Bond topology, reaction center flags etc. Usually 0
-
-        // This is the "counts" line, e.g. " 50 50  0  0  0  0  0  0  0999 V2000"
-        let counts_line = lines[3];
-        let counts_cols: Vec<&str> = counts_line.split_whitespace().collect();
-
-        if counts_cols.len() < 2 {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "Counts line doesn't have enough fields",
-            ));
-        }
-
-        // Typically, the first number is the number of atoms (natoms)
-        // and the second number is the number of bonds (nbonds).
-        let mut n_atoms = counts_cols[0].parse::<usize>().map_err(|_| {
-            io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms")
-        })?;
-
-        let mut n_bonds = counts_cols[1].parse::<usize>().map_err(|_| {
-            io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds")
-        })?;
-
-        // Now read the next 'natoms' lines as the atom block.
-        // Each line usually looks like:
-        //   X Y Z Element ??? ??? ...
-        //   e.g. "    1.4386   -0.8054   -0.4963 O   0  0  0  0  0  0  0  0  0  0  0  0"
-        //
-
-        let first_atom_line = 4;
-        let mut last_atom_line = first_atom_line + n_atoms;
-        let mut first_bond_line = last_atom_line;
-        let mut last_bond_line = first_bond_line + n_bonds;
-
-        if lines.len() < last_atom_line {
-            // We have observed that sometimes the space between atom and bond counts is omitted,
-            // from PubChem molecules that have triple-digit counts, so we will assume that here.
-            let atom_bond_count = counts_cols[0];
-
-            // If atom 0 is 3 digits, there is no space in these cases. So could be 4-6 total len.
-            if atom_bond_count.len() >= 4 {
-                (n_atoms, n_bonds) = split_atom_bond_count_col(atom_bond_count, 3)?;
-                // Note: We have observed cases where we need to split at atom 2, i.e. if
-                // the count is 5 digits long. So it will still fail if the space is ommitted.
-
-                last_atom_line = first_atom_line + n_atoms;
-                first_bond_line = last_atom_line;
-                last_bond_line = first_bond_line + n_bonds;
-
-                if lines.len() < last_atom_line {
-                    return Err(io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!(
-                            "Not enough lines for the declared atom block (after 3/3 split.) \
-                        Lines: {}, expected: {} atoms",
-                            lines.len(),
-                            last_atom_line - 4
-                        ),
-                    ));
-                }
-            } else {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "Not enough lines for the declared atom block",
-                ));
-            }
-        }
-
-        let mut atoms = Vec::with_capacity(n_atoms);
-
-        let mut pharmacophore_features: Vec<PharmacophoreFeatureGeneric> = Vec::new();
-
-        #[allow(clippy::needless_range_loop)]
-        for i in first_atom_line..last_atom_line {
-            let line = lines[i];
-            let cols: Vec<&str> = line.split_whitespace().collect();
-
-            if cols.len() < 4 {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Atom line {i} does not have enough columns"),
-                ));
-            }
-
-            let x = cols[0].parse::<f64>().map_err(|_| {
-                io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate")
-            })?;
-            let y = cols[1].parse::<f64>().map_err(|_| {
-                io::Error::new(ErrorKind::InvalidData, "Could not parse Y coordinate")
-            })?;
-            let z = cols[2].parse::<f64>().map_err(|_| {
-                io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate")
-            })?;
-            let element = cols[3];
-
-            atoms.push(AtomGeneric {
-                // SDF doesn't explicitly include incices.
-                serial_number: (i - first_atom_line) as u32 + 1,
-                posit: Vec3 { x, y, z }, // or however you store coordinates
-                element: Element::from_letter(element)?,
-                hetero: true,
-                ..Default::default()
-            });
-        }
-
-        let mut bonds = Vec::with_capacity(n_bonds);
-        for i in first_bond_line..last_bond_line {
-            let line = lines[i];
-            let cols: Vec<&str> = line.split_whitespace().collect();
-
-            if cols.len() < 3 {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Bond line {i} does not have enough columns"),
-                ));
-            }
-
-            let mut atom_0_sn = cols[0].parse::<u32>().map_err(|_| {
-                io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 0")
-            })?;
-            let mut atom_1_sn = cols[1].parse::<u32>().map_err(|_| {
-                io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1")
-            })?;
-
-            // See note above on atom/bond counts. We observe the same thing from PubChem in some
-            // cases for the atom SNs listed in bond lines; space omitted if len of atom0 is 3.
-            let bond_type = if cols[2] == "0" {
-                let prev = if i != first_bond_line {
-                    let line_p = lines[i - 1];
-                    let cols_p: Vec<&str> = line_p.split_whitespace().collect();
-                    Some(cols_p[0])
-                } else {
-                    None
-                };
-                let next = if i != last_bond_line - 1 {
-                    let line_p = lines[i + 1];
-                    let cols_p: Vec<&str> = line_p.split_whitespace().collect();
-                    Some(cols_p[0])
-                } else {
-                    None
-                };
-
-                let (atom_0, atom_1) = split_bond_indices_line(cols[0], prev, next, atoms.len())?;
-                atom_0_sn = atom_0 as u32;
-                atom_1_sn = atom_1 as u32;
-
-                if atom_0_sn as usize > atoms.len() || atom_1_sn as usize > atoms.len() {
-                    return Err(io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!(
-                            "Bond indices out of bounds, during split: {}. Atom len: {}. A0: {atom_0_sn} A1: {atom_1_sn}",
-                            cols[0],
-                            atoms.len(),
-                        ),
-                    ));
-                }
-                // }
-
-                BondType::from_str(cols[1])?
-            } else {
-                BondType::from_str(cols[2])?
-            };
-
-            bonds.push(BondGeneric {
-                atom_0_sn,
-                atom_1_sn,
-                bond_type,
-            })
-        }
-
-        // Look for a molecule identifier in the file. Check for either
-        // "> <PUBCHEM_COMPOUND_CID>" or "> <DATABASE_ID>" and take the next nonempty line.
-        let mut _pubchem_cid = None;
-        let mut _drugbank_id = None;
-
-        for (i, line) in lines.iter().enumerate() {
-            if line.contains("> <PUBCHEM_COMPOUND_CID>")
-                && let Some(value_line) = lines.get(i + 1)
-            {
-                let value = value_line.trim();
-                if let Ok(v) = value.parse::<u32>() {
-                    _pubchem_cid = Some(v);
-                }
-            }
-            if line.contains("> <DATABASE_ID>")
-                && let Some(value_line) = lines.get(i + 1)
-            {
-                let value = value_line.trim();
-                if !value.is_empty() {
-                    _drugbank_id = Some(value.to_string());
-                }
-            }
-        }
-
         let ident = lines[0].trim().to_string();
-        // We observe that on at least some DrugBank files, this line
-        // is the PubChem ID, even if the PUBCHEM_COMPOUND_CID line is omitted.
-        if let Ok(v) = lines[0].parse::<u32>() {
-            _pubchem_cid = Some(v);
-        }
 
-        // We could now skip over the bond lines if we want:
-        //   let first_bond_line = last_atom_ line;
-        //   let last_bond_line = first_bond_line + nbonds;
-        // etc.
-        // Then we look for "M  END" or the data fields, etc.
+        // Detect format from the counts line (line index 3).
+        let format = if lines[3].contains("V3000") {
+            SdfFormat::V3000
+        } else {
+            SdfFormat::V2000
+        };
 
-        // For now, just return the Sdf with the atoms we parsed:
+        let (mut atoms, bonds, fallback_start) = match format {
+            SdfFormat::V2000 => parse_v2000_ctab(&lines)?,
+            SdfFormat::V3000 => {
+                let (a, b) = parse_v3000_ctab(&lines)?;
+                // For V3000, M  END is always present; pass lines.len() as an unreachable fallback.
+                (a, b, lines.len())
+            }
+        };
+
+        let (metadata, pharmacophore_features) =
+            parse_metadata_section(&lines, &mut atoms, fallback_start)?;
+
+        let atom_sns: Vec<_> = atoms.iter().map(|a| a.serial_number).collect();
 
         let mut chains = Vec::new();
         let mut residues = Vec::new();
-
-        // let atom_indices: Vec<usize> = (0..atoms.len()).collect();
-        let atom_sns: Vec<_> = atoms.iter().map(|a| a.serial_number).collect();
 
         residues.push(ResidueGeneric {
             serial_number: 0,
@@ -379,102 +606,6 @@ impl Sdf {
             atom_sns,
         });
 
-        // Load metadata. We use a separate pass for simplicity, although this is a bit slower.
-        let metadata = {
-            let mut md: HashMap<String, String> = HashMap::new();
-
-            let mut idx = if let Some(m_end) = lines.iter().position(|l| l.trim() == "M  END") {
-                m_end + 1
-            } else {
-                last_bond_line
-            };
-
-            while idx < lines.len() {
-                let line = lines[idx].trim();
-                if line == "$$$$" {
-                    break;
-                }
-                if line.starts_with('>')
-                    && let (Some(l), Some(r)) = (line.find('<'), line.rfind('>'))
-                    && r > l + 1
-                {
-                    let key = &line[l + 1..r];
-                    idx += 1;
-
-                    let mut rows_pharm: Vec<&str> = Vec::new();
-                    while idx < lines.len() {
-                        let v = lines[idx];
-                        let v_trim = v.trim_end();
-                        if v_trim.is_empty() || v_trim == "$$$$" || v_trim.starts_with("> <") {
-                            break;
-                        }
-                        rows_pharm.push(v_trim);
-                        idx += 1;
-                    }
-                    if key == "PUBCHEM_PHARMACOPHORE_FEATURES" {
-                        match parse_pharmacophore_features(&rows_pharm) {
-                            Ok(v) => pharmacophore_features = v,
-                            Err(e) => {
-                                md.insert(key.to_string(), rows_pharm.join("\n"));
-                                eprintln!("Failed to parse PUBCHEM_PHARMACOPHORE_FEATURES: {e}");
-                            }
-                        }
-                    } else {
-                        md.insert(key.to_string(), rows_pharm.join("\n"));
-                    }
-
-                    // OpenFF format.
-                    if key == "atom.dprop.PartialCharge" {
-                        let joined = rows_pharm.join(" ");
-                        let charges: Vec<&str> = joined.split_whitespace().collect();
-
-                        for (i, q) in charges.into_iter().enumerate() {
-                            if i < atoms.len() {
-                                atoms[i].partial_charge = Some(q.parse().unwrap_or(0.));
-                            }
-                        }
-                    }
-
-                    // Pubchem format.
-                    if key == "PUBCHEM_MMFF94_PARTIAL_CHARGES" {
-                        if rows_pharm.is_empty() {
-                            eprintln!("No values for PUBCHEM_MMFF94_PARTIAL_CHARGES");
-                        } else {
-                            let n = rows_pharm[0].trim().parse::<usize>().unwrap_or(0);
-                            if rows_pharm.len().saturating_sub(1) != n {
-                                eprintln!(
-                                    "Charge count mismatch: expected {}, got {}",
-                                    n,
-                                    rows_pharm.len().saturating_sub(1)
-                                );
-                            }
-                            for line in rows_pharm.iter().skip(1).take(n) {
-                                let mut it = line.split_whitespace();
-                                let i1 = it.next().and_then(|s| s.parse::<usize>().ok());
-                                let q = it.next().and_then(|s| s.parse::<f32>().ok());
-
-                                if let (Some(i1), Some(q)) = (i1, q) {
-                                    if (1..=atoms.len()).contains(&i1) {
-                                        atoms[i1 - 1].partial_charge = Some(q); // 1-based -> 0-based
-                                    } else {
-                                        eprintln!(
-                                            "Atom index {} out of range (n_atoms={})",
-                                            i1,
-                                            atoms.len()
-                                        );
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    continue;
-                }
-                idx += 1;
-            }
-            md
-        };
-
         Ok(Self {
             ident,
             metadata,
@@ -486,97 +617,119 @@ impl Sdf {
         })
     }
 
-    pub fn save(&self, path: &Path) -> io::Result<()> {
+    pub fn save(&self, path: &Path, format: SdfFormat) -> io::Result<()> {
         let mut file = File::create(path)?;
 
         // 1) Title line (often the first line in SDF).
-        //    We use the molecule's name/identifier here:
-        // todo: There is a subtlety here. Add that to your parser as well. There are two values
-        // todo in the files we have; this top ident is not the DB id.
         writeln!(file, "{}", self.ident)?;
 
-        // 2) Write two blank lines:
+        // 2) Two blank lines (program/timestamp and comment lines).
         writeln!(file)?;
         writeln!(file)?;
 
         let natoms = self.atoms.len();
         let nbonds = self.bonds.len();
 
-        // Format the counts line. We loosely mimic typical spacing,
-        // though it's not strictly required to line up exactly.
-        let w = natoms.max(nbonds).to_string().len().max(3) + 1; // +1 keeps a guaranteed gap between the two fields
+        match format {
+            SdfFormat::V2000 => {
+                // Counts line with V2000 stamp.
+                // Format the counts line. We loosely mimic typical spacing,
+                // though it's not strictly required to line up exactly.
+                let w = natoms.max(nbonds).to_string().len().max(3) + 1; // +1 keeps a guaranteed gap between the two fields
 
-        writeln!(
-            file,
-            "{:>w$}{:>w$}  0  0  0  0           0999 V2000",
-            natoms,
-            nbonds,
-            w = w,
-        )?;
+                writeln!(
+                    file,
+                    "{:>w$}{:>w$}  0  0  0  0           0999 V2000",
+                    natoms,
+                    nbonds,
+                    w = w,
+                )?;
 
-        for atom in &self.atoms {
-            let x = atom.posit.x;
-            let y = atom.posit.y;
-            let z = atom.posit.z;
-            let symbol = atom.element.to_letter();
+                for atom in &self.atoms {
+                    let x = atom.posit.x;
+                    let y = atom.posit.y;
+                    let z = atom.posit.z;
+                    let symbol = atom.element.to_letter();
 
-            // MDL v2000 format often uses fixed-width fields,
-            // but for simplicity we use whitespace separation:
-            writeln!(
-                file,
-                "{:>10.4}{:>10.4}{:>10.4} {:<2}  0  0  0  0  0  0  0  0  0  0",
-                x, y, z, symbol
-            )?;
+                    writeln!(
+                        file,
+                        "{:>10.4}{:>10.4}{:>10.4} {:<2}  0  0  0  0  0  0  0  0  0  0",
+                        x, y, z, symbol
+                    )?;
+                }
+
+                // For formatting the bond atom SNs correctly
+                let max_sn = self
+                    .bonds
+                    .iter()
+                    .flat_map(|b| [b.atom_0_sn, b.atom_1_sn])
+                    .max()
+                    .unwrap_or(0);
+
+                let w = max_sn.to_string().len().max(3) + 1; // +1 ensures a gap even at max width
+
+                for bond in &self.bonds {
+                    writeln!(
+                        file,
+                        "{:>w$}{:>w$}{:>3}  0  0  0  0",
+                        bond.atom_0_sn,
+                        bond.atom_1_sn,
+                        bond.bond_type.to_str_sdf(),
+                        w = w,
+                    )?;
+                }
+
+                writeln!(file, "M  END")?;
+            }
+
+            SdfFormat::V3000 => {
+                // V2000-compatibility counts line with V3000 stamp.
+                // Counts are always 0 0 0 ... for V3000; atoms/bonds are in the CTAB block.
+                writeln!(file, "  0  0  0     0  0              0 V3000")?;
+
+                writeln!(file, "M  V30 BEGIN CTAB")?;
+                writeln!(file, "M  V30 COUNTS {} {} 0 0 0", natoms, nbonds)?;
+
+                writeln!(file, "M  V30 BEGIN ATOM")?;
+                for (i, atom) in self.atoms.iter().enumerate() {
+                    // Format: "M  V30 idx elem x y z map_no"
+                    writeln!(
+                        file,
+                        "M  V30 {} {} {:.6} {:.6} {:.6} 0",
+                        i + 1,
+                        atom.element.to_letter(),
+                        atom.posit.x,
+                        atom.posit.y,
+                        atom.posit.z,
+                    )?;
+                }
+                writeln!(file, "M  V30 END ATOM")?;
+
+                writeln!(file, "M  V30 BEGIN BOND")?;
+                for (i, bond) in self.bonds.iter().enumerate() {
+                    // Format: "M  V30 idx bond_type atom1 atom2"
+                    writeln!(
+                        file,
+                        "M  V30 {} {} {} {}",
+                        i + 1,
+                        bond.bond_type.to_str_sdf(),
+                        bond.atom_0_sn,
+                        bond.atom_1_sn,
+                    )?;
+                }
+                writeln!(file, "M  V30 END BOND")?;
+
+                writeln!(file, "M  V30 END CTAB")?;
+                writeln!(file, "M  END")?;
+            }
         }
 
-        // For formatting the bond atom SNs correctly
-        let max_sn = self
-            .bonds
-            .iter()
-            .flat_map(|b| [b.atom_0_sn, b.atom_1_sn])
-            .max()
-            .unwrap_or(0);
-
-        let w = max_sn.to_string().len().max(3) + 1; // +1 ensures a gap even at max width
-
-        for bond in &self.bonds {
-            writeln!(
-                file,
-                "{:>w$}{:>w$}{:>3}  0  0  0  0",
-                bond.atom_0_sn,
-                bond.atom_1_sn,
-                bond.bond_type.to_str_sdf(),
-                w = w,
-            )?;
-        }
-
-        writeln!(file, "M  END")?;
-
+        // Metadata data fields are format-agnostic — they follow M  END in both V2000 and V3000.
         for m in &self.metadata {
             write_metadata(m.0, m.1, &mut file)?;
         }
 
         // If partial charges are available, write them to metadata. This is an OpenFF convention.
-        // todo: Should we use the Pubhcem format instead? e.g.
-        // > <PUBCHEM_MMFF94_PARTIAL_CHARGES>
-        // 16
-        // 1 -0.53
-        // 10 0.63
-        // 11 0.15
-        // 12 0.15
-        // 13 0.15
-        // 14 0.15
-        // 15 0.45
-        // 16 0.5
-        // 2 -0.65
-        // 3 -0.57
-        // 4 0.09
-        // 5 -0.15
-        // 6 -0.15
-        // 7 0.08
-        // 8 -0.15
-        // 9 -0.15
-
         let mut partial_charges = Vec::new();
         let mut all_partial_charges_present = true;
         for atom in &self.atoms {
@@ -589,7 +742,6 @@ impl Sdf {
             }
         }
 
-        // Pubchem format.
         if all_partial_charges_present {
             let charges_formated: Vec<_> =
                 partial_charges.iter().map(|q| format!("{q:.8}")).collect();
