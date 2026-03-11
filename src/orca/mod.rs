@@ -164,6 +164,7 @@ pub enum Task {
     #[default]
     SinglePoint,
     GeometryOptimization((GeomOptThresh, Option<Geom>)),
+    // todo: Support RESP charges too. May just involve "RESP" instead of "MBIS".
     /// Minimal Basis Iterative Stockholder. Can be used for force field parameterization.
     /// [Charge tutorial](https://www.faccts.de/docs/orca/5.0/tutorials/prop/charges.html)
     /// [MBIS Charges](https://www.faccts.de/docs/orca/6.1/manual/contents/spectroscopyproperties/population.html?q=mbis&n=0#mbis-charges)
