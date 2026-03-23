@@ -15,6 +15,7 @@ pub mod map;
 
 pub mod dat;
 pub mod frcmod;
+pub mod gromacs;
 pub mod md_params;
 pub mod orca;
 
