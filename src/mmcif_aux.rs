@@ -1,9 +1,6 @@
 //! Parses secondary structure from mmCIF files.
 
-use std::{
-    collections::HashMap,
-    io::{self, BufRead},
-};
+use std::{collections::HashMap, io};
 
 use crate::{BackboneSS, SecondaryStructure};
 

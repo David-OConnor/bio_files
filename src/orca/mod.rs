@@ -59,7 +59,7 @@ use crate::{
 };
 
 // Used for creating intermediate files
-const TEMP_DIR = "orca_temp";
+const TEMP_DIR: &str = "orca_temp";
 
 /// A helper. The &str and String use reflects how we use this in practie,
 /// e.g. with &str literals vs format!().
@@ -433,7 +433,7 @@ impl OrcaInput {
         fs::create_dir_all(dir)?;
 
         let inp_fname = "temp_orca_input.inp";
-        let inp_path = dir.join(Path::new(file_name));
+        let inp_path = dir.join(Path::new(inp_fname));
         self.save(&inp_path)?;
 
         let cmd_out = match Command::new("orca")

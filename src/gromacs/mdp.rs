@@ -1,10 +1,10 @@
-//! GROMACS MDP (Molecular Dynamics Parameters) file types and generation.
+//! GROMACS MDP (Molecular Dynamics Parameters) file types and generation. This is responsible
+//! for general MD configuration.
 //!
 //! See the [GROMACS manual — MDP options](https://manual.gromacs.org/current/user-guide/mdp-options.html).
 //! [Example MDP file](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#mdp)
 //!
-//! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults —
-//! the same philosophy used by the ORCA module's `Option` fields.
+//! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults.
 
 use std::fmt;
 
@@ -47,21 +47,23 @@ impl fmt::Display for Integrator {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Thermostat {
     No,
-    Berendsen,
+    /// Nosé–Hoover; canonical ensemble.
+    NoseHoover,
+    Andersen,
+    AndersenMassive,
     /// Velocity-rescaling thermostat; produces the canonical ensemble.
     #[default]
     VRescale,
-    /// Nosé–Hoover; canonical ensemble.
-    NoseHoover,
 }
 
 impl Thermostat {
     pub fn keyword(self) -> &'static str {
         match self {
             Self::No => "no",
-            Self::Berendsen => "berendsen",
-            Self::VRescale => "v-rescale",
             Self::NoseHoover => "nose-hoover",
+            Self::Andersen => "andersen",
+            Self::AndersenMassive => "andersen-massive",
+            Self::VRescale => "v-rescale",
         }
     }
 }
@@ -77,19 +79,26 @@ impl fmt::Display for Thermostat {
 /// [GROMACS manual: pressure-coupling](https://manual.gromacs.org/current/user-guide/mdp-options.html#pressure-coupling)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Barostat {
-    #[default]
     No,
+    /// Not recommended, by GROMACS.
     Berendsen,
+    #[default]
+    /// Exponential relaxation pressure coupling with time constant tau-p, including a stochastic term to enforce correct volume fluctuations.
+    CRescale,
     /// Parrinello–Rahman; NPT ensemble.
     ParrinelloRahman,
+    /// Martyna-Tuckerman-Tobias-Klein implementation, only useable with integrator=md-vv or integrator=md-vv-avek, very similar to Parrinello-Rahman.
+    Mtkk,
 }
 
 impl Barostat {
     pub fn keyword(self) -> &'static str {
         match self {
             Self::No => "no",
+            Self::CRescale => "C-rescale",
             Self::Berendsen => "Berendsen",
             Self::ParrinelloRahman => "Parrinello-Rahman",
+            Self::Mtkk => "MTTK",
         }
     }
 }
@@ -97,6 +106,30 @@ impl Barostat {
 impl fmt::Display for Barostat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.keyword())
+    }
+}
+
+/// Pressure-coupling algorithm.
+///
+/// [GROMACS manual: pressure-coupling](https://manual.gromacs.org/current/user-guide/mdp-options.html#pressure-coupling)
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum PressureCouplingType {
+    #[default]
+    ///  todo: What is the gromacs default?
+    Isotropic,
+    Semiisotropic,
+    Anisotropic,
+    SurfaceTension,
+}
+
+impl PressureCouplingType {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::Isotropic => "isotropic",
+            Self::Semiisotropic => "semiisotropic",
+            Self::Anisotropic => "anisotropic",
+            Self::SurfaceTension => "surface-tension",
+        }
     }
 }
 
@@ -152,9 +185,11 @@ impl fmt::Display for VdwType {
 /// Periodic boundary conditions.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Pbc {
+    /// All directions
     #[default]
     Xyz,
     No,
+    /// X and Y directions only
     Xy,
 }
 
@@ -255,14 +290,16 @@ pub struct MdpParams {
     pub tau_t: Vec<f32>,
     /// Reference temperature (K) for each coupling group.
     pub ref_t: Vec<f32>,
-
-    // --- Pressure coupling ---
-    pub barostat: Barostat,
+    pub pcoupl: Barostat,
+    pub pcoupltype: PressureCouplingType,
     /// Pressure coupling time constant (ps).
     pub tau_p: f32,
     /// Reference pressure (bar).
+    /// todo: All pcoupltype values other than isotropic require multiple ref_p values. Wrapped enum on
+    /// todo: PressureCouplingType
     pub ref_p: f32,
     /// Isothermal compressibility (bar⁻¹), e.g. `4.5e-5` for water.
+    /// todo: Same note on ref_p about pressure coupling type applies here.
     pub compressibility: f32,
 
     // --- Periodic boundary ---
@@ -279,37 +316,42 @@ pub struct MdpParams {
     // --- Constraints ---
     pub constraints: Constraints,
     pub constraint_algorithm: ConstraintAlgorithm,
+    /// Valid values are 3-12.
+    pub pme_order: u8,
 }
 
+/// We use the GROMACS defaults here.
 impl Default for MdpParams {
     fn default() -> Self {
         Self {
             integrator: Integrator::Md,
-            nsteps: 50_000,
-            dt: 0.002,
+            nsteps: 0,
+            dt: 0.001,
             nstxout: 0,
             nstvout: 0,
-            nstxout_compressed: 500,
-            nstenergy: 500,
-            nstlog: 500,
-            coulombtype: CoulombType::Pme,
+            nstxout_compressed: 0,
+            nstenergy: 1_000,
+            nstlog: 1_000,
+            coulombtype: CoulombType::default(),
             rcoulomb: 1.0,
-            vdwtype: VdwType::CutOff,
+            vdwtype: VdwType::default(),
             rvdw: 1.0,
             fourierspacing: None,
-            thermostat: Thermostat::VRescale,
-            tau_t: vec![0.1],
-            ref_t: vec![310.],
-            barostat: Barostat::No,
-            tau_p: 2.0,
+            thermostat: Thermostat::default(),
+            tau_t: vec![1.0], // todo: 0.1?
+            ref_t: vec![300.],
+            pcoupl: Barostat::default(),
+            pcoupltype: PressureCouplingType::default(),
+            tau_p: 5.0,
             ref_p: 1.0,
             compressibility: 4.5e-5,
-            pbc: Pbc::Xyz,
+            pbc: Pbc::default(),
             gen_vel: true,
-            gen_temp: 310.,
+            gen_temp: 300.,
             gen_seed: -1,
-            constraints: Constraints::HBonds,
-            constraint_algorithm: ConstraintAlgorithm::Lincs,
+            constraints: Constraints::default(),
+            constraint_algorithm: ConstraintAlgorithm::default(),
+            pme_order: 4,
         }
     }
 }
@@ -364,12 +406,14 @@ impl MdpParams {
         if self.thermostat != Thermostat::No {
             let n = self.ref_t.len().max(1);
             let tc_grps = (0..n).map(|_| "System").collect::<Vec<_>>().join(" ");
+
             let tau_t = self
                 .tau_t
                 .iter()
                 .map(|v| format!("{v}"))
                 .collect::<Vec<_>>()
                 .join(" ");
+
             let ref_t = self
                 .ref_t
                 .iter()
@@ -385,9 +429,15 @@ impl MdpParams {
         s.push_str("\n; Pressure coupling\n");
         s.push_str(&format!(
             "pcoupl                  = {}\n",
-            self.barostat.keyword()
+            self.pcoupl.keyword()
         ));
-        if self.barostat != Barostat::No {
+
+        if self.pcoupl != Barostat::No {
+            // todo: QC pcoupltype.
+            s.push_str(&format!(
+                "pcoupltype              = {}\n",
+                self.pcoupltype.keyword()
+            ));
             s.push_str(&format!("tau-p                   = {}\n", self.tau_p));
             s.push_str(&format!("ref-p                   = {}\n", self.ref_p));
             s.push_str(&format!(
@@ -420,12 +470,15 @@ impl MdpParams {
             "constraints             = {}\n",
             self.constraints.keyword()
         ));
+
         if self.constraints != Constraints::None {
             s.push_str(&format!(
                 "constraint-algorithm    = {}\n",
                 self.constraint_algorithm.keyword()
             ));
         }
+
+        s.push_str(&format!("pme-order               = {}\n", self.pme_order));
 
         s
     }
