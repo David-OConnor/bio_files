@@ -28,7 +28,8 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - Amber .lib files, e.g. with charge data for amino acids and proteins.
 - GRO (Gromacs molecules)
 - TOP (Gromacs topology) - WIP
-- ORCA Input and output files (quantum chemistry; HF, DFT etc)
+- ORCA input and output files (quantum chemistry; HF, DFT etc)
+- GROMACS files (.mdp, .gro, .top)
 - XYZ (Minimal atom coordinate format)
 - DCD (MD trajectories)
 - XTC: If [MDTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories)
@@ -72,21 +73,22 @@ add optimizations downstream, like converting to indices, and/or applying back-r
 residue
 an atom's in, in your derived Atom struct).
 
-## Orca interface
 
-This library provides an interface to building Orca inputs, executing commands, and parsing
-outputs. It uses Rust data structures to contrain input choices into valid ones when possible, and allows you to
-integrate Orca into Rust programs and libraries. For example,
-[ChemForma](https://github.com/david-oconnorChemForma) uses it to minimize energy on organic
-molecules, and augment traditional MD technique with quantum mechanics.
+## ORCA interface
 
-ORCA support in this library is limited to Rust only. If you wish to use Orca with Python,
-use [OPI, the official FACCTS library](https://github.com/faccts/opi).
+This library provides an interface to build Orca inputs, execute commands, and parse outputs. It uses Rust data structures to contrain input choices into valid ones when possible, and allows you to integrate Orca into Rust programs and libraries. For example, [Molchanica](https://github.com/david-oconnor/molchanica) uses it to minimize energy on organic molecules, and augment traditional MD technique with quantum mechanics.
 
-Note: Orca support is currently limited to a subset of features. We plan to gradually expand this.
-If you're looking for specific functionality, please open an Issue or PR on Github.
+ORCA support in this library is limited to Rust only. If you wish to use Orca with Python, use [OPI, the official FACCTS library](https://github.com/faccts/opi).
+
+Note: Orca support is currently limited to a subset of features. We plan to gradually expand this. If you're looking for specific functionality, please open an Issue or PR on Github.
 
 Can generate and run [ORCA](https://www.faccts.de/orca/) commands, and parse the result. Example:
+
+
+## GROMACS interface
+
+This library provides an interface to build GROMACS inputs, run MD, and parse outputs. This is similar conceptually to the ORCA interface.
+
 
 ## Loading building-block molecules from templates
 

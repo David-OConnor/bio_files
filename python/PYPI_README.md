@@ -28,7 +28,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 
 ### Planned:
 
-- MTZ (Exists in ChemForma; needs to be decoupled)
+- MTZ (Exists in Molchanica; needs to be decoupled)
 - DNA (Exists in PlasCAD; needs to be decoupled)
 
 ## Generic data types

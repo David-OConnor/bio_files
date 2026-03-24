@@ -1,5 +1,9 @@
 //! Interop with [GROMACS](https://www.gromacs.org/) molecular dynamics software.
 //! [GROMACS User guide](https://manual.gromacs.org/current/user-guide/index.html)
+//! [GROMACS reference Manual](https://manual.gromacs.org/2026.1/reference-manual/index.html)
+//! [GROMACS manual on Zenodo](https://zenodo.org/records/18886967)
+//!
+//! ## Overview
 //!
 //! This module constructs GROMACS input files (`.mdp`, `.gro`, `.top`), runs
 //! the simulation via the `gmx` command-line tool, and parses the resulting
@@ -35,12 +39,16 @@ use std::{
     path::Path,
     process::Command,
 };
+use std::{io::Write as _, process::Stdio};
 
 pub use mdp::MdpParams;
 pub use output::{GromacsFrame, GromacsOutput};
 pub use topology::MoleculeTopology;
 
 use crate::{AtomGeneric, BondGeneric, md_params::ForceFieldParams};
+
+// Used for creating intermediate files
+const TEMP_DIR = "gromacs_temp";
 
 /// One molecule entry passed to a [`GromacsInput`].
 ///
@@ -98,6 +106,7 @@ impl GromacsInput {
     }
 
     /// Generate a GROMACS `.gro` structure file from all molecule atoms.
+    /// [Example format](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#gro)
     ///
     /// Positions are converted from Å (internal) to nm (GROMACS).
     pub fn make_gro(&self) -> String {
@@ -193,12 +202,14 @@ impl GromacsInput {
     /// 5. Parse and return [`GromacsOutput`].
     /// 6. Remove the temporary directory.
     pub fn run(&self) -> io::Result<GromacsOutput> {
-        let dir = Path::new("gromacs_temp");
+        let dir = Path::new(TEMP_DIR);
         self.save_input_files(dir)?;
 
-        // grompp: Preprocessor
+        // grompp: Preprocessor. Creates a [binary] TPR file.
+        // [Data on TPR](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#tpr)
+        // This format contains everything GROMACS needs to run MD.
         run_gmx(
-            dir,
+            Some(dir),
             &[
                 "grompp",
                 "-f",
@@ -216,7 +227,7 @@ impl GromacsInput {
 
         // mdrun
         run_gmx(
-            dir,
+            Some(dir),
             &[
                 "mdrun",
                 "-s",
@@ -238,7 +249,7 @@ impl GromacsInput {
         // `-pbc mol` re-wraps molecules into the box; `-b 0` starts from t=0.
         // The echo provides the "System" group selection for the interactive prompt.
         run_gmx_stdin(
-            dir,
+            Some(dir),
             &[
                 "trjconv",
                 "-f",
@@ -280,8 +291,15 @@ fn read_text(path: impl AsRef<Path>) -> io::Result<String> {
 
 /// Run a `gmx` sub-command, returning an error if `gmx` is not found or the
 /// process exits non-zero.
-fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
-    let out = match Command::new("gmx").current_dir(dir).args(args).output() {
+fn run_gmx(dir_: Option<&Path>, args: &[&str]) -> io::Result<()> {
+    let dir = match = dir_ {
+        Some(d) => d,
+        None => &Path::new(TEMP_DIR)
+    };
+
+    let out = match Command::new("gmx").current_dir(dir)
+        .args(args)
+        .output() {
         Ok(o) => o,
         Err(e) if e.kind() == ErrorKind::NotFound => {
             return Err(io::Error::new(
@@ -301,21 +319,24 @@ fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
         )));
     }
 
+    if dir_.is_none() { // Clean up the temp dir
+        fs::remove_dir_all(dir)?;
+    }
+
     Ok(())
 }
 
 /// Like [`run_gmx`] but supplies `stdin_data` to the process (for interactive
 /// group-selection prompts such as `gmx trjconv`).
-fn run_gmx_stdin(dir: &Path, args: &[&str], stdin_data: &[u8]) -> io::Result<()> {
-    use std::{io::Write as _, process::Stdio};
+fn run_gmx_stdin(dir_: Option<&Path>, args: &[&str], stdin_data: &[u8]) -> io::Result<()> {
+    let dir = match = dir_ {
+        Some(d) => d,
+        None => &Path::new(TEMP_DIR)
+    };
 
-    let mut child = match Command::new("gmx")
-        .current_dir(dir)
+    let mut child = match Command::new("gmx").current_dir(dir)
         .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
+        .output()
     {
         Ok(c) => c,
         Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -342,5 +363,27 @@ fn run_gmx_stdin(dir: &Path, args: &[&str], stdin_data: &[u8]) -> io::Result<()>
         )));
     }
 
+    if dir_.is_none() { // Clean up the temp dir
+        fs::remove_dir_all(dir)?;
+    }
+
     Ok(())
 }
+
+// /// Convert a protein file in mmCIF or PDB format to a .gro file.
+// /// [Docs]()
+// /// Note: In software like Molchanica, we should use a wrapper with that program's
+// /// native protein type.
+// /// todo: Perhaps remove this, as PDB is obsolete, and this doesn't support mmCIF.
+// pub fn convert_protein_to_gmx(protein_file_text: &Str) -> io::Result<String> {
+//     let dir = Path::new(TEMP_DIR);
+//     fs::create_dir_all(dir)?;
+
+//     let inp_fname = "temp_gmx_protein.mmcif";
+//     let inp_path = dir.join(Path::new(file_name));
+//     self.save(&inp_path)?;
+
+//     run_gmx(Some(&dir), &["pdb2gmx", inp_fname]);
+
+//     fs::remove_dir_all(dir)?;
+// }

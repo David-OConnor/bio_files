@@ -1,6 +1,7 @@
 //! GROMACS MDP (Molecular Dynamics Parameters) file types and generation.
 //!
 //! See the [GROMACS manual — MDP options](https://manual.gromacs.org/current/user-guide/mdp-options.html).
+//! [Example MDP file](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#mdp)
 //!
 //! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults —
 //! the same philosophy used by the ORCA module's `Option` fields.

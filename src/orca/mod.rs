@@ -58,6 +58,9 @@ use crate::{
     },
 };
 
+// Used for creating intermediate files
+const TEMP_DIR = "orca_temp";
+
 /// A helper. The &str and String use reflects how we use this in practie,
 /// e.g. with &str literals vs format!().
 fn make_inp_block(block_name: &str, contents: &[(&str, String)], keywords: &[&str]) -> String {
@@ -426,16 +429,16 @@ impl OrcaInput {
     /// on the system PATH environment variable.
     /// todo: Outputs a string for now; adjust this as required into a custom output struct
     pub fn run(&self) -> io::Result<OrcaOutput> {
-        let dir = Path::new("orca_temp");
+        let dir = Path::new(TEMP_DIR);
         fs::create_dir_all(dir)?;
 
-        let file_name = "temp_orca_input.inp";
-        let path = dir.join(Path::new(file_name));
-        self.save(&path)?;
+        let inp_fname = "temp_orca_input.inp";
+        let inp_path = dir.join(Path::new(file_name));
+        self.save(&inp_path)?;
 
         let cmd_out = match Command::new("orca")
             .current_dir(dir)
-            .args([file_name])
+            .args([inp_fname])
             .output()
         {
             Ok(out) => out,

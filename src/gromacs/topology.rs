@@ -1,4 +1,6 @@
-//! GROMACS topology (`.top`) generation from Amber-format parameters.
+//! GROMACS topology (`.top`) generation from Amber-format (Or dyanmics library) parameters.
+//!
+//! [Example .top file](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#top)
 //!
 //! Produces a fully self-contained topology that does not depend on any external
 //! GROMACS force-field include files. All bonded and non-bonded parameters are
