@@ -16,7 +16,6 @@ use std::{
 
 #[cfg(feature = "encode")]
 use bincode::{Decode, Encode};
-use bio::io::fastq;
 use na_seq::{Seq, seq_from_str};
 
 const HEADER_SIZE: usize = 26;
@@ -314,59 +313,59 @@ fn parse_abi_tag(data: &[u8]) -> io::Result<(String, String)> {
     );
     Ok((tag_name, tag_number.to_string()))
 }
-
-fn abi_trim(seq_record: &fastq::Record) -> fastq::Record {
-    // Richard Mott's modified trimming algorithm.
-
-    let segment = 20; // Minimum sequence length
-    let cutoff = 0.05; // Default cutoff value for calculating base score
-
-    // If the length of the sequence is less than or equal to the segment size, return as is.
-    if seq_record.seq().len() <= segment {
-        return seq_record.clone();
-    }
-
-    // Calculate base scores from quality values.
-    let score_list: Vec<f64> = seq_record
-        .qual()
-        .iter()
-        .map(|&qual| cutoff - 10f64.powf((qual as f64) / -10.0))
-        .collect();
-
-    // Calculate cumulative score, initialize with zero.
-    let mut cumulative_scores: Vec<f64> = vec![0.0];
-    let mut trim_start = 0;
-    let mut start_flag = false;
-
-    for i in 1..score_list.len() {
-        let score = cumulative_scores[i - 1] + score_list[i];
-        if score < 0.0 {
-            cumulative_scores.push(0.0);
-        } else {
-            cumulative_scores.push(score);
-            if !start_flag {
-                // Set trim_start when cumulative score is first greater than zero
-                trim_start = i;
-                start_flag = true;
-            }
-        }
-    }
-
-    // Find the index of the highest cumulative score to mark the end of the trimming segment
-    let trim_finish = cumulative_scores
-        .iter()
-        .enumerate()
-        .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
-        .map(|(idx, _)| idx)
-        .unwrap_or(0);
-
-    // Extract the trimmed sequence
-    let trimmed_seq = &seq_record.seq()[trim_start..trim_finish];
-    let trimmed_qual = &seq_record.qual()[trim_start..trim_finish];
-
-    // Create a new trimmed record and return it
-    fastq::Record::with_attrs(seq_record.id(), None, trimmed_seq, trimmed_qual)
-}
+//
+// fn abi_trim(seq_record: &fastq::Record) -> fastq::Record {
+//     // Richard Mott's modified trimming algorithm.
+//
+//     let segment = 20; // Minimum sequence length
+//     let cutoff = 0.05; // Default cutoff value for calculating base score
+//
+//     // If the length of the sequence is less than or equal to the segment size, return as is.
+//     if seq_record.seq().len() <= segment {
+//         return seq_record.clone();
+//     }
+//
+//     // Calculate base scores from quality values.
+//     let score_list: Vec<f64> = seq_record
+//         .qual()
+//         .iter()
+//         .map(|&qual| cutoff - 10f64.powf((qual as f64) / -10.0))
+//         .collect();
+//
+//     // Calculate cumulative score, initialize with zero.
+//     let mut cumulative_scores: Vec<f64> = vec![0.0];
+//     let mut trim_start = 0;
+//     let mut start_flag = false;
+//
+//     for i in 1..score_list.len() {
+//         let score = cumulative_scores[i - 1] + score_list[i];
+//         if score < 0.0 {
+//             cumulative_scores.push(0.0);
+//         } else {
+//             cumulative_scores.push(score);
+//             if !start_flag {
+//                 // Set trim_start when cumulative score is first greater than zero
+//                 trim_start = i;
+//                 start_flag = true;
+//             }
+//         }
+//     }
+//
+//     // Find the index of the highest cumulative score to mark the end of the trimming segment
+//     let trim_finish = cumulative_scores
+//         .iter()
+//         .enumerate()
+//         .max_by(|(_, a), (_, b)| a.partial_cmp(b).unwrap())
+//         .map(|(idx, _)| idx)
+//         .unwrap_or(0);
+//
+//     // Extract the trimmed sequence
+//     let trimmed_seq = &seq_record.seq()[trim_start..trim_finish];
+//     let trimmed_qual = &seq_record.qual()[trim_start..trim_finish];
+//
+//     // Create a new trimmed record and return it
+//     fastq::Record::with_attrs(seq_record.id(), None, trimmed_seq, trimmed_qual)
+// }
 
 #[derive(Debug)]
 enum TagData {

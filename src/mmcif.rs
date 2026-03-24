@@ -13,7 +13,6 @@ use std::{
     io::{ErrorKind, Write},
     path::Path,
     str::FromStr,
-    time::Instant,
 };
 
 use bio_apis::rcsb;

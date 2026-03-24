@@ -2,7 +2,7 @@
 
 use std::{
     collections::HashMap,
-    io::{self, BufRead, BufReader, Read, Seek, SeekFrom},
+    io::{self, BufRead},
 };
 
 use crate::{BackboneSS, SecondaryStructure};
