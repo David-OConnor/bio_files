@@ -44,6 +44,28 @@ pub use mdp::MdpParams;
 pub use output::{GromacsFrame, GromacsOutput};
 pub use topology::MoleculeTopology;
 
+/// Water model to use for explicit solvation via `gmx solvate`.
+///
+/// Selecting a model causes the pipeline to:
+/// 1. Include the model's atom-type and molecule-type sections in the topology.
+/// 2. Run `gmx solvate` to fill the simulation box with water before `grompp`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum WaterModel {
+    /// OPC 4-point rigid water (recommended with Amber ff19SB).
+    /// Requires GROMACS 2022+ which ships `opc.gro` in its data directory.
+    Opc,
+}
+
+impl WaterModel {
+    /// Pre-equilibrated water-box filename for `gmx solvate -cs`.
+    /// GROMACS resolves this from its data directory automatically.
+    fn gro_filename(self) -> &'static str {
+        match self {
+            Self::Opc => "opc.gro",
+        }
+    }
+}
+
 use crate::{AtomGeneric, BondGeneric, md_params::ForceFieldParams};
 
 // Used for creating intermediate files
@@ -66,9 +88,9 @@ pub struct MoleculeInput {
     pub count: usize,
 }
 
-/// Complete GROMACS simulation input.
+/// GROMACS simulation input.
 ///
-/// Analogous to `OrcaInput` in the `orca` module.
+/// Analogous to `orca::OrcaInput`.
 #[derive(Clone, Debug)]
 pub struct GromacsInput {
     /// MD simulation parameters (timestep, thermostat, etc.).
@@ -82,6 +104,9 @@ pub struct GromacsInput {
     /// System-wide (global) force-field parameters used as a fall-back for
     /// any per-molecule terms that are absent from `MoleculeInput::ff_params`.
     pub ff_global: Option<ForceFieldParams>,
+    /// When set, `run()` will call `gmx solvate` to fill the box with water
+    /// before preprocessing, and include the model's topology in the `.top`.
+    pub water_model: Option<WaterModel>,
 }
 
 impl Default for GromacsInput {
@@ -91,6 +116,7 @@ impl Default for GromacsInput {
             molecules: Vec::new(),
             box_nm: None,
             ff_global: None,
+            water_model: None,
         }
     }
 }
@@ -174,7 +200,12 @@ impl GromacsInput {
             })
             .collect();
 
-        topology::make_top(&mol_tops, self.ff_global.as_ref())
+        topology::make_top(&mol_tops, self.ff_global.as_ref(), self.water_model)
+    }
+
+    /// Total number of solute (non-water) atoms across all molecule copies.
+    pub fn solute_atom_count(&self) -> usize {
+        self.molecules.iter().map(|m| m.atoms.len() * m.count).sum()
     }
 
     /// Write all input files (`conf.gro`, `topol.top`, `md.mdp`) to `dir`.
@@ -206,6 +237,29 @@ impl GromacsInput {
         let dir = Path::new(TEMP_DIR);
         self.save_input_files(dir)?;
 
+        let solute_atom_count = self.solute_atom_count();
+
+        // Optional solvation: fill the box with water before preprocessing.
+        let structure_gro = if let Some(wm) = self.water_model {
+            run_gmx(
+                dir,
+                &[
+                    "solvate",
+                    "-cp",
+                    "conf.gro",
+                    "-cs",
+                    wm.gro_filename(),
+                    "-o",
+                    "solvated.gro",
+                    "-p",
+                    "topol.top",
+                ],
+            )?;
+            "solvated.gro"
+        } else {
+            "conf.gro"
+        };
+
         // grompp: Preprocessor. Creates a [binary] TPR file from the generated input files.
         // [Data on TPR](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#tpr)
         // This format contains everything GROMACS needs to run MD.
@@ -216,7 +270,7 @@ impl GromacsInput {
                 "-f",
                 "md.mdp",
                 "-c",
-                "conf.gro",
+                structure_gro,
                 "-p",
                 "topol.top",
                 "-o",
@@ -268,7 +322,7 @@ impl GromacsInput {
         let log_text = read_text(dir.join("md.log")).unwrap_or_default();
         let traj_gro = read_text(dir.join("traj.gro"))?;
 
-        let result = GromacsOutput::new(log_text, &traj_gro)?;
+        let result = GromacsOutput::new(log_text, &traj_gro, solute_atom_count)?;
 
         // Remove the folder containing temporary (e.g. input and output) files.
 
@@ -296,7 +350,10 @@ fn read_text(path: impl AsRef<Path>) -> io::Result<String> {
 /// process exits non-zero. This is primarily called by `run`, but can be called directly
 /// by applications.
 pub fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
-    let out = match Command::new("gmx").current_dir(dir).args(args).output() {
+    let mut cmd = Command::new("gmx");
+    cmd.current_dir(dir).args(args);
+
+    let out = match cmd.output() {
         Ok(o) => o,
         Err(e) if e.kind() == ErrorKind::NotFound => {
             return Err(io::Error::new(
@@ -323,14 +380,14 @@ pub fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
 /// group-selection prompts such as `gmx trjconv`). This is primarily called by `run`, but can be called directly
 /// by applications.
 pub fn run_gmx_stdin(dir: &Path, args: &[&str], stdin_data: &[u8]) -> io::Result<()> {
-    let mut child = match Command::new("gmx")
-        .current_dir(dir)
+    let mut cmd = Command::new("gmx");
+    cmd.current_dir(dir)
         .args(args)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-    {
+        .stderr(Stdio::piped());
+
+    let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) if e.kind() == ErrorKind::NotFound => {
             return Err(io::Error::new(

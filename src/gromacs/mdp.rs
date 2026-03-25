@@ -13,24 +13,44 @@ use std::fmt;
 /// [GROMACS manual: run-control](https://manual.gromacs.org/current/user-guide/mdp-options.html#run-control)
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum Integrator {
-    /// Leap-frog MD integrator (default).
+    /// Leap-frog MD integrator (default in gromacsαθθs).
     #[default]
     Md,
-    /// Velocity Verlet.
+    /// Velocity Verlet. Slower than `md`, but perhaps more rigorous.
     MdVv,
-    /// Steep-descent energy minimization.
+    MdVvAvek,
+    /// Stochastic dynamics (Langevin). `tcoupl` must be `no`; friction is
+    /// specified via `tau-t` (the inverse friction constant, ps) per group.
+    /// Also known as Langevin, with built-in stochastic thermostat.
+    Sd,
+    Bd,
+    /// Steep-descent energy minimization. (Good default for energy minimization)
     Steep,
     /// Conjugate gradient energy minimization.
     Cg,
+    LBfgs,
+    Nm,
+    Tpi,
+    Tpic,
+    Mimic,
 }
 
 impl Integrator {
     pub fn keyword(self) -> &'static str {
+        use Integrator::*;
         match self {
-            Self::Md => "md",
-            Self::MdVv => "md-vv",
-            Self::Steep => "steep",
-            Self::Cg => "cg",
+            Md => "md",
+            MdVv => "md-vv",
+            MdVvAvek => "md-vv-avek",
+            Bd => "bd",
+            Sd => "sd",
+            Steep => "steep",
+            Cg => "cg",
+            LBfgs => "l-bfgs",
+            Nm => "nm",
+            Tpi => "tpi",
+            Tpic => "tpic",
+            Mimic => "mimic",
         }
     }
 }
@@ -248,10 +268,12 @@ impl Constraints {
     }
 }
 
-/// Complete set of GROMACS MDP parameters for classical MD.
+/// Complete set of GROMACS Molecular Dynamics Parameters (MDP) for classical MD.
 ///
 /// All parameters correspond directly to
 /// [GROMACS MDP options](https://manual.gromacs.org/current/user-guide/mdp-options.html).
+/// Similar in concept to `dyanmics::MdConfig`.
+///
 /// Units follow GROMACS conventions (ps, nm, kJ/mol, K, bar).
 #[derive(Clone, Debug)]
 pub struct MdpParams {
@@ -403,7 +425,11 @@ impl MdpParams {
             "tcoupl                  = {}\n",
             self.thermostat.keyword()
         ));
-        if self.thermostat != Thermostat::No {
+        // For the `sd` integrator, tcoupl must be `no`, but tc-grps / tau-t / ref-t
+        // are still required: tau-t is the inverse friction constant (1/γ, ps).
+        let needs_tc_params =
+            self.thermostat != Thermostat::No || self.integrator == Integrator::Sd;
+        if needs_tc_params {
             let n = self.ref_t.len().max(1);
             let tc_grps = (0..n).map(|_| "System").collect::<Vec<_>>().join(" ");
 
@@ -478,7 +504,10 @@ impl MdpParams {
             ));
         }
 
-        s.push_str(&format!("pme-order               = {}\n", self.pme_order));
+        // pme-order is only relevant when PME is used for Coulomb or VdW.
+        if self.coulombtype == CoulombType::Pme || self.vdwtype == VdwType::Pme {
+            s.push_str(&format!("pme-order               = {}\n", self.pme_order));
+        }
 
         s
     }

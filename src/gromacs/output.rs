@@ -24,16 +24,20 @@ pub struct GromacsOutput {
     pub log_text: String,
     /// Parsed trajectory frames.
     pub trajectory: Vec<GromacsFrame>,
+    /// Number of solute (non-water) atoms per frame. Atoms beyond this index
+    /// in each frame's `atom_posits` are water molecules.
+    pub solute_atom_count: usize,
 }
 
 impl GromacsOutput {
-    /// Parse a GROMACS run's output given the raw log text and a multi-frame
-    /// `.gro` string produced by `gmx trjconv`.
-    pub fn new(log_text: String, traj_gro: &str) -> io::Result<Self> {
+    /// Parse a GROMACS run's output given the raw log text, a multi-frame
+    /// `.gro` string produced by `gmx trjconv`, and the number of solute atoms.
+    pub fn new(log_text: String, traj_gro: &str, solute_atom_count: usize) -> io::Result<Self> {
         let trajectory = parse_multi_gro(traj_gro)?;
         Ok(Self {
             log_text,
             trajectory,
+            solute_atom_count,
         })
     }
 }
