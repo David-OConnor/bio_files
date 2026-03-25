@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cargo check:*)",
+      "Bash(xargs grep:*)",
+      "Bash(find C:/Users/the_a/code/Bio/ewald -type f -not -path */target/* -not -path */.git/* -not -path */.idea/*)"
+    ]
+  }
+}
