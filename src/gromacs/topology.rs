@@ -1,6 +1,7 @@
 //! GROMACS topology (`.top`) generation from Amber-format (Or dyanmics library) parameters.
 //!
 //! [Example .top file](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#top)
+//! [User Guide: Force Fields](https://manual.gromacs.org/current/user-guide/force-fields.html)
 //!
 //! Produces a fully self-contained topology that does not depend on any external
 //! GROMACS force-field include files. All bonded and non-bonded parameters are
@@ -77,16 +78,20 @@ pub fn make_top(
     s.push_str("[ atomtypes ]\n");
     s.push_str("; name  at.num   mass      charge  ptype  sigma (nm)      epsilon (kJ/mol)\n");
     for ff_type in &all_types {
-        // Prefer the first molecule's params that mentions this type; fall back to global.
-        let ff_src = molecules.iter().find_map(|m| m.ff_mol).or(ff_global);
-
-        let mass_val = ff_src
-            .and_then(|p| p.mass.get(ff_type.as_str()))
+        // Try per-molecule params first, then the global fallback — same two-source
+        // chain used by lookup_bond/angle/dihedral. This matters because ff_mol often
+        // carries only bonded terms, while mass/LJ live in ff_global (e.g. GAFF2 table).
+        let mass_val = molecules
+            .iter()
+            .find_map(|m| m.ff_mol.and_then(|p| p.mass.get(ff_type.as_str())))
+            .or_else(|| ff_global.and_then(|p| p.mass.get(ff_type.as_str())))
             .map(|m| m.mass)
             .unwrap_or(12.011);
 
-        let (sigma_nm, eps_kj) = ff_src
-            .and_then(|p| p.lennard_jones.get(ff_type.as_str()))
+        let (sigma_nm, eps_kj) = molecules
+            .iter()
+            .find_map(|m| m.ff_mol.and_then(|p| p.lennard_jones.get(ff_type.as_str())))
+            .or_else(|| ff_global.and_then(|p| p.lennard_jones.get(ff_type.as_str())))
             .map(|lj| (lj.sigma * ANG_TO_NM, lj.eps * KCAL_TO_KJ))
             .unwrap_or((0.3, 0.5));
 
@@ -141,11 +146,11 @@ pub fn make_top(
 fn opc_atomtypes() -> String {
     // sigma in nm, epsilon in kJ/mol (from Amber frcmod.opc converted to GROMACS units)
     // OW_opc: R* = 1.777167 Å → sigma = R* * 2/2^(1/6) = 0.316655 nm; eps = 0.2128 kcal/mol = 0.8907 kJ/mol
-    String::from(
-        "  OW_opc    8   15.99940   0.0000  A   3.16655e-01  8.90699e-01\n\
-         HW_opc    1    1.00800   0.0000  A   0.00000e+00  0.00000e+00\n\
-         MW        0    0.00000   0.0000  V   0.00000e+00  0.00000e+00\n",
-    )
+    String::from(concat!(
+        "  OW_opc    8   15.99940   0.0000  A   3.16655e-01  8.90699e-01\n",
+        "  HW_opc    1    1.00800   0.0000  A   0.00000e+00  0.00000e+00\n",
+        "  MW        0    0.00000   0.0000  V   0.00000e+00  0.00000e+00\n",
+    ))
 }
 
 /// Complete `SOL` molecule-type block for OPC 4-point water.
@@ -212,14 +217,19 @@ fn write_molecule_block(
     // [ atoms ]
     s.push_str("[ atoms ]\n");
     s.push_str("; nr   type    resnr  residue  atom    cgnr   charge     mass\n");
+
     for (i, atom) in mol.atoms.iter().enumerate() {
         let nr = i + 1;
         let ff_type = atom.force_field_type.as_deref().unwrap_or("X");
         let charge = atom.partial_charge.unwrap_or(0.0);
-        let mass = ff
+
+        let mass = mol
+            .ff_mol
             .and_then(|p| p.mass.get(ff_type))
+            .or_else(|| ff_global.and_then(|p| p.mass.get(ff_type)))
             .map(|m| m.mass)
-            .unwrap_or(12.011); // default to carbon mass
+            .unwrap_or(12.011);
+
         let atom_name = atom
             .type_in_res
             .as_ref()
@@ -336,6 +346,38 @@ fn write_molecule_block(
             }
         }
         s.push('\n');
+    }
+
+    // [ dihedrals ] — improper (funct 4)
+    let improper_quads = enumerate_impropers(&sn_to_idx, mol.bonds);
+    if !improper_quads.is_empty() {
+        let mut improper_lines = String::new();
+        for (ai, aj, ak, al) in &improper_quads {
+            let fft_i = mol.atoms.get(ai - 1).and_then(|a| a.force_field_type.as_deref()).unwrap_or("X");
+            let fft_j = mol.atoms.get(aj - 1).and_then(|a| a.force_field_type.as_deref()).unwrap_or("X");
+            let fft_k = mol.atoms.get(ak - 1).and_then(|a| a.force_field_type.as_deref()).unwrap_or("X");
+            let fft_l = mol.atoms.get(al - 1).and_then(|a| a.force_field_type.as_deref()).unwrap_or("X");
+            if let Some(terms) = lookup_improper(fft_i, fft_j, fft_k, fft_l, ff, ff_global) {
+                for t in terms {
+                    improper_lines.push_str(&format!(
+                        "  {:>4}  {:>4}  {:>4}  {:>4}  4  {:>10.3}  {:>12.4}  {:>4}\n",
+                        ai,
+                        aj,
+                        ak,
+                        al,
+                        t.phase.to_degrees(),
+                        t.barrier_height * KCAL_TO_KJ,
+                        t.periodicity,
+                    ));
+                }
+            }
+        }
+        if !improper_lines.is_empty() {
+            s.push_str("[ dihedrals ] ; improper\n");
+            s.push_str("; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
+            s.push_str(&improper_lines);
+            s.push('\n');
+        }
     }
 }
 
@@ -456,6 +498,63 @@ fn enumerate_angles(
         }
     }
     triples
+}
+
+/// Enumerate all hub-and-spoke improper quads: (sat0, sat1, hub, sat2).
+/// Hub is at index 2 (position 3) — Amber/GAFF convention.
+/// Only atoms with ≥3 neighbours are candidates.
+fn enumerate_impropers(
+    sn_to_idx: &HashMap<u32, usize>,
+    bonds: &[BondGeneric],
+) -> Vec<(usize, usize, usize, usize)> {
+    let adj = adjacency(sn_to_idx, bonds);
+    let mut quads = Vec::new();
+    let mut seen: HashSet<(usize, usize, usize, usize)> = HashSet::new();
+
+    for (&hub, neighbors) in &adj {
+        let n = neighbors.len();
+        if n < 3 {
+            continue;
+        }
+        for a in 0..n - 2 {
+            for b in a + 1..n - 1 {
+                for d in b + 1..n {
+                    let (sat0, sat1, sat2) = (neighbors[a], neighbors[b], neighbors[d]);
+                    let key = (sat0, sat1, hub, sat2);
+                    if seen.insert(key) {
+                        quads.push(key);
+                    }
+                }
+            }
+        }
+    }
+    quads
+}
+
+/// Look up an improper dihedral term.  Satellites are sorted alphabetically
+/// before forming the key, matching Amber's wildcard-lookup convention.
+fn lookup_improper<'a>(
+    sat0: &str,
+    sat1: &str,
+    hub: &str,
+    sat2: &str,
+    ff: Option<&'a crate::md_params::ForceFieldParams>,
+    ff_global: Option<&'a crate::md_params::ForceFieldParams>,
+) -> Option<&'a Vec<crate::md_params::DihedralParams>> {
+    let mut sats = [sat0, sat1, sat2];
+    sats.sort_unstable();
+    let key = (
+        sats[0].to_string(),
+        sats[1].to_string(),
+        hub.to_string(),
+        sats[2].to_string(),
+    );
+    for src in [ff, ff_global].into_iter().flatten() {
+        if let Some(p) = src.get_dihedral(&key, false, true) {
+            return Some(p);
+        }
+    }
+    None
 }
 
 /// Enumerate all 1-2-3-4 proper dihedral quads.

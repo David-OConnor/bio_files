@@ -6,13 +6,51 @@
 //!
 //! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults.
 
+use crate::gromacs::save_txt_to_file;
+use std::collections::HashMap;
+use std::io::{Error, ErrorKind};
 use std::{fmt, io, path::Path};
 
-use crate::gromacs::save_txt_to_file;
+/// Abramowitz & Stegun 7.1.26 — max error 1.5×10⁻⁷.
+fn erfc_approx(x: f32) -> f32 {
+    let t = 1.0 / (1.0 + 0.3275911 * x);
+    let p = t * (0.254829592
+        + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    p * (-x * x).exp()
+}
+
+/// Invert erfc by bisection. Only called at parse time so performance is irrelevant.
+fn erfc_inv_approx(y: f32) -> f32 {
+    let (mut lo, mut hi) = (0.0_f32, 6.0_f32);
+    for _ in 0..60 {
+        let mid = 0.5 * (lo + hi);
+        if erfc_approx(mid) > y {
+            lo = mid;
+        } else {
+            hi = mid;
+        }
+    }
+    0.5 * (lo + hi)
+}
 
 /// Helper function to append a key and value to an .mdp file.
 fn append_inp<T: ToString>(inp: &mut String, k: &str, v: T) {
     inp.push_str(&format!("{k:<25}= {}\n", v.to_string()));
+}
+
+/// Float wrapper that formats with scientific notation when `|v| < 0.001`.
+/// This matches GROMACS conventions: `compressibility = 4.5e-5`, `ewald-rtol = 1e-5`, etc.
+struct Gf(f32);
+
+impl fmt::Display for Gf {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let v = self.0;
+        if v != 0.0 && v.abs() < 0.001 {
+            write!(f, "{:e}", v)
+        } else {
+            write!(f, "{v}")
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -21,9 +59,13 @@ pub struct PmeConfig {
     pub fourierspacing: f32,
     /// Valid values are 3-12.
     pub order: u8,
-    /// (10-5) The relative strength of the Ewald-shifted direct potential at rcoulomb is
-    /// given by ewald-rtol. Decreasing this will give a more accurate direct sum, but then you need more wave vectors for the reciprocal sum.
-    pub rtol: f32,
+    /// Ewald splitting parameter α in **nm⁻¹**.  Controls the balance between
+    /// real-space and reciprocal-space work.  When writing an MDP file, this is
+    /// converted to `ewald-rtol = erfc(α × rcoulomb)`.
+    ///
+    /// Default (3.12 nm⁻¹) gives ewald-rtol ≈ 1×10⁻⁵ at the GROMACS default
+    /// rcoulomb of 1.0 nm, matching the GROMACS default behaviour.
+    pub alpha: f32,
     pub rtol_lj: f32,
     pub epsilon_surface: Option<f32>,
 }
@@ -33,7 +75,7 @@ impl Default for PmeConfig {
         Self {
             fourierspacing: 0.12,
             order: 4,
-            rtol: 1e-5,
+            alpha: 3.12, // erfc(3.12 × 1.0 nm) ≈ 1e-5 — matches GROMACS default ewald-rtol
             rtol_lj: 1e-3,
             epsilon_surface: None,
         }
@@ -41,16 +83,18 @@ impl Default for PmeConfig {
 }
 
 impl PmeConfig {
-    pub fn make_inp(&self) -> String {
+    /// Render PME parameters to MDP key-value lines.
+    /// `rcoulomb` (nm) is required to derive `ewald-rtol = erfc(alpha × rcoulomb)`.
+    pub fn make_inp(&self, rcoulomb: f32) -> String {
         let mut res = String::new();
 
-        append_inp(&mut res, "fourierspacing", self.fourierspacing);
+        append_inp(&mut res, "fourierspacing", Gf(self.fourierspacing));
         append_inp(&mut res, "pme-order", self.order);
-        append_inp(&mut res, "ewald-rtol", self.rtol);
-        append_inp(&mut res, "ewald-rtol-lj", self.rtol_lj);
+        append_inp(&mut res, "ewald-rtol", Gf(erfc_approx(self.alpha * rcoulomb)));
+        append_inp(&mut res, "ewald-rtol-lj", Gf(self.rtol_lj));
 
         if let Some(v) = &self.epsilon_surface {
-            append_inp(&mut res, "epsilon-surface", v);
+            append_inp(&mut res, "epsilon-surface", Gf(*v));
         }
 
         res
@@ -143,8 +187,8 @@ impl EnergyMinimization {
     pub fn make_inp(&self) -> String {
         let mut res = String::new();
 
-        append_inp(&mut res, "emtol", self.emtol);
-        append_inp(&mut res, "emstep", self.emstep);
+        append_inp(&mut res, "emtol", Gf(self.emtol));
+        append_inp(&mut res, "emstep", Gf(self.emstep));
         append_inp(&mut res, "nstcgsteep", self.nstcgsteep);
         append_inp(&mut res, "nbfgscorr", self.nbfgscorr);
 
@@ -260,13 +304,13 @@ impl Default for CoulombType {
 }
 
 impl CoulombType {
-    pub fn make_inp(&self) -> String {
+    pub fn make_inp(&self, rcoulomb: f32) -> String {
         let mut res = String::new();
 
         match self {
             Self::Pme(pme) => {
-                append_inp(&mut res, "coulombtype", "Cut-off");
-                res.push_str(&pme.make_inp());
+                append_inp(&mut res, "coulombtype", "PME");
+                res.push_str(&pme.make_inp(rcoulomb));
             }
             Self::CutOff => append_inp(&mut res, "coulombtype", "Cut-off"),
             Self::ReactionField => append_inp(&mut res, "coulombtype", "Reaction-Field"),
@@ -362,13 +406,13 @@ impl ConstraintAlgorithm {
 
         match self {
             Self::Lincs { order, iter } => {
-                append_inp(&mut res, "contraint-algorithm", "LINCS");
+                append_inp(&mut res, "constraint-algorithm", "LINCS");
                 append_inp(&mut res, "lincs-order", order);
                 append_inp(&mut res, "lincs-iter", iter);
             }
             Self::Shake { tol } => {
-                append_inp(&mut res, "contraint-algorithm", "SHAKE");
-                append_inp(&mut res, "shake-tol", tol);
+                append_inp(&mut res, "constraint-algorithm", "SHAKE");
+                append_inp(&mut res, "shake-tol", Gf(tol));
             }
         }
 
@@ -461,7 +505,7 @@ pub struct MdpParams {
     /// Temperature (K) for velocity generation.
     pub gen_temp: f32,
     /// Random seed for velocity generation; `-1` lets GROMACS choose.
-    pub gen_seed: i32,
+    pub gen_seed: Option<i32>,
 
     // --- Constraints ---
     pub constraints: Constraints,
@@ -495,7 +539,7 @@ impl Default for MdpParams {
             pbc: Pbc::default(),
             gen_vel: true,
             gen_temp: 300.,
-            gen_seed: -1,
+            gen_seed: None,
             constraints: Constraints::default(),
             constraint_algorithm: ConstraintAlgorithm::default(),
             energy_minimization: Default::default(),
@@ -512,7 +556,7 @@ impl MdpParams {
         s.push_str("; Run control\n");
         append_inp(&mut s, "integrator", self.integrator.keyword());
         append_inp(&mut s, "nsteps", self.nsteps);
-        append_inp(&mut s, "dt", self.dt);
+        append_inp(&mut s, "dt", Gf(self.dt));
 
         // Output
         s.push_str("\n; Output control\n");
@@ -524,11 +568,11 @@ impl MdpParams {
 
         // Non-bonded
         s.push_str("\n; Non-bonded interactions\n");
-        s.push_str(&self.coulombtype.make_inp());
+        s.push_str(&self.coulombtype.make_inp(self.rcoulomb));
 
-        append_inp(&mut s, "rcoulomb", self.rcoulomb);
+        append_inp(&mut s, "rcoulomb", Gf(self.rcoulomb));
         append_inp(&mut s, "vdw-type", self.vdwtype.keyword());
-        append_inp(&mut s, "rvdw", self.rvdw);
+        append_inp(&mut s, "rvdw", Gf(self.rvdw));
 
         // Temperature coupling
         s.push_str("\n; Temperature coupling\n");
@@ -544,14 +588,14 @@ impl MdpParams {
             let tau_t = self
                 .tau_t
                 .iter()
-                .map(|v| format!("{v}"))
+                .map(|v| Gf(*v).to_string())
                 .collect::<Vec<_>>()
                 .join(" ");
 
             let ref_t = self
                 .ref_t
                 .iter()
-                .map(|v| format!("{v}"))
+                .map(|v| Gf(*v).to_string())
                 .collect::<Vec<_>>()
                 .join(" ");
             append_inp(&mut s, "tc-grps", tc_grps);
@@ -566,9 +610,9 @@ impl MdpParams {
         if self.pcoupl != Barostat::No {
             // todo: QC pcoupltype.
             append_inp(&mut s, "pcoupltype", self.pcoupltype.keyword());
-            append_inp(&mut s, "tau-p", self.tau_p);
-            append_inp(&mut s, "ref-p", self.ref_p);
-            append_inp(&mut s, "compressibility", self.compressibility);
+            append_inp(&mut s, "tau-p", Gf(self.tau_p));
+            append_inp(&mut s, "ref-p", Gf(self.ref_p));
+            append_inp(&mut s, "compressibility", Gf(self.compressibility));
         }
 
         // PBC
@@ -579,8 +623,11 @@ impl MdpParams {
         s.push_str("\n; Velocity generation\n");
         append_inp(&mut s, "gen-vel", if self.gen_vel { "yes" } else { "no" });
         if self.gen_vel {
-            append_inp(&mut s, "gen-temp", self.gen_temp);
-            append_inp(&mut s, "gen-seed", self.gen_seed);
+            append_inp(&mut s, "gen-temp", Gf(self.gen_temp));
+
+            if let Some(v) = &self.gen_seed {
+                append_inp(&mut s, "gen-seed", v);
+            }
         }
 
         // Constraints
@@ -601,53 +648,56 @@ impl MdpParams {
     }
 
     pub fn from_mdp_str(data: &str) -> io::Result<Self> {
-        use std::{
-            collections::HashMap,
-            io::{Error, ErrorKind},
-        };
-
         fn inv(k: &str, e: impl std::fmt::Display) -> io::Error {
             Error::new(ErrorKind::InvalidData, format!("{k}: {e}"))
         }
+
         fn get_s<'a>(map: &'a HashMap<String, String>, k: &str) -> Option<&'a str> {
             map.get(k).map(String::as_str)
         }
+
         fn f32_or(map: &HashMap<String, String>, k: &str, d: f32) -> io::Result<f32> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
             }
         }
+
         fn u8_or(map: &HashMap<String, String>, k: &str, d: u8) -> io::Result<u8> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
             }
         }
+
         fn u16_or(map: &HashMap<String, String>, k: &str, d: u16) -> io::Result<u16> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
             }
         }
+
         fn u32_or(map: &HashMap<String, String>, k: &str, d: u32) -> io::Result<u32> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
             }
         }
+
         fn u64_or(map: &HashMap<String, String>, k: &str, d: u64) -> io::Result<u64> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
             }
         }
+
         fn i32_or(map: &HashMap<String, String>, k: &str, d: i32) -> io::Result<i32> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
             }
         }
+
         fn f32_vec(map: &HashMap<String, String>, k: &str, d: Vec<f32>) -> io::Result<Vec<f32>> {
             match map.get(k) {
                 None => Ok(d),
@@ -673,6 +723,7 @@ impl MdpParams {
         let integrator_s = get_s(&map, "integrator")
             .unwrap_or("md")
             .to_ascii_lowercase();
+
         let integrator = match integrator_s.as_str() {
             "md" => Integrator::Md,
             "md-vv" => Integrator::MdVv,
@@ -702,6 +753,9 @@ impl MdpParams {
         let nstenergy = u32_or(&map, "nstenergy", 1_000)?;
         let nstlog = u32_or(&map, "nstlog", 1_000)?;
 
+        // Parse rcoulomb early — needed to convert ewald-rtol → alpha.
+        let rcoulomb = f32_or(&map, "rcoulomb", 1.0)?;
+
         let coulomb_s = get_s(&map, "coulombtype")
             .unwrap_or("pme")
             .to_ascii_lowercase();
@@ -711,7 +765,8 @@ impl MdpParams {
                 let d = PmeConfig::default();
                 let fourierspacing = f32_or(&map, "fourierspacing", d.fourierspacing)?;
                 let order = u8_or(&map, "pme-order", d.order)?;
-                let rtol = f32_or(&map, "ewald-rtol", d.rtol)?;
+                // Parse ewald-rtol (GROMACS default 1e-5), then invert to alpha (nm⁻¹).
+                let rtol = f32_or(&map, "ewald-rtol", 1e-5_f32)?;
                 let rtol_lj = f32_or(&map, "ewald-rtol-lj", d.rtol_lj)?;
                 let epsilon_surface = map
                     .get("epsilon-surface")
@@ -720,7 +775,7 @@ impl MdpParams {
                 CoulombType::Pme(PmeConfig {
                     fourierspacing,
                     order,
-                    rtol,
+                    alpha: erfc_inv_approx(rtol) / rcoulomb,
                     rtol_lj,
                     epsilon_surface,
                 })
@@ -734,8 +789,6 @@ impl MdpParams {
                 ));
             }
         };
-
-        let rcoulomb = f32_or(&map, "rcoulomb", 1.0)?;
 
         let vdw_s = get_s(&map, "vdw-type")
             .unwrap_or("cut-off")
@@ -822,7 +875,11 @@ impl MdpParams {
         let gen_vel_s = get_s(&map, "gen-vel").unwrap_or("no").to_ascii_lowercase();
         let gen_vel = matches!(gen_vel_s.as_str(), "yes" | "true" | "1");
         let gen_temp = f32_or(&map, "gen-temp", 300.0)?;
-        let gen_seed = i32_or(&map, "gen-seed", -1)?;
+
+        let mut gen_seed = Some(i32_or(&map, "gen-seed", -1)?);
+        if gen_seed == Some(-1) {
+            gen_seed = None;
+        }
 
         let constr_s = get_s(&map, "constraints")
             .unwrap_or("h-bonds")
@@ -842,7 +899,7 @@ impl MdpParams {
         // Handle both the correct spelling and the typo in ConstraintAlgorithm::make_inp.
         let ca_s = map
             .get("constraint-algorithm")
-            .or_else(|| map.get("contraint-algorithm"))
+            .or_else(|| map.get("constraint-algorithm"))
             .map(String::as_str)
             .unwrap_or("lincs")
             .to_ascii_lowercase();

@@ -419,6 +419,21 @@ impl ForceFieldParams {
         result
     }
 
+    /// Merge `other` into a copy of `self`. Entries already present in `self` win;
+    /// entries only in `other` are added. This lets you build a comprehensive global
+    /// fallback from multiple force-field tables (e.g. GAFF2 + ff19SB).
+    pub fn merge_with(&self, other: &Self) -> Self {
+        let mut result = other.clone();
+        result.mass.extend(self.mass.clone());
+        result.lennard_jones.extend(self.lennard_jones.clone());
+        result.bond.extend(self.bond.clone());
+        result.angle.extend(self.angle.clone());
+        // For dihedrals/impropers, self's entry replaces other's entirely (same key).
+        result.dihedral.extend(self.dihedral.clone());
+        result.improper.extend(self.improper.clone());
+        result
+    }
+
     /// A convenience wrapper.
     pub fn from_frcmod(text: &str) -> io::Result<Self> {
         Ok(Self::new(&ForceFieldParamsVec::from_frcmod(text)?))
