@@ -4,6 +4,7 @@
 Cargo.lock
 /python/target/
 
+.claude/
 
 # Molecular formats
 *.pdb

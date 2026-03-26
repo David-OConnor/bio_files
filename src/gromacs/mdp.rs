@@ -6,16 +6,23 @@
 //!
 //! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults.
 
+use std::{
+    collections::HashMap,
+    fmt, io,
+    io::{Error, ErrorKind},
+    path::Path,
+};
+
+use na_seq::NucleotideGeneral::S;
+
 use crate::gromacs::save_txt_to_file;
-use std::collections::HashMap;
-use std::io::{Error, ErrorKind};
-use std::{fmt, io, path::Path};
 
 /// Abramowitz & Stegun 7.1.26 — max error 1.5×10⁻⁷.
 fn erfc_approx(x: f32) -> f32 {
     let t = 1.0 / (1.0 + 0.3275911 * x);
-    let p = t * (0.254829592
-        + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
+    let p = t
+        * (0.254829592
+            + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
     p * (-x * x).exp()
 }
 
@@ -90,7 +97,11 @@ impl PmeConfig {
 
         append_inp(&mut res, "fourierspacing", Gf(self.fourierspacing));
         append_inp(&mut res, "pme-order", self.order);
-        append_inp(&mut res, "ewald-rtol", Gf(erfc_approx(self.alpha * rcoulomb)));
+        append_inp(
+            &mut res,
+            "ewald-rtol",
+            Gf(erfc_approx(self.alpha * rcoulomb)),
+        );
         append_inp(&mut res, "ewald-rtol-lj", Gf(self.rtol_lj));
 
         if let Some(v) = &self.epsilon_surface {
@@ -232,59 +243,196 @@ impl fmt::Display for Thermostat {
 /// Pressure-coupling algorithm.
 ///
 /// [GROMACS manual: pressure-coupling](https://manual.gromacs.org/current/user-guide/mdp-options.html#pressure-coupling)
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Barostat {
     No,
     /// Not recommended, by GROMACS.
-    Berendsen,
-    #[default]
+    Berendsen(BarostatCfg),
     /// Exponential relaxation pressure coupling with time constant tau-p, including a stochastic term to enforce correct volume fluctuations.
-    CRescale,
+    CRescale(BarostatCfg),
     /// Parrinello–Rahman; NPT ensemble.
-    ParrinelloRahman,
+    ParrinelloRahman(BarostatCfg),
     /// Martyna-Tuckerman-Tobias-Klein implementation, only useable with integrator=md-vv or integrator=md-vv-avek, very similar to Parrinello-Rahman.
-    Mtkk,
+    Mtkk(BarostatCfg),
 }
 
-impl Barostat {
-    pub fn keyword(self) -> &'static str {
-        match self {
-            Self::No => "no",
-            Self::CRescale => "C-rescale",
-            Self::Berendsen => "Berendsen",
-            Self::ParrinelloRahman => "Parrinello-Rahman",
-            Self::Mtkk => "MTTK",
-        }
+impl Default for Barostat {
+    fn default() -> Self {
+        Self::CRescale(BarostatCfg::default())
     }
 }
 
-impl fmt::Display for Barostat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword())
+impl Barostat {
+    pub fn make_inp(&self) -> String {
+        let mut res = String::new();
+
+        match self {
+            Self::No => {
+                append_inp(&mut res, "pcoupl", "no");
+            }
+            Self::Berendsen(cfg) => {
+                append_inp(&mut res, "pcoupl", "Berendsen");
+                res.push_str(&cfg.make_inp());
+            }
+            Self::CRescale(cfg) => {
+                append_inp(&mut res, "pcoupl", "C-rescale");
+                res.push_str(&cfg.make_inp());
+            }
+            Self::ParrinelloRahman(cfg) => {
+                append_inp(&mut res, "pcoupl", "Parrinello-Rahman");
+                res.push_str(&cfg.make_inp());
+            }
+            Self::Mtkk(cfg) => {
+                append_inp(&mut res, "pcoupl", "MTTK");
+                res.push_str(&cfg.make_inp());
+            }
+        }
+
+        res
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct BarostatCfg {
+    pub pcoupltype: PressureCouplingType,
+    /// Pressure coupling time constant (ps).
+    pub tau_p: f32,
+}
+
+impl BarostatCfg {
+    pub fn make_inp(&self) -> String {
+        let mut res = String::new();
+
+        res.push_str(&self.pcoupltype.make_inp());
+        append_inp(&mut res, "tau-p", self.tau_p);
+
+        res
+    }
+}
+
+impl Default for BarostatCfg {
+    fn default() -> Self {
+        Self {
+            pcoupltype: Default::default(),
+            tau_p: 5.,
+        }
     }
 }
 
 /// Pressure-coupling algorithm.
 ///
 /// [GROMACS manual: pressure-coupling](https://manual.gromacs.org/current/user-guide/mdp-options.html#pressure-coupling)
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum PressureCouplingType {
-    #[default]
-    ///  todo: What is the gromacs default?
-    Isotropic,
-    Semiisotropic,
-    Anisotropic,
-    SurfaceTension,
+    Isotropic {
+        /// Isothermal compressibility (bar⁻¹), e.g. `4.5e-5` for water.
+        compressibility: f32,
+        /// Reference pressure (bar).
+        ref_p: f32,
+    },
+    Semiisotropic {
+        compressibility_xy: f32,
+        compressibility_z: f32,
+        ref_p_xy: f32,
+        ref_p_z: f32,
+    },
+    Anisotropic {
+        compressibility: [f32; 6],
+        ref_p: [f32; 6],
+    },
+    SurfaceTension {
+        compressibility_xy: f32,
+        compressibility_z: f32,
+        ref_p_sfc_tension: f32,
+        ref_p_z: f32,
+    },
+}
+
+impl Default for PressureCouplingType {
+    fn default() -> Self {
+        Self::Isotropic {
+            ref_p: 1.0,
+            compressibility: 4.5e-5,
+        }
+    }
 }
 
 impl PressureCouplingType {
-    pub fn keyword(self) -> &'static str {
+    pub fn make_inp(&self) -> String {
+        let mut res = String::new();
+
         match self {
-            Self::Isotropic => "isotropic",
-            Self::Semiisotropic => "semiisotropic",
-            Self::Anisotropic => "anisotropic",
-            Self::SurfaceTension => "surface-tension",
+            Self::Isotropic {
+                compressibility,
+                ref_p,
+            } => {
+                append_inp(&mut res, "pcoupltype", "isotropic");
+                append_inp(&mut res, "ref-p", ref_p);
+                append_inp(&mut res, "compressibility", Gf(*compressibility));
+            }
+            Self::Semiisotropic {
+                compressibility_xy,
+                compressibility_z,
+                ref_p_xy,
+                ref_p_z,
+            } => {
+                append_inp(&mut res, "pcoupltype", "semiisotropic");
+                append_inp(
+                    &mut res,
+                    "ref-p",
+                    format!("{} {}", Gf(*ref_p_xy), Gf(*ref_p_z)),
+                );
+                append_inp(
+                    &mut res,
+                    "compressibility",
+                    format!("{} {}", Gf(*compressibility_xy), Gf(*compressibility_z)),
+                );
+            }
+            Self::Anisotropic {
+                compressibility,
+                ref_p,
+            } => {
+                append_inp(&mut res, "pcoupltype", "anisotropic");
+                append_inp(
+                    &mut res,
+                    "ref-p",
+                    ref_p
+                        .iter()
+                        .map(|v| Gf(*v).to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+                append_inp(
+                    &mut res,
+                    "compressibility",
+                    compressibility
+                        .iter()
+                        .map(|v| Gf(*v).to_string())
+                        .collect::<Vec<_>>()
+                        .join(" "),
+                );
+            }
+            Self::SurfaceTension {
+                compressibility_xy,
+                compressibility_z,
+                ref_p_sfc_tension,
+                ref_p_z,
+            } => {
+                append_inp(&mut res, "pcoupltype", "surface-tension");
+                append_inp(
+                    &mut res,
+                    "ref-p",
+                    format!("{} {}", Gf(*ref_p_sfc_tension), Gf(*ref_p_z)),
+                );
+                append_inp(
+                    &mut res,
+                    "compressibility",
+                    format!("{} {}", Gf(*compressibility_xy), Gf(*compressibility_z)),
+                );
+            }
         }
+
+        res
     }
 }
 
@@ -421,22 +569,49 @@ impl ConstraintAlgorithm {
 }
 
 /// Which bonds to constrain.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Constraints {
     None,
     /// Constrain bonds involving H atoms; allows longer timesteps.
-    #[default]
-    HBonds,
-    AllBonds,
+    HBonds(ConstraintAlgorithm),
+    AllBonds(ConstraintAlgorithm),
+    HAngles(ConstraintAlgorithm),
+    AllAngles(ConstraintAlgorithm),
+}
+
+impl Default for Constraints {
+    fn default() -> Self {
+        Self::HAngles(ConstraintAlgorithm::default())
+    }
 }
 
 impl Constraints {
-    pub fn keyword(self) -> &'static str {
+    pub fn make_inp(&self) -> String {
+        let mut res = String::new();
+
         match self {
-            Self::None => "none",
-            Self::HBonds => "h-bonds",
-            Self::AllBonds => "all-bonds",
+            Self::None => {
+                append_inp(&mut res, "constraints", "none");
+            }
+            Self::HBonds(ca) => {
+                append_inp(&mut res, "constraints", "h-bonds");
+                res.push_str(&ca.make_inp());
+            }
+            Self::AllBonds(ca) => {
+                append_inp(&mut res, "constraints", "all-bonds");
+                res.push_str(&ca.make_inp());
+            }
+            Self::HAngles(ca) => {
+                append_inp(&mut res, "constraints", "h-angles");
+                res.push_str(&ca.make_inp());
+            }
+            Self::AllAngles(ca) => {
+                append_inp(&mut res, "constraints", "all-angles");
+                res.push_str(&ca.make_inp());
+            }
         }
+
+        res
     }
 }
 
@@ -485,16 +660,6 @@ pub struct MdpParams {
     /// Reference temperature (K) for each coupling group.
     pub ref_t: Vec<f32>,
     pub pcoupl: Barostat,
-    pub pcoupltype: PressureCouplingType,
-    /// Pressure coupling time constant (ps).
-    pub tau_p: f32,
-    /// Reference pressure (bar).
-    /// todo: All pcoupltype values other than isotropic require multiple ref_p values. Wrapped enum on
-    /// todo: PressureCouplingType
-    pub ref_p: f32,
-    /// Isothermal compressibility (bar⁻¹), e.g. `4.5e-5` for water.
-    /// todo: Same note on ref_p about pressure coupling type applies here.
-    pub compressibility: f32,
 
     // --- Periodic boundary ---
     pub pbc: Pbc,
@@ -506,10 +671,8 @@ pub struct MdpParams {
     pub gen_temp: f32,
     /// Random seed for velocity generation; `-1` lets GROMACS choose.
     pub gen_seed: Option<i32>,
-
     // --- Constraints ---
     pub constraints: Constraints,
-    pub constraint_algorithm: ConstraintAlgorithm,
 }
 
 /// We use the GROMACS defaults here.
@@ -532,16 +695,11 @@ impl Default for MdpParams {
             tau_t: vec![1.0], // todo: 0.1?
             ref_t: vec![300.],
             pcoupl: Barostat::default(),
-            pcoupltype: PressureCouplingType::default(),
-            tau_p: 5.0,
-            ref_p: 1.0,
-            compressibility: 4.5e-5,
             pbc: Pbc::default(),
             gen_vel: true,
             gen_temp: 300.,
             gen_seed: None,
             constraints: Constraints::default(),
-            constraint_algorithm: ConstraintAlgorithm::default(),
             energy_minimization: Default::default(),
         }
     }
@@ -605,15 +763,7 @@ impl MdpParams {
 
         // Pressure coupling
         s.push_str("\n; Pressure coupling\n");
-        append_inp(&mut s, "pcoupl", self.pcoupl.keyword());
-
-        if self.pcoupl != Barostat::No {
-            // todo: QC pcoupltype.
-            append_inp(&mut s, "pcoupltype", self.pcoupltype.keyword());
-            append_inp(&mut s, "tau-p", Gf(self.tau_p));
-            append_inp(&mut s, "ref-p", Gf(self.ref_p));
-            append_inp(&mut s, "compressibility", Gf(self.compressibility));
-        }
+        s.push_str(&self.pcoupl.make_inp());
 
         // PBC
         s.push_str("\n; Periodic boundary conditions\n");
@@ -632,11 +782,7 @@ impl MdpParams {
 
         // Constraints
         s.push_str("\n; Constraints\n");
-        append_inp(&mut s, "constraints", self.constraints.keyword());
-
-        if self.constraints != Constraints::None {
-            s.push_str(&self.constraint_algorithm.make_inp())
-        }
+        s.push_str(&self.constraints.make_inp());
 
         if let Some(em) = &self.energy_minimization {
             s.push_str("\n; Energy minimization\n");
@@ -824,30 +970,53 @@ impl MdpParams {
         let tau_t = f32_vec(&map, "tau-t", vec![1.0])?;
         let ref_t = f32_vec(&map, "ref-t", vec![300.0])?;
 
-        let pcoupl_s = get_s(&map, "pcoupl")
-            .unwrap_or("c-rescale")
-            .to_ascii_lowercase();
-        let pcoupl = match pcoupl_s.as_str() {
-            "no" => Barostat::No,
-            "berendsen" => Barostat::Berendsen,
-            "c-rescale" => Barostat::CRescale,
-            "parrinello-rahman" => Barostat::ParrinelloRahman,
-            "mttk" => Barostat::Mtkk,
-            o => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("unknown pcoupl: {o}"),
-                ));
-            }
-        };
+        let pcoupl_s = get_s(&map, "pcoupl").unwrap_or("no").to_ascii_lowercase();
+
         let pcoupltype_s = get_s(&map, "pcoupltype")
             .unwrap_or("isotropic")
             .to_ascii_lowercase();
+
         let pcoupltype = match pcoupltype_s.as_str() {
-            "isotropic" => PressureCouplingType::Isotropic,
-            "semiisotropic" => PressureCouplingType::Semiisotropic,
-            "anisotropic" => PressureCouplingType::Anisotropic,
-            "surface-tension" => PressureCouplingType::SurfaceTension,
+            "isotropic" => PressureCouplingType::Isotropic {
+                compressibility: f32_or(&map, "compressibility", 4.5e-5)?,
+                ref_p: f32_or(&map, "ref-p", 1.0)?,
+            },
+            "semiisotropic" => {
+                let comp = f32_vec(&map, "compressibility", vec![4.5e-5, 4.5e-5])?;
+                let rp = f32_vec(&map, "ref-p", vec![1.0, 1.0])?;
+                PressureCouplingType::Semiisotropic {
+                    compressibility_xy: comp.first().copied().unwrap_or(4.5e-5),
+                    compressibility_z: comp.get(1).copied().unwrap_or(4.5e-5),
+                    ref_p_xy: rp.first().copied().unwrap_or(1.0),
+                    ref_p_z: rp.get(1).copied().unwrap_or(1.0),
+                }
+            }
+            "anisotropic" => {
+                let comp = f32_vec(&map, "compressibility", vec![4.5e-5; 6])?;
+                let rp = f32_vec(&map, "ref-p", vec![1.0; 6])?;
+                let mut compressibility = [4.5e-5_f32; 6];
+                let mut ref_p = [1.0_f32; 6];
+                for (i, v) in comp.iter().enumerate().take(6) {
+                    compressibility[i] = *v;
+                }
+                for (i, v) in rp.iter().enumerate().take(6) {
+                    ref_p[i] = *v;
+                }
+                PressureCouplingType::Anisotropic {
+                    compressibility,
+                    ref_p,
+                }
+            }
+            "surface-tension" => {
+                let comp = f32_vec(&map, "compressibility", vec![4.5e-5, 4.5e-5])?;
+                let rp = f32_vec(&map, "ref-p", vec![0.0, 1.0])?;
+                PressureCouplingType::SurfaceTension {
+                    compressibility_xy: comp.first().copied().unwrap_or(4.5e-5),
+                    compressibility_z: comp.get(1).copied().unwrap_or(4.5e-5),
+                    ref_p_sfc_tension: rp.first().copied().unwrap_or(0.0),
+                    ref_p_z: rp.get(1).copied().unwrap_or(1.0),
+                }
+            }
             o => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
@@ -855,9 +1024,23 @@ impl MdpParams {
                 ));
             }
         };
+
         let tau_p = f32_or(&map, "tau-p", 5.0)?;
-        let ref_p = f32_or(&map, "ref-p", 1.0)?;
-        let compressibility = f32_or(&map, "compressibility", 4.5e-5)?;
+        let barostat_cfg = BarostatCfg { pcoupltype, tau_p };
+
+        let pcoupl = match pcoupl_s.as_str() {
+            "no" => Barostat::No,
+            "berendsen" => Barostat::Berendsen(barostat_cfg),
+            "c-rescale" => Barostat::CRescale(barostat_cfg),
+            "parrinello-rahman" => Barostat::ParrinelloRahman(barostat_cfg),
+            "mttk" => Barostat::Mtkk(barostat_cfg),
+            o => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("unknown pcoupl: {o}"),
+                ));
+            }
+        };
 
         let pbc_s = get_s(&map, "pbc").unwrap_or("xyz").to_ascii_lowercase();
         let pbc = match pbc_s.as_str() {
@@ -881,21 +1064,6 @@ impl MdpParams {
             gen_seed = None;
         }
 
-        let constr_s = get_s(&map, "constraints")
-            .unwrap_or("h-bonds")
-            .to_ascii_lowercase();
-        let constraints = match constr_s.as_str() {
-            "none" => Constraints::None,
-            "h-bonds" => Constraints::HBonds,
-            "all-bonds" => Constraints::AllBonds,
-            o => {
-                return Err(Error::new(
-                    ErrorKind::InvalidData,
-                    format!("unknown constraints: {o}"),
-                ));
-            }
-        };
-
         // Handle both the correct spelling and the typo in ConstraintAlgorithm::make_inp.
         let ca_s = map
             .get("constraint-algorithm")
@@ -903,6 +1071,7 @@ impl MdpParams {
             .map(String::as_str)
             .unwrap_or("lincs")
             .to_ascii_lowercase();
+
         let constraint_algorithm = match ca_s.as_str() {
             "lincs" => ConstraintAlgorithm::Lincs {
                 order: u8_or(&map, "lincs-order", 4)?,
@@ -915,6 +1084,24 @@ impl MdpParams {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
                     format!("unknown constraint-algorithm: {o}"),
+                ));
+            }
+        };
+
+        let constr_s = get_s(&map, "constraints")
+            .unwrap_or("h-bonds")
+            .to_ascii_lowercase();
+
+        let constraints = match constr_s.as_str() {
+            "none" => Constraints::None,
+            "h-bonds" => Constraints::HBonds(constraint_algorithm),
+            "all-bonds" => Constraints::AllBonds(constraint_algorithm),
+            "h-angles" => Constraints::HAngles(constraint_algorithm),
+            "all-angles" => Constraints::AllAngles(constraint_algorithm),
+            o => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("unknown constraints: {o}"),
                 ));
             }
         };
@@ -950,16 +1137,11 @@ impl MdpParams {
             tau_t,
             ref_t,
             pcoupl,
-            pcoupltype,
-            tau_p,
-            ref_p,
-            compressibility,
             pbc,
             gen_vel,
             gen_temp,
             gen_seed,
             constraints,
-            constraint_algorithm,
             energy_minimization,
         })
     }
