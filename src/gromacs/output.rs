@@ -2,11 +2,104 @@
 //!
 //! After an `mdrun`, we use `gmx trjconv` to export the trajectory as a
 //! multi-model `.gro` file, then parse each frame here into [`GromacsFrame`].
-//! Energy and log data are extracted from the `.log` file when present.
+//! Energy data is extracted from the binary `.edr` file by calling
+//! `gmx energy` to convert it to an XVG text file, which is then parsed.
 
-use std::io::{self, ErrorKind};
+use std::collections::HashMap;
+use std::io::{self, ErrorKind, Write as _};
+use std::path::Path;
+use std::process::{Command, Stdio};
 
 use lin_alg::f64::Vec3;
+
+/// Output thermodynamic / energy properties at a single recorded time step.
+///
+/// Fields are `Option` because not every simulation records every quantity
+/// (e.g. NVT runs have no `pressure`; vacuum runs have no `volume`).
+#[derive(Clone, Debug, Default)]
+pub struct OutputEnergy {
+    /// Simulation time in **ps** — used to match energy records to frames.
+    pub time: f64,
+    /// Temperature in **K**.
+    pub temperature: Option<f32>,
+    /// Pressure in **bar**.
+    pub pressure: Option<f32>,
+    /// Potential energy in **kJ/mol**.
+    pub potential_energy: Option<f32>,
+    /// Kinetic energy in **kJ/mol**.
+    pub kinetic_energy: Option<f32>,
+    /// Total energy (potential + kinetic) in **kJ/mol**.
+    pub total_energy: Option<f32>,
+    /// Simulation box volume in **nm³**.
+    pub volume: Option<f32>,
+    /// System density in **kg/m³**.
+    pub density: Option<f32>,
+}
+
+impl OutputEnergy {
+    /// Extract per-frame energy data from a GROMACS binary `.edr` file.
+    ///
+    /// The EDR format is an XDR-based binary; rather than parsing it directly
+    /// this function calls `gmx energy` to convert it to a text XVG file,
+    /// then parses that file.
+    ///
+    /// A broad set of term indices (1–30) is piped to `gmx energy` so that
+    /// whatever terms the simulation recorded are captured. GROMACS warns
+    /// about out-of-range indices but does not abort.
+    ///
+    /// Returns `Ok(Vec::new())` when `gmx` is unavailable or the file yields
+    /// no usable data, so callers can treat energy as optional.
+    pub fn from_edr(path: &Path) -> io::Result<Vec<Self>> {
+        let dir = path.parent().unwrap_or(Path::new("."));
+        let edr_name = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| io::Error::new(ErrorKind::InvalidInput, "invalid EDR path"))?;
+
+        const XVG_OUT: &str = "energy_out.xvg";
+
+        // Feed term indices 1–30 to gmx energy, then "0" to end the
+        // selection. Indices beyond the available range produce a warning
+        // but are otherwise ignored by GROMACS.
+        let selection = b"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 \
+                          21 22 23 24 25 26 27 28 29 30 0\n";
+
+        let mut child = match Command::new("gmx")
+            .current_dir(dir)
+            .args(["energy", "-f", edr_name, "-o", XVG_OUT])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(c) => c,
+            Err(e) if e.kind() == ErrorKind::NotFound => {
+                eprintln!("`gmx` not found; skipping energy parsing");
+                return Ok(Vec::new());
+            }
+            Err(e) => return Err(e),
+        };
+
+        if let Some(mut stdin) = child.stdin.take() {
+            let _ = stdin.write_all(selection);
+        }
+
+        let out = child.wait_with_output()?;
+        if !out.status.success() {
+            // Non-fatal — GROMACS still writes the XVG for valid terms.
+            let msg = String::from_utf8_lossy(&out.stderr);
+            eprintln!("gmx energy exited non-zero: {msg}");
+        }
+
+        let xvg_path = dir.join(XVG_OUT);
+        if !xvg_path.exists() {
+            return Ok(Vec::new());
+        }
+
+        let text = std::fs::read_to_string(&xvg_path)?;
+        parse_xvg(&text)
+    }
+}
 
 /// A single frame of a GROMACS trajectory.
 #[derive(Clone, Debug)]
@@ -15,6 +108,9 @@ pub struct GromacsFrame {
     pub time: f64,
     /// Atom positions in **Å** (converted from nm on parse).
     pub atom_posits: Vec<Vec3>,
+    /// Energy data for this frame, if the energy recording interval
+    /// (`nstenergy`) aligns with the trajectory interval (`nstxout`).
+    pub energy: Option<OutputEnergy>,
 }
 
 /// The collected output of a `gmx mdrun` run.
@@ -31,11 +127,19 @@ pub struct GromacsOutput {
 
 impl GromacsOutput {
     /// Parse a GROMACS run's output given the raw log text, a multi-frame
-    /// `.gro` string produced by `gmx trjconv`, and the number of solute atoms.
+    /// `.gro` string produced by `gmx trjconv`, parsed energy records, and
+    /// the number of solute atoms.
     ///
-    /// todo: Would it be faster to, instead, parse an output binary (TRR? XTC?)
-    pub fn new(log_text: String, traj_gro: &str, solute_atom_count: usize) -> io::Result<Self> {
-        let trajectory = parse_multi_gro(traj_gro)?;
+    /// Energy records are matched to frames by simulation time; frames whose
+    /// time does not align with any energy record will have `energy: None`.
+    pub fn new(
+        log_text: String,
+        traj_gro: &str,
+        energies: Vec<OutputEnergy>,
+        solute_atom_count: usize,
+    ) -> io::Result<Self> {
+        let mut trajectory = parse_multi_gro(traj_gro)?;
+        attach_energies(&mut trajectory, energies);
         Ok(Self {
             log_text,
             trajectory,
@@ -105,10 +209,127 @@ pub fn parse_multi_gro(text: &str) -> io::Result<Vec<GromacsFrame>> {
         frames.push(GromacsFrame {
             time: time_ps,
             atom_posits: posits,
+            energy: None,
         });
     }
 
     Ok(frames)
+}
+
+// ---------------------------------------------------------------------------
+// Energy attachment
+// ---------------------------------------------------------------------------
+
+/// Attach energy records to trajectory frames by matching on simulation time.
+///
+/// The energy recording interval (`nstenergy`) may differ from the trajectory
+/// interval (`nstxout`), so some frames legitimately have no energy entry.
+/// Times are matched to the nearest millisecond (0.001 ps) to absorb any
+/// floating-point rounding in the GRO title and XVG data lines.
+fn attach_energies(frames: &mut Vec<GromacsFrame>, energies: Vec<OutputEnergy>) {
+    if energies.is_empty() {
+        return;
+    }
+    // Key: time rounded to nearest 0.001 ps expressed as integer (avoids f64 hashing).
+    let map: HashMap<i64, OutputEnergy> = energies
+        .into_iter()
+        .map(|e| ((e.time * 1000.0).round() as i64, e))
+        .collect();
+
+    for frame in frames.iter_mut() {
+        let key = (frame.time * 1000.0).round() as i64;
+        frame.energy = map.get(&key).cloned();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// XVG parsing
+// ---------------------------------------------------------------------------
+
+/// Parse an XVG file produced by `gmx energy` into a sequence of
+/// [`OutputEnergy`] values.
+///
+/// XVG layout:
+/// - Lines starting with `#` are comments — skipped.
+/// - Lines starting with `@` are metadata; `@ sN legend "Name"` lines map
+///   column indices to energy term names.
+/// - All other non-empty lines are data rows: time followed by term values,
+///   all space-separated.
+fn parse_xvg(text: &str) -> io::Result<Vec<OutputEnergy>> {
+    // Column index (0-based after the time column) → GROMACS term name.
+    let mut col_names: Vec<String> = Vec::new();
+    let mut rows: Vec<Vec<f64>> = Vec::new();
+
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        if trimmed.starts_with('@') {
+            if let Some(name) = parse_xvg_legend(trimmed) {
+                col_names.push(name);
+            }
+            continue;
+        }
+        // Data row: space-separated floats.
+        let vals: Vec<f64> = trimmed
+            .split_whitespace()
+            .filter_map(|t| t.parse().ok())
+            .collect();
+        if !vals.is_empty() {
+            rows.push(vals);
+        }
+    }
+
+    let energies = rows
+        .into_iter()
+        .map(|vals| {
+            let time = vals.first().copied().unwrap_or(0.0);
+            let mut e = OutputEnergy {
+                time,
+                ..OutputEnergy::default()
+            };
+            for (col, name) in col_names.iter().enumerate() {
+                let val = vals.get(col + 1).copied().map(|v| v as f32);
+                match name.as_str() {
+                    "Temperature" => e.temperature = val,
+                    "Pressure" => e.pressure = val,
+                    "Potential" => e.potential_energy = val,
+                    n if n.starts_with("Kinetic") => e.kinetic_energy = val,
+                    n if n.starts_with("Total") => e.total_energy = val,
+                    "Volume" => e.volume = val,
+                    "Density" => e.density = val,
+                    _ => {}
+                }
+            }
+            e
+        })
+        .collect();
+
+    Ok(energies)
+}
+
+/// Extract the legend name from a `@ sN legend "Name"` XVG directive.
+/// Returns `None` for any other `@` line.
+fn parse_xvg_legend(line: &str) -> Option<String> {
+    // Strip leading '@' and whitespace.
+    let rest = line.strip_prefix('@')?.trim();
+    // Must start with 's' followed by a column index (digits).
+    if !rest.starts_with('s') {
+        return None;
+    }
+    // Strip the sN token to reach the keyword.
+    let after_index = rest.trim_start_matches(|c: char| c == 's' || c.is_ascii_digit());
+    let rest = after_index.trim();
+    // Next token must be "legend".
+    let rest = rest.strip_prefix("legend")?.trim();
+    // The remainder is the quoted name.
+    let name = rest.trim_matches('"');
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
 }
 
 // ---------------------------------------------------------------------------

@@ -631,6 +631,68 @@ impl Constraints {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct OutputControl {
+    /// Write full-precision coordinates to `.trr` every N steps (0 = never).
+    pub nstxout: Option<u32>,
+    /// Write velocities to `.trr` every N steps (0 = never).
+    pub nstvout: Option<u32>,
+    /// Number of steps that elapse between writing forces to the output trajectory file
+    pub nstfout: Option<u32>,
+    /// Write to `.log` every N steps.
+    pub nstlog: Option<u32>,
+    /// Write energies to `.edr` every N steps.
+    pub nstcalcenergy: Option<u32>,
+    /// Write energies to `.edr` every N steps.
+    pub nstenergy: Option<u32>,
+    /// Write compressed coordinates to `.xtc` every N steps (0 = never).
+    pub nstxout_compressed: Option<u32>,
+    ///  precision with which to write to the compressed trajectory file
+    pub compressed_x_precision: u32,
+    // pub compressed_x_grps: u32,
+}
+
+impl Default for OutputControl {
+    fn default() -> Self {
+        Self {
+            nstxout: None,
+            nstvout: None,
+            nstfout: None,
+            nstlog: Some(1_000),
+            nstcalcenergy: Some(100),
+            nstenergy: Some(1_000),
+            nstxout_compressed: None,
+            compressed_x_precision: 1_000,
+        }
+    }
+}
+
+impl OutputControl {
+    pub fn make_inp(&self) -> String {
+        let mut res = String::new();
+
+        // 0 is the default for these write ratios.
+        append_inp(&mut res, "nstxout", self.nstxout.unwrap_or(0));
+        append_inp(&mut res, "nstvout", self.nstvout.unwrap_or(0));
+        append_inp(&mut res, "nstfout", self.nstfout.unwrap_or(0));
+        append_inp(&mut res, "nstlog", self.nstlog.unwrap_or(0));
+        append_inp(&mut res, "nstcalcenergy", self.nstcalcenergy.unwrap_or(0));
+        append_inp(&mut res, "nstenergy", self.nstenergy.unwrap_or(0));
+        append_inp(
+            &mut res,
+            "nstxout-compressed",
+            self.nstxout_compressed.unwrap_or(0),
+        );
+        append_inp(
+            &mut res,
+            "compressed-x-precision",
+            self.compressed_x_precision,
+        );
+
+        res
+    }
+}
+
 /// Complete set of GROMACS Molecular Dynamics Parameters (MDP) for classical MD.
 ///
 /// All parameters correspond directly to
@@ -646,19 +708,7 @@ pub struct MdpParams {
     pub nsteps: u64,
     /// Integration timestep in **ps** (e.g. `0.002` = 2 fs).
     pub dt: f32,
-
-    // --- Output control ---
-    /// Write full-precision coordinates to `.trr` every N steps (0 = never).
-    pub nstxout: u32,
-    /// Write velocities to `.trr` every N steps (0 = never).
-    pub nstvout: u32,
-    /// Write compressed coordinates to `.xtc` every N steps (0 = never).
-    pub nstxout_compressed: u32,
-    /// Write energies to `.edr` every N steps.
-    pub nstenergy: u32,
-    /// Write to `.log` every N steps.
-    pub nstlog: u32,
-
+    pub output_control: OutputControl,
     // --- Non-bonded interactions ---
     pub coulombtype: CoulombType,
     /// Coulomb cutoff in **nm**.
@@ -700,11 +750,7 @@ impl Default for MdpParams {
             integrator: Integrator::Md,
             nsteps: 0,
             dt: 0.001,
-            nstxout: 0,
-            nstvout: 0,
-            nstxout_compressed: 0,
-            nstenergy: 1_000,
-            nstlog: 1_000,
+            output_control: OutputControl::default(),
             coulombtype: CoulombType::default(),
             rcoulomb: 1.0,
             vdwtype: VdwType::default(),
@@ -737,11 +783,7 @@ impl MdpParams {
 
         // Output
         s.push_str("\n; Output control\n");
-        append_inp(&mut s, "nstxout", self.nstxout);
-        append_inp(&mut s, "nstvout", self.nstvout);
-        append_inp(&mut s, "nstxout-compressed", self.nstxout_compressed);
-        append_inp(&mut s, "nstenergy", self.nstenergy);
-        append_inp(&mut s, "nstlog", self.nstlog);
+        s.push_str(&self.output_control.make_inp());
 
         // Non-bonded
         s.push_str("\n; Non-bonded interactions\n");
@@ -916,13 +958,18 @@ impl MdpParams {
             }
         };
 
+        // todo: I do not like these defaulting to duplicates of default values.
         let nsteps = u64_or(&map, "nsteps", 0)?;
         let dt = f32_or(&map, "dt", 0.001)?;
         let nstxout = u32_or(&map, "nstxout", 0)?;
         let nstvout = u32_or(&map, "nstvout", 0)?;
-        let nstxout_compressed = u32_or(&map, "nstxout-compressed", 0)?;
-        let nstenergy = u32_or(&map, "nstenergy", 1_000)?;
+        let nstfout = u32_or(&map, "nstfout", 0)?;
         let nstlog = u32_or(&map, "nstlog", 1_000)?;
+        let nstcalcenergy = u32_or(&map, "nstcalcenergy", 100)?;
+        let nstenergy = u32_or(&map, "nstenergy", 1_000)?;
+        let nstxout_compressed = u32_or(&map, "nstxout-compressed", 0)?;
+
+        let compressed_x_precision = u32_or(&map, "compressed-x-precision", 1_000)?;
 
         // Parse rcoulomb early — needed to convert ewald-rtol → alpha.
         let rcoulomb = f32_or(&map, "rcoulomb", 1.0)?;
@@ -1157,11 +1204,16 @@ impl MdpParams {
             integrator,
             nsteps,
             dt,
-            nstxout,
-            nstvout,
-            nstxout_compressed,
-            nstenergy,
-            nstlog,
+            output_control: OutputControl {
+                nstxout: Some(nstxout),
+                nstvout: Some(nstvout),
+                nstfout: Some(nstfout),
+                nstxout_compressed: Some(nstxout_compressed),
+                nstenergy: Some(nstenergy),
+                nstcalcenergy: Some(nstcalcenergy),
+                nstlog: Some(nstlog),
+                compressed_x_precision,
+            },
             coulombtype,
             rcoulomb,
             vdwtype,

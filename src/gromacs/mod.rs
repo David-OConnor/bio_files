@@ -46,6 +46,7 @@ pub use output::{GromacsFrame, GromacsOutput};
 use solvate::WaterModel;
 pub use topology::MoleculeTopology;
 
+use crate::gromacs::output::OutputEnergy;
 use crate::{AtomGeneric, BondGeneric, md_params::ForceFieldParams};
 
 // Used for creating intermediate files
@@ -60,6 +61,7 @@ pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
 pub(in crate::gromacs) const GRO_TRAJ_NAME: &str = "traj.gro";
 pub(in crate::gromacs) const GRO_OUT_NAME: &str = "confout.gro";
+pub(in crate::gromacs) const ENERGY_OUT_NAME: &str = "energy.edr";
 
 /// One molecule entry passed to a [`GromacsInput`].
 ///
@@ -383,7 +385,15 @@ impl GromacsInput {
         run_gmx(
             dir,
             &[
-                "mdrun", "-s", "em.tpr", "-c", "em.gro", "-e", "em.edr", "-g", "em.log",
+                "mdrun",
+                "-s",
+                "em.tpr",
+                "-c",
+                "em.gro",
+                "-e",
+                ENERGY_OUT_NAME,
+                "-g",
+                "em.log",
             ],
         )?;
 
@@ -421,7 +431,7 @@ impl GromacsInput {
                 "-c",
                 GRO_OUT_NAME,
                 "-e",
-                "energy.edr",
+                ENERGY_OUT_NAME,
                 "-g",
                 "md.log",
             ],
@@ -448,8 +458,11 @@ impl GromacsInput {
 
         let log_text = read_text(dir.join("md.log")).unwrap_or_default();
         let traj_gro = read_text(dir.join(GRO_TRAJ_NAME))?;
+        // Energy data is optional: if gmx energy fails or is unavailable, run()
+        // still returns a valid trajectory — frames just have `energy: None`.
+        let energies = OutputEnergy::from_edr(&dir.join(ENERGY_OUT_NAME)).unwrap_or_default();
 
-        let result = GromacsOutput::new(log_text, &traj_gro, solute_atom_count)?;
+        let result = GromacsOutput::new(log_text, &traj_gro, energies, solute_atom_count)?;
 
         // Remove the folder containing temporary (e.g. input and output) files.
 
