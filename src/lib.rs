@@ -4,7 +4,6 @@
 //! The `generic` label in names in this module are to differentiate from ones used in more specific
 //! applications.
 
-pub mod gro;
 pub mod mmcif;
 pub mod mol2;
 pub mod pdbqt;
@@ -38,7 +37,6 @@ use std::{
 
 pub use ab1::*;
 pub use bond_inference::create_bonds;
-pub use gro::*;
 use lin_alg::f64::Vec3;
 pub use map::*;
 pub use mmcif::*;

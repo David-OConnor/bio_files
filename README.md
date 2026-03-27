@@ -19,6 +19,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - mmCIF (structure factors / 2fo-fc: Electron density data, raw)
 - Mol2 (Small molecules, e.g. ligands)
 - SDF (Small molecules, e.g. ligands)
+- XYZ (Minimal atom coordinate format. Used by ORCA.)
 - PDBQT (Small molecules, e.g. ligands. Includes docking-specific fields.)
 - Map (Electron density, e.g. from crystallography, Cryo EM. Processed using Fourier transforms)
 - MTZ: If [Gemmi](https://gemmi.readthedocs.io/en/latest/) is installed. (Electron density)
@@ -26,13 +27,14 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - DAT (Amber force field data for small molecules)
 - FRCMOD (Amber force field patch data for small molecules)
 - Amber .lib files, e.g. with charge data for amino acids and proteins.
-- GRO (Gromacs molecules)
-- TOP (Gromacs topology) - WIP
+- GRO (GROMACS molecules)
+- TOP (GROMACS topology)
+- MDP (GROMACS MD configuration)
+- EDR (GROMACS energy output)
 - ORCA input and output files (quantum chemistry; HF, DFT etc)
-- GROMACS files (.mdp, .gro, .top)
-- XYZ (Minimal atom coordinate format)
 - DCD (MD trajectories)
 - XTC: If [MDTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories)
+- TRR (MD trajectories)
 
 ### Planned:
 
@@ -73,22 +75,106 @@ add optimizations downstream, like converting to indices, and/or applying back-r
 residue
 an atom's in, in your derived Atom struct).
 
-
 ## ORCA interface
 
-This library provides an interface to build Orca inputs, execute commands, and parse outputs. It uses Rust data structures to contrain input choices into valid ones when possible, and allows you to integrate Orca into Rust programs and libraries. For example, [Molchanica](https://github.com/david-oconnor/molchanica) uses it to minimize energy on organic molecules, and augment traditional MD technique with quantum mechanics.
+This library provides an interface to build Orca inputs, execute commands, and parse outputs. It uses Rust
+datastructures to contrain input choices into valid ones when possible, and allows you to integrate Orca into Rust
+programs and libraries. For example, [Molchanica](https://github.com/david-oconnor/molchanica) uses it to minimize
+energy on organic molecules, and augment traditional MD technique with quantum mechanics. See
+the [API docs](https://docs.rs/bio_files/latest/bio_files/orca/index.html) for details.
 
-ORCA support in this library is limited to Rust only. If you wish to use Orca with Python, use [OPI, the official FACCTS library](https://github.com/faccts/opi).
+ORCA support in this library is limited to Rust only. If you wish to use Orca with Python,
+use [OPI, the official FACCTS library](https://github.com/faccts/opi).
 
-Note: Orca support is currently limited to a subset of features. We plan to gradually expand this. If you're looking for specific functionality, please open an Issue or PR on Github.
+Note: Orca support is currently limited to a subset of features. We plan to gradually expand this. If you're looking for
+specific functionality, please open an Issue or PR on Github.
 
 Can generate and run [ORCA](https://www.faccts.de/orca/) commands, and parse the result. Example:
-
+(todo )
 
 ## GROMACS interface
 
-This library provides an interface to build GROMACS inputs, run MD, and parse outputs. This is similar conceptually to the ORCA interface.
+This library provides an interface to build [GROMACS](https://www.gromacs.org/) inputs, run MD, and parse outputs. This
+is similar conceptually to the ORCA interface. We use it in [Molchanica](https://github.com/david-oconnor/molchanica) as
+an optional backend for MD. See the [API docs](https://docs.rs/bio_files/latest/bio_files/gromacs/index.html). To use
+it, GROMACS must be installed, and available on the system path.
 
+It constructs an [MDP](https://manual.gromacs.org/current/user-guide/mdp-options.html) configuration, converts
+molecules (From atoms and bonds) into a .gro files, and creates a topology from force field parameters. It launches
+`grompp` and `gmx` to prepare and run MD. Once complete, it collects data from the files GROMACS generates: `.trr` for
+trajectory data, `.edr` for thermodynamic properties, and `.log` for general information.
+
+We do not provide Python bindings to this functionality, as it's handled by
+the [official gmxapi library](https://manual.gromacs.org/current/gmxapi/userguide/usage.html).
+
+It also offers standalone functionality to read and write TRR and other files.
+
+Minimal example:
+
+```rust
+use bio_files::{
+    gromacs::{GromacsInput, MdpParams, OutputControl, MoleculeInput},
+    ForceFieldParams,
+};
+
+
+fn run_gromacs() -> io::Result<()> {
+    let mols = ();
+
+    // The default implementation for each field will use GROMACS defaults; override
+    // ones we wish to change.
+    let mdp = MdpParams {
+        integrator: Integrator::MdVv,
+        nsteps: 1_000,
+        dt: 0.001,
+        output_control: OutputControl {
+            txout: Some(100),
+            nstenergy: Some(500),
+            ..Default::default()
+        }
+            ..Default::default()
+    };
+
+    let molecules = {
+        let mol = Sdf::load_pubchem(2244)?;
+
+        // todo: Demonstrate how to load mol specific params, e.g. with antechamber
+
+        vec![MoleculeInput {
+            name: &mol.ident,
+            atoms: mol.atoms.clone(),
+            bonds: mol.bonds.clone(),
+            // ff_params: Some(ff_params_mol_specific),
+            ff_params: None,
+            count: 0,
+        }]
+    };
+
+    let p = Path::new("gaff2.dat");
+    let params = ForceFieldParams::load_dat(p)?;
+
+
+    let input = GromacsInput {
+        mdp,
+        molecules,
+        box_nm: Some((30., 30., 30.)),
+        ff_global: Some(params),
+        water_model,
+    };
+
+    let output = input.run()?;
+
+    println!("Gromacs output log: \n\n{}", output.log_text);
+
+    for frame in &output.trajectory {
+        println!("Frame time: {:?.3}", frame.time);
+
+        println!("Energy: {:?}", frame.energy);
+
+        // Do something with `frame.atom_posits` and `frame.atom_velocities` as required.
+    }
+}
+```
 
 ## Loading building-block molecules from templates
 
@@ -398,6 +484,7 @@ use bio_files::dcd::DcdTrajectory;
 fn main() {
     let path_dcd = Path::new("traj.dcd");
     let path_xtc = Path::new("traj.xtc");
+    // Or TRR
 
     // Load trajectory files:
     let traj = DcdTrajectory::load(path_dcd).unwrap();

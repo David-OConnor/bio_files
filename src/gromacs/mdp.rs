@@ -631,7 +631,8 @@ impl Constraints {
     }
 }
 
-#[derive(Clone, Debug)]
+#[cfg_attr(feature = "encode", derive(bincode::Encode, bincode::Decode))]
+#[derive(Clone, Debug, PartialEq)]
 pub struct OutputControl {
     /// Write full-precision coordinates to `.trr` every N steps (0 = never).
     pub nstxout: Option<u32>,

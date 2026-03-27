@@ -41,13 +41,12 @@ use std::{
     process::{Command, Stdio},
 };
 
-pub use mdp::MdpParams;
-pub use output::{GromacsFrame, GromacsOutput};
+pub use mdp::{MdpParams, OutputControl};
+pub use output::{GromacsFrame, GromacsOutput, OutputEnergy};
 use solvate::WaterModel;
 pub use topology::MoleculeTopology;
 
-use crate::gromacs::output::OutputEnergy;
-use crate::{AtomGeneric, BondGeneric, md_params::ForceFieldParams};
+use crate::{AtomGeneric, BondGeneric, gromacs::output::read_trr, md_params::ForceFieldParams};
 
 // Used for creating intermediate files
 const TEMP_DIR: &str = "gromacs_temp";
@@ -60,6 +59,7 @@ pub(in crate::gromacs) const SOLVATED_NAME: &str = "solvated.gro";
 pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
 pub(in crate::gromacs) const GRO_TRAJ_NAME: &str = "traj.gro";
+pub(in crate::gromacs) const TRR_NAME: &str = "traj.trr";
 pub(in crate::gromacs) const GRO_OUT_NAME: &str = "confout.gro";
 pub(in crate::gromacs) const ENERGY_OUT_NAME: &str = "energy.edr";
 
@@ -131,6 +131,7 @@ impl GromacsInput {
     pub fn make_gro(&self) -> String {
         let total_atoms: usize = self.molecules.iter().map(|m| m.atoms.len() * m.count).sum();
 
+        // todo: QCS this.
         // Shift all atoms so their centroid lands at the box center.
         // This ensures `gmx solvate` places water around the solute rather than in a corner.
         let (shift_x, shift_y, shift_z) = if let Some((bx, by, bz)) = self.box_nm {
@@ -425,7 +426,7 @@ impl GromacsInput {
                 "-s",
                 "topol.tpr",
                 "-o",
-                "traj.trr",
+                TRR_NAME,
                 "-x",
                 "traj.xtc",
                 "-c",
@@ -437,32 +438,34 @@ impl GromacsInput {
             ],
         )?;
 
-        // --- gmx trjconv: export trajectory as multi-frame GRO ---
-        // `-pbc mol` re-wraps molecules into the box; `-b 0` starts from t=0.
-        // The echo provides the "System" group selection for the interactive prompt.
-        run_gmx_stdin(
-            dir,
-            &[
-                "trjconv",
-                "-f",
-                "traj.trr",
-                "-s",
-                "topol.tpr",
-                "-o",
-                GRO_TRAJ_NAME,
-                "-pbc",
-                "mol",
-            ],
-            b"0\n", // select group 0 = "System"
-        )?;
+        // // --- gmx trjconv: export trajectory as multi-frame GRO ---
+        // // `-pbc mol` re-wraps molecules into the box; `-b 0` starts from t=0.
+        // // The echo provides the "System" group selection for the interactive prompt.
+        // run_gmx_stdin(
+        //     dir,
+        //     &[
+        //         "trjconv",
+        //         "-f",
+        //         TRR_NAME,
+        //         "-s",
+        //         "topol.tpr",
+        //         "-o",
+        //         GRO_TRAJ_NAME,
+        //         "-pbc",
+        //         "mol",
+        //     ],
+        //     b"0\n", // select group 0 = "System"
+        // )?;
 
         let log_text = read_text(dir.join("md.log")).unwrap_or_default();
-        let traj_gro = read_text(dir.join(GRO_TRAJ_NAME))?;
+        // let traj_gro = read_text(dir.join(GRO_TRAJ_NAME))?;
+        let trr_frames = read_trr(&dir.join(TRR_NAME), None, None)?;
+
         // Energy data is optional: if gmx energy fails or is unavailable, run()
         // still returns a valid trajectory — frames just have `energy: None`.
         let energies = OutputEnergy::from_edr(&dir.join(ENERGY_OUT_NAME)).unwrap_or_default();
 
-        let result = GromacsOutput::new(log_text, &traj_gro, energies, solute_atom_count)?;
+        let result = GromacsOutput::new(log_text, trr_frames, energies, solute_atom_count)?;
 
         // Remove the folder containing temporary (e.g. input and output) files.
 
