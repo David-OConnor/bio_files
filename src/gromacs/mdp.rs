@@ -13,8 +13,6 @@ use std::{
     path::Path,
 };
 
-use na_seq::NucleotideGeneral::S;
-
 use crate::gromacs::save_txt_to_file;
 
 /// Abramowitz & Stegun 7.1.26 — max error 1.5×10⁻⁷.
@@ -162,6 +160,24 @@ impl Integrator {
 impl fmt::Display for Integrator {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.keyword())
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum FreeEnergyCalculations {
+    #[default]
+    No,
+    Yes,
+    Expanded,
+}
+
+impl FreeEnergyCalculations {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::No => "no",
+            Self::Yes => "yes",
+            Self::Expanded => "expanded",
+        }
     }
 }
 
@@ -673,6 +689,8 @@ pub struct MdpParams {
     pub gen_seed: Option<i32>,
     // --- Constraints ---
     pub constraints: Constraints,
+    // ---
+    pub free_energy_calculations: FreeEnergyCalculations,
 }
 
 /// We use the GROMACS defaults here.
@@ -701,6 +719,7 @@ impl Default for MdpParams {
             gen_seed: None,
             constraints: Constraints::default(),
             energy_minimization: Default::default(),
+            free_energy_calculations: Default::default(),
         }
     }
 }
@@ -789,6 +808,12 @@ impl MdpParams {
 
             s.push_str(&em.make_inp());
         }
+
+        append_inp(
+            &mut s,
+            "free-energy",
+            self.free_energy_calculations.keyword(),
+        );
 
         s
     }
@@ -939,6 +964,7 @@ impl MdpParams {
         let vdw_s = get_s(&map, "vdw-type")
             .unwrap_or("cut-off")
             .to_ascii_lowercase();
+
         let vdwtype = match vdw_s.as_str() {
             "cut-off" => VdwType::CutOff,
             "pme" => VdwType::Pme,
@@ -954,6 +980,7 @@ impl MdpParams {
         let tcoupl_s = get_s(&map, "tcoupl")
             .unwrap_or("v-rescale")
             .to_ascii_lowercase();
+
         let thermostat = match tcoupl_s.as_str() {
             "no" => Thermostat::No,
             "nose-hoover" => Thermostat::NoseHoover,
@@ -1120,6 +1147,12 @@ impl MdpParams {
             None
         };
 
+        let free_energy_calculations = match get_s(&map, "free-energy").unwrap_or("no") {
+            "yes" => FreeEnergyCalculations::Yes,
+            "expanded" => FreeEnergyCalculations::Expanded,
+            _ => FreeEnergyCalculations::No,
+        };
+
         Ok(Self {
             integrator,
             nsteps,
@@ -1143,6 +1176,7 @@ impl MdpParams {
             gen_seed,
             constraints,
             energy_minimization,
+            free_energy_calculations,
         })
     }
 

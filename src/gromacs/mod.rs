@@ -56,6 +56,7 @@ pub(in crate::gromacs) const TOP_NAME: &str = "topo.top";
 pub(in crate::gromacs) const MDP_NAME: &str = "md.mdp";
 pub(in crate::gromacs) const SOLVENT_GRO_NAME: &str = "opc.gro";
 pub(in crate::gromacs) const SOLVATED_NAME: &str = "solvated.gro";
+pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
 pub(in crate::gromacs) const GRO_TRAJ_NAME: &str = "traj.gro";
 pub(in crate::gromacs) const GRO_OUT_NAME: &str = "confout.gro";
@@ -300,7 +301,65 @@ impl GromacsInput {
             )?;
             SOLVATED_NAME
         } else {
-            "conf.gro"
+            GRO_NAME
+        };
+
+        // Add counter-ions if the solute carries a net charge.
+        // Only meaningful when solvent is present (ions replace water molecules).
+        // `gmx genion -neutral` adds exactly the number of Na+/Cl- needed.
+        let net_q: f32 = self
+            .molecules
+            .iter()
+            .map(|m| {
+                m.atoms
+                    .iter()
+                    .map(|a| a.partial_charge.unwrap_or(0.0))
+                    .sum::<f32>()
+                    * m.count as f32
+            })
+            .sum();
+
+        let structure_gro = if self.water_model.is_some() && net_q.abs() >= 0.5 {
+            // grompp needs a valid MDP to build ions.tpr; reuse the EM MDP.
+            save_txt_to_file(dir.join("ions.mdp"), em_mdp_str())?;
+            run_gmx(
+                dir,
+                &[
+                    "grompp",
+                    "-f",
+                    "ions.mdp",
+                    "-c",
+                    structure_gro,
+                    "-p",
+                    TOP_NAME,
+                    "-o",
+                    "ions.tpr",
+                    "-maxwarn",
+                    "5",
+                ],
+            )?;
+            // genion asks interactively which group to replace; we select SOL.
+            run_gmx_stdin(
+                dir,
+                &[
+                    "genion",
+                    "-s",
+                    "ions.tpr",
+                    "-o",
+                    IONIZED_NAME,
+                    "-p",
+                    TOP_NAME,
+                    "-pname",
+                    "NA",
+                    "-nname",
+                    "CL",
+                    "-neutral",
+                ],
+                b"SOL\n",
+            )?;
+            IONIZED_NAME
+        } else {
+            structure_gro
         };
 
         // Energy minimization — removes bad contacts

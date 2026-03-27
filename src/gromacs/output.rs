@@ -32,6 +32,8 @@ pub struct GromacsOutput {
 impl GromacsOutput {
     /// Parse a GROMACS run's output given the raw log text, a multi-frame
     /// `.gro` string produced by `gmx trjconv`, and the number of solute atoms.
+    ///
+    /// todo: Would it be faster to, instead, parse an output binary (TRR? XTC?)
     pub fn new(log_text: String, traj_gro: &str, solute_atom_count: usize) -> io::Result<Self> {
         let trajectory = parse_multi_gro(traj_gro)?;
         Ok(Self {

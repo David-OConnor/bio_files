@@ -1,4 +1,5 @@
 //! [Docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html)
+//! [More docs](https://manual.gromacs.org/current/how-to/topology.html#water-solvation)
 
 use std::fmt::Write as _;
 
