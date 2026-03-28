@@ -642,7 +642,7 @@ pub struct OutputControl {
     pub nstfout: Option<u32>,
     /// Write to `.log` every N steps.
     pub nstlog: Option<u32>,
-    /// Write energies to `.edr` every N steps.
+    /// Calculate energies to `.edr` every N steps.
     pub nstcalcenergy: Option<u32>,
     /// Write energies to `.edr` every N steps.
     pub nstenergy: Option<u32>,

@@ -58,7 +58,6 @@ pub(in crate::gromacs) const SOLVENT_GRO_NAME: &str = "opc.gro";
 pub(in crate::gromacs) const SOLVATED_NAME: &str = "solvated.gro";
 pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
-pub(in crate::gromacs) const GRO_TRAJ_NAME: &str = "traj.gro";
 pub(in crate::gromacs) const TRR_NAME: &str = "traj.trr";
 pub(in crate::gromacs) const GRO_OUT_NAME: &str = "confout.gro";
 pub(in crate::gromacs) const ENERGY_OUT_NAME: &str = "energy.edr";
