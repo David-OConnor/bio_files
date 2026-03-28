@@ -15,6 +15,9 @@ use std::{
 
 use lin_alg::f64::Vec3;
 
+// todo: Consider structs that are "file-like" etc, and impl std traits to read/write etc? (Check examples
+// todo in other libs) instead of free-stnading fns.
+
 /// Output thermodynamic / energy properties at a single recorded time step.
 ///
 /// Fields are `Option` because not every simulation records every quantity
@@ -195,7 +198,7 @@ pub fn read_trr(
 /// Velocities are written as-is (nm/ps). Both use single-precision (`f32`),
 /// which is the GROMACS default. Frames with no velocity data (`atom_velocities`
 /// empty or length-mismatched) omit the velocity block (`v_size = 0`).
-pub fn write_trr(path: &mut Path, frames: &[GromacsFrame]) -> io::Result<()> {
+pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
     // XDR version string — 12 bytes, already 4B-aligned so no padding needed.
     const VERSION: &[u8] = b"GMX_trn_file";
 
