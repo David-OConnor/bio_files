@@ -57,6 +57,19 @@ impl fmt::Display for Gf {
     }
 }
 
+struct Gf64(f64);
+
+impl fmt::Display for Gf64 {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let v = self.0;
+        if v != 0.0 && v.abs() < 0.001 {
+            write!(f, "{:e}", v)
+        } else {
+            write!(f, "{v}")
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PmeConfig {
     /// PME Fourier grid spacing in **nm**.
@@ -348,23 +361,23 @@ impl Default for BarostatCfg {
 pub enum PressureCouplingType {
     Isotropic {
         /// Isothermal compressibility (bar⁻¹), e.g. `4.5e-5` for water.
-        compressibility: f32,
+        compressibility: f64,
         /// Reference pressure (bar).
         ref_p: f32,
     },
     Semiisotropic {
-        compressibility_xy: f32,
-        compressibility_z: f32,
+        compressibility_xy: f64,
+        compressibility_z: f64,
         ref_p_xy: f32,
         ref_p_z: f32,
     },
     Anisotropic {
-        compressibility: [f32; 6],
+        compressibility: [f64; 6],
         ref_p: [f32; 6],
     },
     SurfaceTension {
-        compressibility_xy: f32,
-        compressibility_z: f32,
+        compressibility_xy: f64,
+        compressibility_z: f64,
         ref_p_sfc_tension: f32,
         ref_p_z: f32,
     },
@@ -390,7 +403,7 @@ impl PressureCouplingType {
             } => {
                 append_inp(&mut res, "pcoupltype", "isotropic");
                 append_inp(&mut res, "ref-p", ref_p);
-                append_inp(&mut res, "compressibility", Gf(*compressibility));
+                append_inp(&mut res, "compressibility", Gf64(*compressibility));
             }
             Self::Semiisotropic {
                 compressibility_xy,
@@ -407,7 +420,7 @@ impl PressureCouplingType {
                 append_inp(
                     &mut res,
                     "compressibility",
-                    format!("{} {}", Gf(*compressibility_xy), Gf(*compressibility_z)),
+                    format!("{} {}", Gf64(*compressibility_xy), Gf64(*compressibility_z)),
                 );
             }
             Self::Anisotropic {
@@ -429,7 +442,7 @@ impl PressureCouplingType {
                     "compressibility",
                     compressibility
                         .iter()
-                        .map(|v| Gf(*v).to_string())
+                        .map(|v| Gf64(*v).to_string())
                         .collect::<Vec<_>>()
                         .join(" "),
                 );
@@ -449,7 +462,7 @@ impl PressureCouplingType {
                 append_inp(
                     &mut res,
                     "compressibility",
-                    format!("{} {}", Gf(*compressibility_xy), Gf(*compressibility_z)),
+                    format!("{} {}", Gf64(*compressibility_xy), Gf64(*compressibility_z)),
                 );
             }
         }
@@ -915,6 +928,13 @@ impl MdpParams {
             }
         }
 
+        fn f64_or(map: &HashMap<String, String>, k: &str, d: f64) -> io::Result<f64> {
+            match map.get(k) {
+                None => Ok(d),
+                Some(v) => v.parse().map_err(|e| inv(k, e)),
+            }
+        }
+
         fn u8_or(map: &HashMap<String, String>, k: &str, d: u8) -> io::Result<u8> {
             match map.get(k) {
                 None => Ok(d),
@@ -956,6 +976,16 @@ impl MdpParams {
                 Some(v) => v
                     .split_whitespace()
                     .map(|s| s.parse::<f32>().map_err(|e| inv(k, e)))
+                    .collect(),
+            }
+        }
+
+        fn f64_vec(map: &HashMap<String, String>, k: &str, d: Vec<f64>) -> io::Result<Vec<f64>> {
+            match map.get(k) {
+                None => Ok(d),
+                Some(v) => v
+                    .split_whitespace()
+                    .map(|s| s.parse::<f64>().map_err(|e| inv(k, e)))
                     .collect(),
             }
         }
@@ -1113,11 +1143,11 @@ impl MdpParams {
 
         let pcoupltype = match pcoupltype_s.as_str() {
             "isotropic" => PressureCouplingType::Isotropic {
-                compressibility: f32_or(&map, "compressibility", 4.5e-5)?,
+                compressibility: f64_or(&map, "compressibility", 4.5e-5)?,
                 ref_p: f32_or(&map, "ref-p", 1.0)?,
             },
             "semiisotropic" => {
-                let comp = f32_vec(&map, "compressibility", vec![4.5e-5, 4.5e-5])?;
+                let comp = f64_vec(&map, "compressibility", vec![4.5e-5, 4.5e-5])?;
                 let rp = f32_vec(&map, "ref-p", vec![1.0, 1.0])?;
                 PressureCouplingType::Semiisotropic {
                     compressibility_xy: comp.first().copied().unwrap_or(4.5e-5),
@@ -1127,10 +1157,11 @@ impl MdpParams {
                 }
             }
             "anisotropic" => {
-                let comp = f32_vec(&map, "compressibility", vec![4.5e-5; 6])?;
+                let comp = f64_vec(&map, "compressibility", vec![4.5e-5; 6])?;
                 let rp = f32_vec(&map, "ref-p", vec![1.0; 6])?;
-                let mut compressibility = [4.5e-5_f32; 6];
-                let mut ref_p = [1.0_f32; 6];
+                let mut compressibility = [4.5e-5f64; 6];
+                let mut ref_p = [1.0; 6];
+
                 for (i, v) in comp.iter().enumerate().take(6) {
                     compressibility[i] = *v;
                 }
@@ -1143,7 +1174,7 @@ impl MdpParams {
                 }
             }
             "surface-tension" => {
-                let comp = f32_vec(&map, "compressibility", vec![4.5e-5, 4.5e-5])?;
+                let comp = f64_vec(&map, "compressibility", vec![4.5e-5, 4.5e-5])?;
                 let rp = f32_vec(&map, "ref-p", vec![0.0, 1.0])?;
                 PressureCouplingType::SurfaceTension {
                     compressibility_xy: comp.first().copied().unwrap_or(4.5e-5),
