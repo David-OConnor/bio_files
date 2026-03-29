@@ -340,6 +340,7 @@ impl GromacsInput {
                     "5",
                 ],
             )?;
+
             // genion asks interactively which group to replace; we select SOL.
             run_gmx_stdin(
                 dir,

@@ -343,7 +343,7 @@ pub struct GromacsFrame {
 }
 
 /// The collected output of a `gmx mdrun` run.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct GromacsOutput {
     /// Full text of the GROMACS `.log` file.
     pub log_text: String,
