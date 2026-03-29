@@ -113,7 +113,7 @@ impl PmeConfig {
 /// Integration algorithm.
 ///
 /// [GROMACS manual: run-control](https://manual.gromacs.org/current/user-guide/mdp-options.html#run-control)
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub enum Integrator {
     /// Leap-frog MD integrator (default in gromacsαθθs).
     #[default]
@@ -127,10 +127,21 @@ pub enum Integrator {
     Sd,
     Bd,
     /// Steep-descent energy minimization. (Good default for energy minimization)
-    Steep,
+    Steep {
+        /// (10.0) [kJ mol-1 nm-1] the minimization is converged when the maximum force is smaller than this value
+        emtol: f32,
+        /// (0.01) [nm] initial step-size
+        emstep: f32,
+    },
     /// Conjugate gradient energy minimization.
-    Cg,
-    LBfgs,
+    Cg {
+        emtol: f32,
+        /// (1000) [steps] interval of performing 1 steepest descent step while doing conjugate gradient energy minimization.
+        nstcgsteep: u32,
+    },
+    LBfgs {
+        nbfgscorr: u8,
+    },
     Nm,
     Tpi,
     Tpic,
@@ -146,9 +157,9 @@ impl Integrator {
             MdVvAvek => "md-vv-avek",
             Bd => "bd",
             Sd => "sd",
-            Steep => "steep",
-            Cg => "cg",
-            LBfgs => "l-bfgs",
+            Steep { .. } => "steep",
+            Cg { .. } => "cg",
+            LBfgs { .. } => "l-bfgs",
             Nm => "nm",
             Tpi => "tpi",
             Tpic => "tpic",
@@ -157,9 +168,29 @@ impl Integrator {
     }
 }
 
-impl fmt::Display for Integrator {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword())
+impl Integrator {
+    pub fn make_inp(&self) -> String {
+        use Integrator::*;
+
+        let mut res = String::new();
+        append_inp(&mut res, "integrator", &self.clone().keyword());
+
+        match self {
+            Steep { emtol, emstep } => {
+                append_inp(&mut res, "emtol", emtol);
+                append_inp(&mut res, "emstep", emstep);
+            }
+            Cg { emtol, nstcgsteep } => {
+                append_inp(&mut res, "emtol", emtol);
+                append_inp(&mut res, "nstcgsteep", nstcgsteep);
+            }
+            LBfgs { nbfgscorr } => {
+                append_inp(&mut res, "nbfgscorr", nbfgscorr);
+            }
+            _ => (),
+        }
+
+        res
     }
 }
 
@@ -181,47 +212,23 @@ impl FreeEnergyCalculations {
     }
 }
 
-/// [https://manual.gromacs.org/current/user-guide/mdp-options.html#energy-minimization](MDP Guide: Energy min)
-#[derive(Clone, Debug, PartialEq)]
-#[cfg_attr(feature = "encode", derive(bincode::Encode, bincode::Decode))]
-pub struct EnergyMinimization {
-    /// (10.0) [kJ mol-1 nm-1] the minimization is converged when the maximum force is smaller
-    /// than this value
-    pub emtol: f32,
-    /// (0.01) [nm] initial step-size
-    pub emstep: f32,
-    /// (1000) [steps] interval of performing 1 steepest descent step while doing conjugate
-    /// gradient energy minimization.
-    pub nstcgsteep: u16,
-    /// (10) Number of correction steps to use for L-BFGS minimization. A higher number
-    /// is (at least theoretically) more accurate, but slower.
-    pub nbfgscorr: u8,
-}
-
-// GROMACS defaults.
-impl Default for EnergyMinimization {
-    fn default() -> Self {
-        Self {
-            emtol: 10.,
-            emstep: 0.01,
-            nstcgsteep: 1_000,
-            nbfgscorr: 0,
-        }
-    }
-}
-
-impl EnergyMinimization {
-    pub fn make_inp(&self) -> String {
-        let mut res = String::new();
-
-        append_inp(&mut res, "emtol", Gf(self.emtol));
-        append_inp(&mut res, "emstep", Gf(self.emstep));
-        append_inp(&mut res, "nstcgsteep", self.nstcgsteep);
-        append_inp(&mut res, "nbfgscorr", self.nbfgscorr);
-
-        res
-    }
-}
+// /// [https://manual.gromacs.org/current/user-guide/mdp-options.html#energy-minimization](MDP Guide: Energy min)
+// #[derive(Clone, Debug, PartialEq)]
+// #[cfg_attr(feature = "encode", derive(bincode::Encode, bincode::Decode))]
+// pub struct EnergyMinimization {
+//     /// (10.0) [kJ mol-1 nm-1] the minimization is converged when the maximum force is smaller
+//     /// than this value
+//     pub emtol: f32,
+//     /// (0.01) [nm] initial step-size
+//     /// /
+//     pub emstep: f32,
+//     /// (1000) [steps] interval of performing 1 steepest descent step while doing conjugate
+//     /// gradient energy minimization.
+//     pub nstcgsteep: u16,
+//     /// (10) Number of correction steps to use for L-BFGS minimization. A higher number
+//     /// is (at least theoretically) more accurate, but slower.
+//     pub nbfgscorr: u8,
+// }
 
 /// Temperature-coupling algorithm.
 ///
@@ -499,6 +506,7 @@ impl fmt::Display for CoulombType {
 }
 
 /// Van der Waals interaction treatment.
+/// Note: "Shift", "Switch", and "User" and deprecated, so we skip them here.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum VdwType {
     #[default]
@@ -515,9 +523,25 @@ impl VdwType {
     }
 }
 
-impl fmt::Display for VdwType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword())
+/// Van der Waals interaction treatment.
+/// Note: "Shift", "Switch", and "User" and deprecated, so we skip them here.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum VdwModifier {
+    #[default]
+    PotentialShift,
+    None,
+    ForceSwitch,
+    PotentialSwitch,
+}
+
+impl VdwModifier {
+    pub fn keyword(self) -> &'static str {
+        match self {
+            Self::PotentialShift => "Potential-shift",
+            Self::None => "None",
+            Self::ForceSwitch => "Force-switch",
+            Self::PotentialSwitch => "Potential-switch",
+        }
     }
 }
 
@@ -646,7 +670,7 @@ pub struct OutputControl {
     pub nstcalcenergy: Option<u32>,
     /// Write energies to `.edr` every N steps.
     pub nstenergy: Option<u32>,
-    /// Write compressed coordinates to `.xtc` every N steps (0 = never).
+    /// Write compressed coordinates to `.xtc.rs` every N steps (0 = never).
     pub nstxout_compressed: Option<u32>,
     ///  precision with which to write to the compressed trajectory file
     pub compressed_x_precision: u32,
@@ -715,11 +739,9 @@ pub struct MdpParams {
     /// Coulomb cutoff in **nm**.
     pub rcoulomb: f32,
     pub vdwtype: VdwType,
+    pub vdw_modifier: VdwModifier,
     /// VdW cutoff in **nm**.
     pub rvdw: f32,
-    /// None means use GROMACS defaults; don't write to the file.
-    pub energy_minimization: Option<EnergyMinimization>,
-
     // --- Temperature coupling ---
     pub thermostat: Thermostat,
     /// Time constant (ps) for each coupling group. Must match length of `ref_t`.
@@ -755,6 +777,7 @@ impl Default for MdpParams {
             coulombtype: CoulombType::default(),
             rcoulomb: 1.0,
             vdwtype: VdwType::default(),
+            vdw_modifier: VdwModifier::default(),
             rvdw: 1.0,
             thermostat: Thermostat::default(),
             tau_t: vec![1.0], // todo: 0.1?
@@ -765,7 +788,6 @@ impl Default for MdpParams {
             gen_temp: 300.,
             gen_seed: None,
             constraints: Constraints::default(),
-            energy_minimization: Default::default(),
             free_energy_calculations: Default::default(),
         }
     }
@@ -778,7 +800,9 @@ impl MdpParams {
 
         // Run control
         s.push_str("; Run control\n");
-        append_inp(&mut s, "integrator", self.integrator.keyword());
+
+        s.push_str(&self.integrator.make_inp());
+
         append_inp(&mut s, "nsteps", self.nsteps);
         append_inp(&mut s, "dt", Gf(self.dt));
 
@@ -792,15 +816,18 @@ impl MdpParams {
 
         append_inp(&mut s, "rcoulomb", Gf(self.rcoulomb));
         append_inp(&mut s, "vdw-type", self.vdwtype.keyword());
+        append_inp(&mut s, "vdw-modifier", self.vdw_modifier.keyword());
         append_inp(&mut s, "rvdw", Gf(self.rvdw));
 
         // Temperature coupling
         s.push_str("\n; Temperature coupling\n");
         append_inp(&mut s, "tcoupl", self.thermostat.keyword());
+
         // For the `sd` integrator, tcoupl must be `no`, but tc-grps / tau-t / ref-t
         // are still required: tau-t is the inverse friction constant (1/γ, ps).
         let needs_tc_params =
             self.thermostat != Thermostat::No || self.integrator == Integrator::Sd;
+
         if needs_tc_params {
             let n = self.ref_t.len().max(1);
             let tc_grps = (0..n).map(|_| "System").collect::<Vec<_>>().join(" ");
@@ -846,12 +873,6 @@ impl MdpParams {
         s.push_str("\n; Constraints\n");
         s.push_str(&self.constraints.make_inp());
 
-        if let Some(em) = &self.energy_minimization {
-            s.push_str("\n; Energy minimization\n");
-
-            s.push_str(&em.make_inp());
-        }
-
         append_inp(
             &mut s,
             "free-energy",
@@ -861,8 +882,9 @@ impl MdpParams {
         s
     }
 
+    // todo: This fn is a mess. re-definition of default values, field names etc here in addition to the enums.
     pub fn from_mdp_str(data: &str) -> io::Result<Self> {
-        fn inv(k: &str, e: impl std::fmt::Display) -> io::Error {
+        fn inv(k: &str, e: impl fmt::Display) -> io::Error {
             Error::new(ErrorKind::InvalidData, format!("{k}: {e}"))
         }
 
@@ -944,9 +966,17 @@ impl MdpParams {
             "md-vv-avek" => Integrator::MdVvAvek,
             "bd" => Integrator::Bd,
             "sd" => Integrator::Sd,
-            "steep" => Integrator::Steep,
-            "cg" => Integrator::Cg,
-            "l-bfgs" => Integrator::LBfgs,
+            "steep" => Integrator::Steep {
+                emtol: f32_or(&map, "emtol", 10.0)?,
+                emstep: f32_or(&map, "emstep", 0.01)?,
+            },
+            "cg" => Integrator::Cg {
+                emtol: f32_or(&map, "emtol", 10.0)?,
+                nstcgsteep: u32_or(&map, "nstcgsteep", 1000)?,
+            },
+            "l-bfgs" => Integrator::LBfgs {
+                nbfgscorr: u8_or(&map, "nbfgscorr", 10)?,
+            },
             "nm" => Integrator::Nm,
             "tpi" => Integrator::Tpi,
             "tpic" => Integrator::Tpic,
@@ -1023,6 +1053,24 @@ impl MdpParams {
                 ));
             }
         };
+
+        let vdwm_s = get_s(&map, "vdw-modifier")
+            .unwrap_or("Potential-shift")
+            .to_ascii_lowercase();
+
+        let vdw_modifier = match vdwm_s.as_str() {
+            "Potential-shift" => VdwModifier::PotentialShift,
+            "None" => VdwModifier::None,
+            "Force-switch" => VdwModifier::ForceSwitch,
+            "Potential-switch" => VdwModifier::PotentialShift,
+            o => {
+                return Err(Error::new(
+                    ErrorKind::InvalidData,
+                    format!("unknown vdw-modifier type: {o}"),
+                ));
+            }
+        };
+
         let rvdw = f32_or(&map, "rvdw", 1.0)?;
 
         let tcoupl_s = get_s(&map, "tcoupl")
@@ -1181,20 +1229,6 @@ impl MdpParams {
             }
         };
 
-        let em_keys = ["emtol", "emstep", "nstcgsteep", "nbfgscorr"];
-        let has_em = em_keys.iter().any(|k| map.contains_key(*k));
-        let energy_minimization = if has_em {
-            let d = EnergyMinimization::default();
-            Some(EnergyMinimization {
-                emtol: f32_or(&map, "emtol", d.emtol)?,
-                emstep: f32_or(&map, "emstep", d.emstep)?,
-                nstcgsteep: u16_or(&map, "nstcgsteep", d.nstcgsteep)?,
-                nbfgscorr: u8_or(&map, "nbfgscorr", d.nbfgscorr)?,
-            })
-        } else {
-            None
-        };
-
         let free_energy_calculations = match get_s(&map, "free-energy").unwrap_or("no") {
             "yes" => FreeEnergyCalculations::Yes,
             "expanded" => FreeEnergyCalculations::Expanded,
@@ -1218,6 +1252,7 @@ impl MdpParams {
             coulombtype,
             rcoulomb,
             vdwtype,
+            vdw_modifier,
             rvdw,
             thermostat,
             tau_t,
@@ -1228,7 +1263,6 @@ impl MdpParams {
             gen_temp,
             gen_seed,
             constraints,
-            energy_minimization,
             free_energy_calculations,
         })
     }

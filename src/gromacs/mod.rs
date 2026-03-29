@@ -427,7 +427,7 @@ impl GromacsInput {
                 "-o",
                 TRR_NAME,
                 "-x",
-                "traj.xtc",
+                "traj.xtc.rs",
                 "-c",
                 GRO_OUT_NAME,
                 "-e",

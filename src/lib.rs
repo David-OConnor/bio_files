@@ -25,6 +25,7 @@ pub mod dcd;
 mod mmcif_aux;
 pub mod mol_templates;
 pub mod prmtop;
+pub mod xtc;
 pub mod xyz;
 
 use std::{

@@ -7,7 +7,7 @@ use bio_files::dcd::DcdTrajectory;
 
 fn main() {
     let path_dcd = Path::new("traj.dcd");
-    let path_xtc = Path::new("traj.xtc");
+    let path_xtc = Path::new("traj.xtc.rs");
 
     let traj = DcdTrajectory::load(path_dcd).unwrap();
     // Or, if you have MDTraj installed, load XTC files:

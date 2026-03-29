@@ -32,9 +32,9 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 - MDP (GROMACS MD configuration)
 - EDR (GROMACS energy output)
 - ORCA input and output files (quantum chemistry; HF, DFT etc)
-- DCD (MD trajectories)
-- XTC: If [MDTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories)
 - TRR (MD trajectories)
+- XTC: If [MDTraj](https://www.mdtraj.org/1.9.8.dev0/index.html) is installed. (MD trajectories, compressed)
+  DCD (MD trajectories)
 
 ### Planned:
 
@@ -483,7 +483,7 @@ use bio_files::dcd::DcdTrajectory;
 
 fn main() {
     let path_dcd = Path::new("traj.dcd");
-    let path_xtc = Path::new("traj.xtc");
+    let path_xtc = Path::new("traj.xtc.rs");
     // Or TRR
 
     // Load trajectory files:
