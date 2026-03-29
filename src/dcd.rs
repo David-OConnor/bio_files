@@ -2,12 +2,10 @@
 //! This format is used, for example, by VMD.
 
 use std::{
-    fs,
     fs::{File, OpenOptions},
     io,
     io::{BufReader, Read, Seek, SeekFrom, Write},
     path::Path,
-    process::Command,
 };
 
 use lin_alg::f32::Vec3;

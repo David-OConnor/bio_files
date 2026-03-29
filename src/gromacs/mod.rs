@@ -98,6 +98,7 @@ pub struct GromacsInput {
     /// When set, `run()` will call `gmx solvate` to fill the box with water
     /// before preprocessing, and include the model's topology in the `.top`.
     pub water_model: Option<WaterModel>,
+    pub minimize_energy: bool,
 }
 
 impl Default for GromacsInput {
@@ -108,6 +109,7 @@ impl Default for GromacsInput {
             box_nm: None,
             ff_global: None,
             water_model: None,
+            minimize_energy: true,
         }
     }
 }
@@ -366,37 +368,46 @@ impl GromacsInput {
         };
 
         // Energy minimization — removes bad contacts
-        save_txt_to_file(dir.join("em.mdp"), em_mdp_str())?;
-        run_gmx(
-            dir,
-            &[
-                "grompp",
-                "-f",
-                "em.mdp",
-                "-c",
-                structure_gro,
-                "-p",
-                TOP_NAME,
-                "-o",
-                "em.tpr",
-                "-maxwarn",
-                "5",
-            ],
-        )?;
-        run_gmx(
-            dir,
-            &[
-                "mdrun",
-                "-s",
-                "em.tpr",
-                "-c",
-                "em.gro",
-                "-e",
-                ENERGY_OUT_NAME,
-                "-g",
-                "em.log",
-            ],
-        )?;
+        let md_input_gro = if self.minimize_energy {
+            // A preset configuration file.
+            save_txt_to_file(dir.join("em.mdp"), em_mdp_str())?;
+
+            run_gmx(
+                dir,
+                &[
+                    "grompp",
+                    "-f",
+                    "em.mdp",
+                    "-c",
+                    structure_gro,
+                    "-p",
+                    TOP_NAME,
+                    "-o",
+                    "em.tpr",
+                    "-maxwarn",
+                    "5",
+                ],
+            )?;
+
+            run_gmx(
+                dir,
+                &[
+                    "mdrun",
+                    "-s",
+                    "em.tpr",
+                    "-c",
+                    "em.gro",
+                    "-e",
+                    ENERGY_OUT_NAME,
+                    "-g",
+                    "em.log",
+                ],
+            )?;
+
+            "em.gro"
+        } else {
+            structure_gro
+        };
 
         // grompp: Preprocessor. Creates a [binary] TPR file from the generated input files.
         // [Data on TPR](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#tpr)
@@ -408,7 +419,7 @@ impl GromacsInput {
                 "-f",
                 MDP_NAME,
                 "-c",
-                "em.gro",
+                md_input_gro,
                 "-p",
                 TOP_NAME,
                 "-o",
@@ -437,25 +448,6 @@ impl GromacsInput {
                 "md.log",
             ],
         )?;
-
-        // // --- gmx trjconv: export trajectory as multi-frame GRO ---
-        // // `-pbc mol` re-wraps molecules into the box; `-b 0` starts from t=0.
-        // // The echo provides the "System" group selection for the interactive prompt.
-        // run_gmx_stdin(
-        //     dir,
-        //     &[
-        //         "trjconv",
-        //         "-f",
-        //         TRR_NAME,
-        //         "-s",
-        //         "topol.tpr",
-        //         "-o",
-        //         GRO_TRAJ_NAME,
-        //         "-pbc",
-        //         "mol",
-        //     ],
-        //     b"0\n", // select group 0 = "System"
-        // )?;
 
         let log_text = read_text(dir.join("md.log")).unwrap_or_default();
         // let traj_gro = read_text(dir.join(GRO_TRAJ_NAME))?;

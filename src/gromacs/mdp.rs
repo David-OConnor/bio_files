@@ -6,14 +6,13 @@
 //!
 //! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults.
 
+use crate::gromacs::save_txt_to_file;
 use std::{
     collections::HashMap,
     fmt, io,
     io::{Error, ErrorKind},
     path::Path,
 };
-
-use crate::gromacs::save_txt_to_file;
 
 /// Abramowitz & Stegun 7.1.26 — max error 1.5×10⁻⁷.
 fn erfc_approx(x: f32) -> f32 {
@@ -149,7 +148,7 @@ pub enum Integrator {
 }
 
 impl Integrator {
-    pub fn keyword(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         use Integrator::*;
         match self {
             Md => "md",
@@ -173,7 +172,7 @@ impl Integrator {
         use Integrator::*;
 
         let mut res = String::new();
-        append_inp(&mut res, "integrator", &self.clone().keyword());
+        append_inp(&mut res, "integrator", &self.clone().key());
 
         match self {
             Steep { emtol, emstep } => {
@@ -203,7 +202,7 @@ pub enum FreeEnergyCalculations {
 }
 
 impl FreeEnergyCalculations {
-    pub fn keyword(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::No => "no",
             Self::Yes => "yes",
@@ -246,7 +245,7 @@ pub enum Thermostat {
 }
 
 impl Thermostat {
-    pub fn keyword(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::No => "no",
             Self::NoseHoover => "nose-hoover",
@@ -259,7 +258,7 @@ impl Thermostat {
 
 impl fmt::Display for Thermostat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword())
+        write!(f, "{}", self.key())
     }
 }
 
@@ -490,7 +489,7 @@ impl CoulombType {
         res
     }
 
-    pub fn keyword(&self) -> &'static str {
+    pub fn key(&self) -> &'static str {
         match self {
             Self::Pme(_) => "PME",
             Self::CutOff => "Cut-off",
@@ -501,7 +500,7 @@ impl CoulombType {
 
 impl fmt::Display for CoulombType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword())
+        write!(f, "{}", self.key())
     }
 }
 
@@ -515,11 +514,19 @@ pub enum VdwType {
 }
 
 impl VdwType {
-    pub fn keyword(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::CutOff => "Cut-off",
             Self::Pme => "PME",
         }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Some(match key.to_lowercase().as_ref() {
+            "cut-off" => Self::CutOff,
+            "pme" => Self::Pme,
+            _ => return None,
+        })
     }
 }
 
@@ -535,13 +542,23 @@ pub enum VdwModifier {
 }
 
 impl VdwModifier {
-    pub fn keyword(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::PotentialShift => "Potential-shift",
             Self::None => "None",
             Self::ForceSwitch => "Force-switch",
             Self::PotentialSwitch => "Potential-switch",
         }
+    }
+
+    pub fn from_key(key: &str) -> Option<Self> {
+        Some(match key.to_lowercase().as_ref() {
+            "potential-shift" => Self::PotentialShift,
+            "none" => Self::None,
+            "force-switch" => Self::ForceSwitch,
+            "potential-switch" => Self::PotentialSwitch,
+            _ => return None,
+        })
     }
 }
 
@@ -557,18 +574,21 @@ pub enum Pbc {
 }
 
 impl Pbc {
-    pub fn keyword(self) -> &'static str {
+    pub fn key(self) -> &'static str {
         match self {
             Self::Xyz => "xyz",
             Self::No => "no",
             Self::Xy => "xy",
         }
     }
-}
 
-impl fmt::Display for Pbc {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.keyword())
+    pub fn from_key(key: &str) -> Option<Self> {
+        Some(match key.to_lowercase().as_ref() {
+            "xyz" => Self::Xyz,
+            "no" => Self::No,
+            "xy" => Self::Xy,
+            _ => return None,
+        })
     }
 }
 
@@ -815,13 +835,13 @@ impl MdpParams {
         s.push_str(&self.coulombtype.make_inp(self.rcoulomb));
 
         append_inp(&mut s, "rcoulomb", Gf(self.rcoulomb));
-        append_inp(&mut s, "vdw-type", self.vdwtype.keyword());
-        append_inp(&mut s, "vdw-modifier", self.vdw_modifier.keyword());
+        append_inp(&mut s, "vdw-type", self.vdwtype.key());
+        append_inp(&mut s, "vdw-modifier", self.vdw_modifier.key());
         append_inp(&mut s, "rvdw", Gf(self.rvdw));
 
         // Temperature coupling
         s.push_str("\n; Temperature coupling\n");
-        append_inp(&mut s, "tcoupl", self.thermostat.keyword());
+        append_inp(&mut s, "tcoupl", self.thermostat.key());
 
         // For the `sd` integrator, tcoupl must be `no`, but tc-grps / tau-t / ref-t
         // are still required: tau-t is the inverse friction constant (1/γ, ps).
@@ -856,7 +876,7 @@ impl MdpParams {
 
         // PBC
         s.push_str("\n; Periodic boundary conditions\n");
-        append_inp(&mut s, "pbc", self.pbc.keyword());
+        append_inp(&mut s, "pbc", self.pbc.key());
 
         // Velocity generation
         s.push_str("\n; Velocity generation\n");
@@ -873,11 +893,7 @@ impl MdpParams {
         s.push_str("\n; Constraints\n");
         s.push_str(&self.constraints.make_inp());
 
-        append_inp(
-            &mut s,
-            "free-energy",
-            self.free_energy_calculations.keyword(),
-        );
+        append_inp(&mut s, "free-energy", self.free_energy_calculations.key());
 
         s
     }
@@ -906,7 +922,7 @@ impl MdpParams {
             }
         }
 
-        fn u16_or(map: &HashMap<String, String>, k: &str, d: u16) -> io::Result<u16> {
+        fn _u16_or(map: &HashMap<String, String>, k: &str, d: u16) -> io::Result<u16> {
             match map.get(k) {
                 None => Ok(d),
                 Some(v) => v.parse().map_err(|e| inv(k, e)),
@@ -1043,13 +1059,12 @@ impl MdpParams {
             .unwrap_or("cut-off")
             .to_ascii_lowercase();
 
-        let vdwtype = match vdw_s.as_str() {
-            "cut-off" => VdwType::CutOff,
-            "pme" => VdwType::Pme,
-            o => {
+        let vdwtype = match VdwType::from_key(&vdw_s) {
+            Some(v) => v,
+            None => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("unknown vdw-type: {o}"),
+                    format!("unknown vdw-type: {vdw_s}"),
                 ));
             }
         };
@@ -1058,15 +1073,12 @@ impl MdpParams {
             .unwrap_or("Potential-shift")
             .to_ascii_lowercase();
 
-        let vdw_modifier = match vdwm_s.as_str() {
-            "Potential-shift" => VdwModifier::PotentialShift,
-            "None" => VdwModifier::None,
-            "Force-switch" => VdwModifier::ForceSwitch,
-            "Potential-switch" => VdwModifier::PotentialShift,
-            o => {
+        let vdw_modifier = match VdwModifier::from_key(&vdwm_s) {
+            Some(v) => v,
+            None => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("unknown vdw-modifier type: {o}"),
+                    format!("unknown vdw-modifier type: {vdwm_s}"),
                 ));
             }
         };
@@ -1090,7 +1102,7 @@ impl MdpParams {
                 ));
             }
         };
-        let tau_t = f32_vec(&map, "tau-t", vec![1.0])?;
+        let tau_t = f32_vec(&map, "tau-t", vec![0.1])?;
         let ref_t = f32_vec(&map, "ref-t", vec![300.0])?;
 
         let pcoupl_s = get_s(&map, "pcoupl").unwrap_or("no").to_ascii_lowercase();
@@ -1166,14 +1178,12 @@ impl MdpParams {
         };
 
         let pbc_s = get_s(&map, "pbc").unwrap_or("xyz").to_ascii_lowercase();
-        let pbc = match pbc_s.as_str() {
-            "xyz" => Pbc::Xyz,
-            "no" => Pbc::No,
-            "xy" => Pbc::Xy,
-            o => {
+        let pbc = match Pbc::from_key(&pbc_s) {
+            Some(pbc) => pbc,
+            None => {
                 return Err(Error::new(
                     ErrorKind::InvalidData,
-                    format!("unknown pbc: {o}"),
+                    format!("unknown pbc: {pbc_s}"),
                 ));
             }
         };
