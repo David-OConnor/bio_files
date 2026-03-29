@@ -225,11 +225,11 @@ impl GromacsInput {
     }
 
     /// Generate the GROMACS `.top` topology file.
-    pub fn make_top(&self) -> String {
-        let mol_tops: Vec<topology::MoleculeTopology<'_>> = self
+    pub fn make_top(&self) -> io::Result<String> {
+        let mol_tops: Vec<MoleculeTopology<'_>> = self
             .molecules
             .iter()
-            .map(|m| topology::MoleculeTopology {
+            .map(|m| MoleculeTopology {
                 name: &m.name,
                 atoms: &m.atoms,
                 bonds: &m.bonds,
@@ -258,7 +258,7 @@ impl GromacsInput {
         fs::create_dir_all(dir)?;
 
         save_txt_to_file(dir.join(GRO_NAME), &self.make_gro())?;
-        save_txt_to_file(dir.join(TOP_NAME), &self.make_top())?;
+        save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;
         save_txt_to_file(dir.join(MDP_NAME), &self.make_mdp())?;
 
         if let Some(WaterModel::Opc(ref template)) = self.water_model {

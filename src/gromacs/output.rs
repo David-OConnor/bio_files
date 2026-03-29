@@ -380,7 +380,8 @@ impl GromacsOutput {
 }
 
 /// Parse a multi-model `.gro` file (as produced by `gmx trjconv`) into a
-/// sequence of [`GromacsFrame`] values.
+/// sequence of [`GromacsFrame`] values. We prefer to parse trajectories from TRR files, but this
+/// can serve as a backup.
 ///
 /// Each model block has the layout:
 /// ```text
@@ -448,10 +449,6 @@ pub fn parse_multi_gro(text: &str) -> io::Result<Vec<GromacsFrame>> {
 
     Ok(frames)
 }
-
-// ---------------------------------------------------------------------------
-// Energy attachment
-// ---------------------------------------------------------------------------
 
 /// Attach energy records to trajectory frames by matching on simulation time.
 ///
