@@ -1,5 +1,5 @@
 //! For reading and writing the [DCD file format](https://docs.openmm.org/7.1.0/api-python/generated/simtk.openmm.app.dcdfile.DCDFile.html), for molecular dynamics simulations.
-//! This format is used, for example, by VMD.
+//! This format is used, for example, by VMD, CHARMM, and NAMD.
 
 use std::{
     fs::{File, OpenOptions},
@@ -9,6 +9,68 @@ use std::{
 };
 
 use lin_alg::f32::Vec3;
+
+use crate::FrameSlice;
+
+/// Stored directly in the DCD file header.d
+pub struct DcdMetadata {
+    pub num_atoms: usize,
+    pub num_frames: usize,
+    pub start_step: f32,
+    pub save_interval_steps: usize,
+    pub dt: f32,
+    pub end_time: f32,
+}
+
+impl DcdMetadata {
+    pub fn read(path: &Path) -> io::Result<Self> {
+        let f = File::open(path)?;
+        let mut r = BufReader::new(f);
+
+        let hdr = read_record(&mut r)?;
+        if hdr.len() < 84 || &hdr[0..4] != b"CORD" {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Not a CORD/DCD file",
+            ));
+        }
+        let mut icntrl = [0i32; 20];
+        for (i, item) in icntrl.iter_mut().enumerate() {
+            let off = 4 + i * 4;
+            *item = i32::from_le_bytes(hdr[off..off + 4].try_into().unwrap());
+        }
+        let num_frames = icntrl[0] as usize;
+        let istart = icntrl[1] as f64;
+        let nsavc = icntrl[2] as f64;
+        let delta = f32::from_le_bytes(hdr[4 + 36..4 + 40].try_into().unwrap());
+
+        skip_title_record(&mut r)?;
+
+        let natom_block = read_record(&mut r)?;
+        if natom_block.len() != 4 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Unexpected NATOM block size",
+            ));
+        }
+        let num_atoms = i32::from_le_bytes(natom_block[0..4].try_into().unwrap()) as usize;
+
+        let end_time = if num_frames == 0 {
+            0.0
+        } else {
+            ((istart + (num_frames as f64 - 1.0) * nsavc) * delta as f64) as f32
+        };
+
+        Ok(Self {
+            num_atoms,
+            num_frames,
+            start_step: istart as f32,
+            save_interval_steps: nsavc as usize,
+            dt: delta,
+            end_time,
+        })
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct DcdUnitCell {
@@ -69,7 +131,13 @@ impl DcdTrajectory {
     /// Load all frames from a DCD file. Equivalent to `read_dcd(path, None, None)`.
     pub fn load(path: &Path) -> io::Result<Self> {
         Ok(Self {
-            frames: read_dcd(path, None, None)?,
+            frames: read_dcd(
+                path,
+                FrameSlice::Time {
+                    start: None,
+                    end: None,
+                },
+            )?,
         })
     }
 
@@ -80,18 +148,16 @@ impl DcdTrajectory {
     }
 }
 
-/// Read frames from a DCD file, optionally filtered to a time window (in ps).
+/// Read frames from a DCD file, optionally filtered by a [`FrameSlice`].
 ///
-/// Frames whose time falls outside `[start_time, end_time]` are skipped by
-/// seeking past their coordinate blocks, so only matching frames are decoded.
-/// Pass `None` for either bound to leave that end open.
+/// For `FrameSlice::Time`, frames whose time (ps) falls outside `[start, end]`
+/// are skipped.  For `FrameSlice::Index`, frames whose 0-based index falls
+/// outside `[start, end]` are skipped.  In both cases skipping is done by
+/// seeking past the coordinate blocks, so only matching frames are decoded.
+/// Use `None` for either bound to leave that end open.
 ///
 /// Returns `Ok(Vec::new())` for an empty file.
-pub fn read_dcd(
-    path: &Path,
-    start_time: Option<f32>,
-    end_time: Option<f32>,
-) -> io::Result<Vec<DcdFrame>> {
+pub fn read_dcd(path: &Path, slice: FrameSlice) -> io::Result<Vec<DcdFrame>> {
     let f = File::open(path)?;
     let mut r = BufReader::new(f);
 
@@ -140,8 +206,14 @@ pub fn read_dcd(
 
     for i in 0..nset_total {
         let time = (istart + (i as f64) * nsavc) * delta;
-        let in_range = start_time.map_or(true, |t| time >= t as f64)
-            && end_time.map_or(true, |t| time <= t as f64);
+        let in_range = match slice {
+            FrameSlice::Time { start, end } => {
+                start.map_or(true, |t| time >= t) && end.map_or(true, |t| time <= t)
+            }
+            FrameSlice::Index { start, end } => {
+                start.map_or(true, |s| i >= s) && end.map_or(true, |e| i <= e)
+            }
+        };
 
         if !in_range {
             // Seek past unit cell record if present.

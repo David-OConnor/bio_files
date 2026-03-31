@@ -15,6 +15,7 @@ use std::{
 
 use lin_alg::f64::Vec3;
 
+use crate::FrameSlice;
 // todo: Consider structs that are "file-like" etc, and impl std traits to read/write etc? (Check examples
 // todo in other libs) instead of free-stnading fns.
 
@@ -42,6 +43,126 @@ pub struct OutputEnergy {
     pub density: Option<f32>,
 }
 
+/// This isn't stored directly in the file; transverse frame headers to collect this. Not too
+/// slow, as it doesn't load the frame coordinates.
+pub struct TrrMetadata {
+    pub num_atoms: usize,
+    pub num_frames: usize,
+    pub start_step: f32,
+    pub save_interval_steps: usize,
+    pub dt: f32,
+    pub end_time: f32,
+}
+
+impl TrrMetadata {
+    /// Scan all frame headers without decoding coordinate data to collect metadata.
+    pub fn read(path: &Path) -> io::Result<Self> {
+        const TRR_MAGIC: i32 = 1993;
+
+        let mut r = BufReader::new(File::open(path)?);
+
+        let mut num_atoms = 0usize;
+        let mut num_frames = 0usize;
+        let mut start_step = 0i32;
+        let mut first_time = 0.0f64;
+        let mut dt = 0.0f32;
+        let mut save_interval_steps = 0usize;
+        let mut end_time = 0.0f32;
+
+        loop {
+            let magic = {
+                let mut b = [0; 4];
+                match r.read_exact(&mut b) {
+                    Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
+                    other => other?,
+                }
+                i32::from_be_bytes(b)
+            };
+            if magic != TRR_MAGIC {
+                return Err(io::Error::new(
+                    ErrorKind::InvalidData,
+                    format!("TRR bad magic: expected {TRR_MAGIC}, got {magic}"),
+                ));
+            }
+
+            // Version string: u32 length + bytes + padding to 4B boundary.
+            let ver_len = trr_u32(&mut r)? as usize;
+            let ver_pad = (4 - (ver_len % 4)) % 4;
+            r.seek(SeekFrom::Current((ver_len + ver_pad) as i64))?;
+
+            // Header fields.
+            let ir_size = trr_i32(&mut r)? as usize;
+            let e_size = trr_i32(&mut r)? as usize;
+            let box_size = trr_i32(&mut r)? as usize;
+            let vir_size = trr_i32(&mut r)? as usize;
+            let pres_size = trr_i32(&mut r)? as usize;
+            let top_size = trr_i32(&mut r)? as usize;
+            let sym_size = trr_i32(&mut r)? as usize;
+            let x_size = trr_i32(&mut r)? as usize;
+            let v_size = trr_i32(&mut r)? as usize;
+            let f_size = trr_i32(&mut r)? as usize;
+            let natoms = trr_i32(&mut r)? as usize;
+            let step = trr_i32(&mut r)?;
+            let _nre = trr_i32(&mut r)?;
+
+            let double_prec = if x_size > 0 && natoms > 0 {
+                x_size == natoms * 3 * 8
+            } else if box_size > 0 {
+                box_size == 9 * 8
+            } else {
+                false
+            };
+
+            let time_ps: f64 = if double_prec {
+                trr_f64(&mut r)?
+            } else {
+                trr_f32(&mut r)? as f64
+            };
+            // lambda — same width, skip.
+            if double_prec {
+                trr_f64(&mut r)?;
+            } else {
+                trr_f32(&mut r)?;
+            }
+
+            if num_frames == 0 {
+                num_atoms = natoms;
+                start_step = step;
+                first_time = time_ps;
+            } else if num_frames == 1 {
+                dt = (time_ps - first_time) as f32;
+                save_interval_steps = (step - start_step).unsigned_abs() as usize;
+            }
+            end_time = time_ps as f32;
+            num_frames += 1;
+
+            // Seek past all data blocks.
+            let skip = ir_size
+                + e_size
+                + box_size
+                + vir_size
+                + pres_size
+                + top_size
+                + sym_size
+                + x_size
+                + v_size
+                + f_size;
+            if skip > 0 {
+                r.seek(SeekFrom::Current(skip as i64))?;
+            }
+        }
+
+        Ok(Self {
+            num_atoms,
+            num_frames,
+            start_step: start_step as f32,
+            save_interval_steps,
+            dt,
+            end_time,
+        })
+    }
+}
+
 /// Parse a GROMACS `.trr` trajectory file into a sequence of [`GromacsFrame`]
 /// values, optionally filtered to a time window (in ps).
 ///
@@ -53,15 +174,12 @@ pub struct OutputEnergy {
 /// Positions are converted from GROMACS native units (nm) to Å on read.
 ///
 /// [Format reference](https://manual.gromacs.org/current/reference-manual/file-formats.html#trr)
-pub fn read_trr(
-    trr: &Path,
-    start_time: Option<f32>,
-    end_time: Option<f32>,
-) -> io::Result<Vec<GromacsFrame>> {
+pub fn read_trr(trr: &Path, slice: FrameSlice) -> io::Result<Vec<GromacsFrame>> {
     const TRR_MAGIC: i32 = 1993;
 
     let mut r = BufReader::new(File::open(trr)?);
     let mut frames = Vec::new();
+    let mut frame_idx: usize = 0;
 
     loop {
         // Magic — EOF here is the normal loop termination.
@@ -128,9 +246,16 @@ pub fn read_trr(
             r.seek(SeekFrom::Current(pre_skip as i64))?;
         }
 
-        // Time-window filter — seek past this frame if it's out of range.
-        let in_range = start_time.map_or(true, |t| time_ps >= t as f64)
-            && end_time.map_or(true, |t| time_ps <= t as f64);
+        // Slice filter — seek past this frame if it's out of range.
+        let in_range = match slice {
+            FrameSlice::Time { start, end } => {
+                start.map_or(true, |t| time_ps >= t) && end.map_or(true, |t| time_ps <= t)
+            }
+            FrameSlice::Index { start, end } => {
+                start.map_or(true, |s| frame_idx >= s) && end.map_or(true, |e| frame_idx <= e)
+            }
+        };
+        frame_idx += 1;
         if !in_range {
             r.seek(SeekFrom::Current((x_size + v_size + f_size) as i64))?;
             continue;

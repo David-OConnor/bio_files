@@ -46,7 +46,9 @@ pub use output::{GromacsFrame, GromacsOutput, OutputEnergy};
 use solvate::WaterModel;
 pub use topology::MoleculeTopology;
 
-use crate::{AtomGeneric, BondGeneric, gromacs::output::read_trr, md_params::ForceFieldParams};
+use crate::{
+    AtomGeneric, BondGeneric, FrameSlice, gromacs::output::read_trr, md_params::ForceFieldParams,
+};
 
 // Used for creating intermediate files
 const TEMP_DIR: &str = "gromacs_temp";
@@ -59,8 +61,11 @@ pub(in crate::gromacs) const SOLVATED_NAME: &str = "solvated.gro";
 pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
 pub(in crate::gromacs) const TRR_NAME: &str = "traj.trr";
+pub(in crate::gromacs) const XTC_NAME: &str = "traj.xtc";
 pub(in crate::gromacs) const GRO_OUT_NAME: &str = "confout.gro";
 pub(in crate::gromacs) const ENERGY_OUT_NAME: &str = "energy.edr";
+
+const LOG_NAME: &str = "md.log";
 
 /// One molecule entry passed to a [`GromacsInput`].
 ///
@@ -439,19 +444,25 @@ impl GromacsInput {
                 "-o",
                 TRR_NAME,
                 "-x",
-                "traj.xtc.rs",
+                XTC_NAME,
                 "-c",
                 GRO_OUT_NAME,
                 "-e",
                 ENERGY_OUT_NAME,
                 "-g",
-                "md.log",
+                LOG_NAME,
             ],
         )?;
 
         let log_text = read_text(dir.join("md.log")).unwrap_or_default();
         // let traj_gro = read_text(dir.join(GRO_TRAJ_NAME))?;
-        let trr_frames = read_trr(&dir.join(TRR_NAME), None, None)?;
+        let trr_frames = read_trr(
+            &dir.join(TRR_NAME),
+            FrameSlice::Time {
+                start: None,
+                end: None,
+            },
+        )?;
 
         // Energy data is optional: if gmx energy fails or is unavailable, run()
         // still returns a valid trajectory — frames just have `energy: None`.

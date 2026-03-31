@@ -6,13 +6,14 @@
 //!
 //! Fields left as `None` are omitted from the generated file, deferring to GROMACS defaults.
 
-use crate::gromacs::save_txt_to_file;
 use std::{
     collections::HashMap,
     fmt, io,
     io::{Error, ErrorKind},
     path::Path,
 };
+
+use crate::gromacs::save_txt_to_file;
 
 /// Abramowitz & Stegun 7.1.26 — max error 1.5×10⁻⁷.
 fn erfc_approx(x: f32) -> f32 {

@@ -19,13 +19,16 @@
 //! | LJ sigma       | Å                 | nm                  | ÷ 10            |
 //! | LJ epsilon     | kcal/mol          | kJ/mol              | × 4.184         |
 
+use std::{
+    collections::{HashMap, HashSet},
+    io,
+};
+
 use crate::{
     AtomGeneric, BondGeneric,
     gromacs::{solvate, solvate::WaterModel},
     md_params::ForceFieldParams,
 };
-use std::collections::{HashMap, HashSet};
-use std::io;
 
 const KCAL_TO_KJ: f32 = 4.184;
 const ANG_TO_NM: f32 = 0.1;

@@ -486,6 +486,22 @@ pub struct BackboneSS {
     pub sec_struct: SecondaryStructure,
 }
 
+/// A way to allow users to slice a trajectory by either physical time or frame index.
+/// Times are in ps.
+///
+/// None values means unbounded on that side.
+#[derive(Clone, Copy, Debug)]
+pub enum FrameSlice {
+    Time {
+        start: Option<f64>,
+        end: Option<f64>,
+    },
+    Index {
+        start: Option<usize>,
+        end: Option<usize>,
+    },
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 /// The method used to find a given molecular structure. This data is present in mmCIF files
 /// as the `_exptl.method` field.
