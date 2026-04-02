@@ -27,6 +27,7 @@
 //! Units throughout follow the rest of the codebase (Å for positions).
 //! Conversions to GROMACS units (nm) happen inside this module.
 
+pub mod gro;
 pub mod mdp;
 pub mod output;
 pub mod solvate;

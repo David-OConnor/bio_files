@@ -555,7 +555,6 @@ impl Mol2 {
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        //todo: Fix this so it outputs mol2 instead of sdf.
         let file = File::create(path)?;
         let mut w = BufWriter::new(file);
         self.write_to(&mut w)

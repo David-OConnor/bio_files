@@ -502,6 +502,39 @@ pub enum FrameSlice {
     },
 }
 
+impl Display for FrameSlice {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        let v = match self {
+            Self::Time { start, end } => {
+                let fmt_idx = |i: &Option<f64>| match i {
+                    Some(v) => v.to_string(),
+                    None => String::from("|"),
+                };
+
+                if start.is_none() && end.is_none() {
+                    String::from("All")
+                } else {
+                    format!("{} - {} ps", fmt_idx(start), fmt_idx(end))
+                }
+            }
+            Self::Index { start, end } => {
+                let fmt_idx = |i: &Option<usize>| match i {
+                    Some(v) => v.to_string(),
+                    None => String::from("|"),
+                };
+
+                if start.is_none() && end.is_none() {
+                    String::from("All")
+                } else {
+                    format!("Frames {} - {}", fmt_idx(start), fmt_idx(end))
+                }
+            }
+        };
+
+        write!(f, "{v}")
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 /// The method used to find a given molecular structure. This data is present in mmCIF files
 /// as the `_exptl.method` field.

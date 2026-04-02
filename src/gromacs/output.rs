@@ -11,6 +11,7 @@ use std::{
     io::{self, BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write as _},
     path::Path,
     process::{Command, Stdio},
+    time::Instant,
 };
 
 use lin_alg::f64::Vec3;
@@ -57,6 +58,8 @@ pub struct TrrMetadata {
 impl TrrMetadata {
     /// Scan all frame headers without decoding coordinate data to collect metadata.
     pub fn read(path: &Path) -> io::Result<Self> {
+        let start = Instant::now();
+        println!("Starting TRR frame scan to load metadata...");
         const TRR_MAGIC: i32 = 1993;
 
         let mut r = BufReader::new(File::open(path)?);
@@ -151,6 +154,9 @@ impl TrrMetadata {
                 r.seek(SeekFrom::Current(skip as i64))?;
             }
         }
+
+        let elapsed = start.elapsed().as_millis();
+        println!("Scan complete in {elapsed} ms");
 
         Ok(Self {
             num_atoms,
