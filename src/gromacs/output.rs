@@ -483,6 +483,12 @@ pub struct GromacsOutput {
     /// Number of solute (non-water) atoms per frame. Atoms beyond this index
     /// in each frame's `atom_posits` are water molecules.
     pub solute_atom_count: usize,
+    /// Path to the saved input GRO file (mols_in_N.gro), if written.
+    pub gro_path: Option<std::path::PathBuf>,
+    /// Path to the saved TRR trajectory (traj_N.trr), if written.
+    pub trr_path: Option<std::path::PathBuf>,
+    /// Path to the saved XTC trajectory (traj_N.xtc), if written.
+    pub xtc_path: Option<std::path::PathBuf>,
 }
 
 impl GromacsOutput {
@@ -506,6 +512,9 @@ impl GromacsOutput {
             log_text,
             trajectory,
             solute_atom_count,
+            gro_path: None,
+            trr_path: None,
+            xtc_path: None,
         })
     }
 }

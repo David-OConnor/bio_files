@@ -53,6 +53,8 @@ use crate::{
 
 // Used for creating intermediate files
 const TEMP_DIR: &str = "gromacs_out";
+// Permanent output directory — numbered files are written here.
+const MD_OUT_DIR: &str = "md_out";
 
 pub(in crate::gromacs) const GRO_NAME: &str = "conf.gro";
 pub(in crate::gromacs) const TOP_NAME: &str = "topo.top";
@@ -293,6 +295,16 @@ impl GromacsInput {
 
         let solute_atom_count = self.solute_atom_count();
 
+        // Find the lowest run index N for which no output files exist yet.
+        let out_dir = Path::new(MD_OUT_DIR);
+        fs::create_dir_all(out_dir)?;
+        let run_n = (1_usize..)
+            .find(|&n| {
+                !out_dir.join(format!("traj_{n}.trr")).exists()
+                    && !out_dir.join(format!("traj_{n}.xtc")).exists()
+            })
+            .unwrap_or(1);
+
         // Solvation: fill the box with water before preprocessing.
         let structure_gro = if let Some(ref wm) = self.water_model {
             run_gmx(
@@ -374,7 +386,7 @@ impl GromacsInput {
         };
 
         // Energy minimization — removes bad contacts
-        let md_input_gro = if self.minimize_energy {
+        let md_input_gro: String = if self.minimize_energy {
             // A preset configuration file.
             save_txt_to_file(dir.join("em.mdp"), em_mdp_str())?;
 
@@ -410,9 +422,9 @@ impl GromacsInput {
                 ],
             )?;
 
-            "em.gro"
+            "em.gro".to_string()
         } else {
-            structure_gro
+            structure_gro.to_string()
         };
 
         // grompp: Preprocessor. Creates a [binary] TPR file from the generated input files.
@@ -425,7 +437,7 @@ impl GromacsInput {
                 "-f",
                 MDP_NAME,
                 "-c",
-                md_input_gro,
+                &md_input_gro,
                 "-p",
                 TOP_NAME,
                 "-o",
@@ -455,10 +467,31 @@ impl GromacsInput {
             ],
         )?;
 
+        // Copy output files to numbered paths in the permanent output directory.
+        let trr_src = dir.join(TRR_NAME);
+        let trr_dest = out_dir.join(format!("traj_{run_n}.trr"));
+        if trr_src.exists() {
+            fs::copy(&trr_src, &trr_dest)?;
+        }
+
+        let xtc_src = dir.join(XTC_NAME);
+        let xtc_dest = if xtc_src.exists() {
+            let dest = out_dir.join(format!("traj_{run_n}.xtc"));
+            fs::copy(&xtc_src, &dest)?;
+            Some(dest)
+        } else {
+            None
+        };
+
+        let gro_src = dir.join(&md_input_gro);
+        let gro_dest = out_dir.join(format!("mols_in_{run_n}.gro"));
+        if gro_src.exists() {
+            fs::copy(&gro_src, &gro_dest)?;
+        }
+
         let log_text = read_text(dir.join("md.log")).unwrap_or_default();
-        // let traj_gro = read_text(dir.join(GRO_TRAJ_NAME))?;
         let trr_frames = read_trr(
-            &dir.join(TRR_NAME),
+            &trr_src,
             FrameSlice::Time {
                 start: None,
                 end: None,
@@ -469,12 +502,18 @@ impl GromacsInput {
         // still returns a valid trajectory — frames just have `energy: None`.
         let energies = OutputEnergy::from_edr(&dir.join(ENERGY_OUT_NAME)).unwrap_or_default();
 
-        let result = GromacsOutput::new(log_text, trr_frames, energies, solute_atom_count)?;
-
-        // Remove the folder containing temporary (e.g. input and output) files.
-
-        // todo: Temp leaving in
-        // fs::remove_dir_all(dir)?;
+        let mut result = GromacsOutput::new(log_text, trr_frames, energies, solute_atom_count)?;
+        result.trr_path = if trr_dest.exists() {
+            Some(trr_dest)
+        } else {
+            None
+        };
+        result.xtc_path = xtc_dest;
+        result.gro_path = if gro_dest.exists() {
+            Some(gro_dest)
+        } else {
+            None
+        };
 
         Ok(result)
     }
