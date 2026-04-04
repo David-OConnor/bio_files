@@ -19,7 +19,7 @@ pub mod md_params;
 pub mod orca;
 
 pub mod amber_typedef;
-mod bond_inference;
+pub mod bond_inference;
 pub mod cif_sf;
 pub mod dcd;
 mod mmcif_aux;
@@ -596,6 +596,43 @@ impl FromStr for ExperimentalMethod {
         };
         Ok(method)
     }
+}
+
+// todo: Util module?
+
+pub(crate) fn el_from_atom_name(name: &str) -> Element {
+    let upper = name.to_uppercase();
+
+    // Two-letter element checks first (GAFF lowercase, PDB uppercase variants).
+    if upper.starts_with("CL") {
+        return Element::Chlorine;
+    }
+    if upper.starts_with("BR") {
+        return Element::Bromine;
+    }
+
+    let mut res = Element::from_letter(
+        &name
+            .chars()
+            .take_while(|c| c.is_ascii_alphabetic())
+            .take(1)
+            .collect::<String>()
+            .to_uppercase(),
+    )
+    .unwrap_or(Element::Carbon);
+
+    // Capitalisation-based corrections for atom names seen in Mol2/GRO files.
+    if name.starts_with('C') && !name.starts_with("Ca") && !name.starts_with("Cu") {
+        res = Element::Carbon;
+    }
+    if name.starts_with('H') && !name.starts_with("Hg") {
+        res = Element::Hydrogen;
+    }
+    if name.starts_with('S') && !name.starts_with("Se") {
+        res = Element::Sulfur;
+    }
+
+    res
 }
 
 /// We use this with SDF and Mol2 files.

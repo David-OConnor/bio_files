@@ -17,7 +17,7 @@
 //!    [`GromacsInput::run`] to execute the full pipeline and collect output.
 //!
 //! The `run` workflow:
-//! - Creates a temporary directory `gromacs_temp/`
+//! - Creates a temporary directory `gromacs_out/`
 //! - Writes `conf.gro`, `topol.top`, `md.mdp`
 //! - Runs `gmx grompp` to produce `topol.tpr`
 //! - Runs `gmx mdrun` to produce `traj.trr`, `confout.gro`, `energy.edr`, `md.log`
@@ -52,7 +52,7 @@ use crate::{
 };
 
 // Used for creating intermediate files
-const TEMP_DIR: &str = "gromacs_temp";
+const TEMP_DIR: &str = "gromacs_out";
 
 pub(in crate::gromacs) const GRO_NAME: &str = "conf.gro";
 pub(in crate::gromacs) const TOP_NAME: &str = "topo.top";

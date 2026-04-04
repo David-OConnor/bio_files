@@ -9,10 +9,17 @@ use std::{
 };
 
 use lin_alg::f64::Vec3;
+use na_seq::Element;
+
+use crate::el_from_atom_name;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct AtomGro {
+    /// Residue sequence number (resid), columns 0–4. Uniquely identifies each residue/molecule instance.
+    pub mol_id: u32,
+    /// Residue name (resname), columns 5–9.
     pub mol_name: String,
+    pub element: Element,
     pub atom_type: String,
     pub serial_number: u32,
     pub posit: Vec3,
@@ -57,33 +64,50 @@ impl Gro {
         let mut atoms = Vec::with_capacity(num_atoms);
 
         for line in &lines[2..2 + num_atoms] {
-            let cols: Vec<&str> = line.split_whitespace().collect();
+            // GRO uses fixed-width columns. When numbers exceed their field width the
+            // spaces between fields disappear, so split_whitespace() fails. Slice directly:
+            //   resid    [0 .. 5]   (5 chars, right-justified integer)
+            //   resname  [5 ..10]   (5 chars, left-justified string)  → mol_name
+            //   atomname [10..15]   (5 chars)                         → atom_type
+            //   atomser  [15..20]   (5 chars, right-justified integer) → serial_number
+            //   x        [20..28]   (8.3f nm)
+            //   y        [28..36]
+            //   z        [36..44]
+            let gro_slice = |a: usize, b: usize| -> &str {
+                let len = line.len();
+                line[a.min(len)..b.min(len)].trim()
+            };
 
-            if cols.len() < 6 {
+            if line.len() < 44 {
                 return Err(io::Error::new(
                     ErrorKind::InvalidData,
-                    format!("Atom line has fewer than 6 columns: {line}"),
+                    format!("Atom line is shorter than 44 chars: {line}"),
                 ));
             }
 
-            let mol_name = cols[0].to_owned();
-            let atom_type = cols[1].to_owned();
+            let mol_id = gro_slice(0, 5).parse::<u32>().map_err(|_| {
+                io::Error::new(ErrorKind::InvalidData, "Could not parse residue ID")
+            })?;
+            let mol_name = gro_slice(5, 10).to_owned(); // resname
+            let atom_type = gro_slice(10, 15).to_owned(); // atomname
 
-            let serial_number = cols[2].parse::<u32>().map_err(|_| {
+            let serial_number = gro_slice(15, 20).parse::<u32>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse atom serial number")
             })?;
-            let x = cols[3].parse::<f64>().map_err(|_| {
+            let x = gro_slice(20, 28).parse::<f64>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate")
             })?;
-            let y = cols[4].parse::<f64>().map_err(|_| {
+            let y = gro_slice(28, 36).parse::<f64>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse Y coordinate")
             })?;
-            let z = cols[5].parse::<f64>().map_err(|_| {
+            let z = gro_slice(36, 44).parse::<f64>().map_err(|_| {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate")
             })?;
 
             atoms.push(AtomGro {
+                mol_id,
                 mol_name,
+                element: el_from_atom_name(&atom_type),
                 atom_type,
                 serial_number,
                 posit: Vec3 { x, y, z },
@@ -123,13 +147,14 @@ impl Gro {
         writeln!(w, "{:>5}", self.atoms.len())?;
 
         for atom in &self.atoms {
-            // mol_name(9) atom_type(6) serial(5) x(8.3) y(8.3) z(8.3)
+            // Standard GRO fixed-width: resid(5) resname(5) atomname(5) atomserial(5) x(8.3) y(8.3) z(8.3)
             writeln!(
                 w,
-                "{:>9}{:>6}{:>5}{:>8.3}{:>8.3}{:>8.3}",
-                atom.mol_name,
-                atom.atom_type,
-                atom.serial_number,
+                "{:>5}{:<5}{:>5}{:>5}{:>8.3}{:>8.3}{:>8.3}",
+                atom.mol_id % 100_000,
+                &atom.mol_name[..atom.mol_name.len().min(5)],
+                &atom.atom_type[..atom.atom_type.len().min(5)],
+                atom.serial_number % 100_000,
                 atom.posit.x,
                 atom.posit.y,
                 atom.posit.z,
