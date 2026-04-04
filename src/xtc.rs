@@ -126,6 +126,9 @@ pub fn write_xtc(path: &Path, frames: &[DcdFrame]) -> io::Result<()> {
     }
 
     let n_atoms = frames[0].atom_posits.len();
+    if n_atoms == 0 {
+        return Ok(());
+    }
     for f in frames.iter().skip(1) {
         if f.atom_posits.len() != n_atoms {
             return Err(io::Error::new(
