@@ -58,7 +58,7 @@ pub(in crate::gromacs) const GRO_NAME: &str = "conf.gro";
 pub(in crate::gromacs) const TOP_NAME: &str = "topo.top";
 pub(in crate::gromacs) const MDP_NAME: &str = "md.mdp";
 pub(in crate::gromacs) const SOLVENT_GRO_NAME: &str = "opc.gro";
-pub(in crate::gromacs) const SOLVATED_NAME: &str = "solvated.gro";
+pub(in crate::gromacs) const SOLVATED_NAME: &str = "mols_in_solvated.gro";
 pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
 pub(in crate::gromacs) const TRR_NAME: &str = "traj.trr";
