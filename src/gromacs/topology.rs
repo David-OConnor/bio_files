@@ -432,30 +432,6 @@ fn write_molecule_block(
 
             let p = params_indexed.bond_stretching.get((ai, aj));
 
-            //
-            // let Some(fft_i) = &mol.atoms[ai - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining bond types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_j) = &mol.atoms[aj - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining bond types.",
-            //     ));
-            // };
-            //
-            // // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
-            // // todo to nm.
-            // let (r0_nm, kb_kj) = match ff.get_bond(&(fft_i.to_string(), fft_j), true) {
-            //     Some(v) => (v.r_0, v.k_b),
-            //     None => {
-            //         return Err(io::Error::other(format!(
-            //             "Missing bond-stretching params for FF types {fft_i} - {fft_j}"
-            //         )));
-            //     }
-            // };
-
             // todo: QC units.
             s.push_str(&format!(
                 "  {:>4}  {:>4}  1  {:>12.6}  {:>12.1}\n",
@@ -470,38 +446,12 @@ fn write_molecule_block(
     if !angle_triples.is_empty() {
         s.push_str("[ angles ]\n; ai   aj   ak   funct  theta0 (deg)  ktheta (kJ/mol/rad²)\n");
         for (ai, aj, ak) in &angle_triples {
-            // let Some(fft_i) = &mol.atoms[ai - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining angle types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_j) = &mol.atoms[aj - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining angle types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_k) = &mol.atoms[ak - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining angle types.",
-            //     ));
-            // };
+            let p = params_indexed.angle_bending.get((ai, aj, ak));
 
-            // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
-            // todo to nm.
-            let (theta_deg, k_kj) = match ff.get_valence_angle(&(fft_i, fft_j, fft_k), true) {
-                Some(v) => (v.theta_0.to_degrees(), v.k), // Convert from radians in the FF param set.
-                None => {
-                    return Err(io::Error::other(format!(
-                        "Missing angle params for FF types {fft_i} - {fft_j}"
-                    )));
-                }
-            };
-
+            // todo: QC units.
             s.push_str(&format!(
                 "  {:>4}  {:>4}  {:>4}  1  {:>10.3}  {:>12.3}\n",
-                ai, aj, ak, theta_deg, k_kj,
+                ai, aj, ak, p.theta_0.to_degrees(), pk._0,
             ));
         }
         s.push('\n');
@@ -512,29 +462,7 @@ fn write_molecule_block(
     if !dihedral_quads.is_empty() {
         s.push_str("[ dihedrals ]\n; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
         for (ai, aj, ak, al) in &dihedral_quads {
-            // let Some(fft_i) = &mol.atoms[ai - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining dihedral types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_j) = &mol.atoms[aj - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining dihedral types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_k) = &mol.atoms[ak - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining dihedral types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_l) = &mol.atoms[al - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining dihedral types.",
-            //     ));
-            // };
+            let p = params_indexed.dihedral.get((ai, aj, ak, l));
 
             // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
             // todo to nm.
@@ -568,29 +496,7 @@ fn write_molecule_block(
     if !improper_quads.is_empty() {
         let mut improper_lines = String::new();
         for (ai, aj, ak, al) in &improper_quads {
-            // let Some(fft_i) = mol.atoms[ai - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining improper types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_j) = mol.atoms[aj - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining improper types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_k) = mol.atoms[ak - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining improper types.",
-            //     ));
-            // };
-            //
-            // let Some(fft_l) = mol.atoms[al - 1].force_field_type else {
-            //     return Err(io::Error::other(
-            //         "Missing a FF param when determining improper types.",
-            //     ));
-            // };
+            let p = params_indexed improper.get((ai, aj, ak, l));
 
             // Impropers are allowed to be missing
             if let Some(params) = ff.get_dihedral(&(fft_i, fft_j, fft_k, fft_l), false, true) {
