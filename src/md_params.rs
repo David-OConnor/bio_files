@@ -10,6 +10,8 @@
 //! For ligands, `atom_type` is a "Type 3". For proteins/AAs, we are currently treating it
 //! as a type 1, but we're unclear on this.
 
+use na_seq::{AminoAcidGeneral, AtomTypeInRes, Nucleotide};
+use std::collections::HashSet;
 use std::{
     collections::HashMap,
     fs::File,
@@ -17,8 +19,6 @@ use std::{
     path::Path,
     str::FromStr,
 };
-
-use na_seq::{AminoAcidGeneral, AtomTypeInRes, Nucleotide};
 
 use crate::{LipidStandard, ResidueEnd};
 
@@ -270,7 +270,8 @@ pub struct LjParams {
 }
 
 impl LjParams {
-    /// Parse a single van-der-Waals (Lennard-Jones) parameter line.
+    /// Parse a single van-der-Waals (Lennard-Jones) parameter line in a dat file, e.g. `parm19.dat`
+    /// from Amber.
     pub fn from_line(line: &str) -> io::Result<Self> {
         // todo: QC this factor of 2!
         // 1.122 is 2^(1/6)
@@ -346,6 +347,32 @@ pub struct ForceFieldParamsVec {
     pub mass: Vec<MassParams>,
     pub lennard_jones: Vec<LjParams>,
     pub remarks: Vec<String>,
+}
+
+/// This variant of forcefield parameters offers the fastest lookups. Unlike the Vec and Hashmap
+/// based parameter structs, the indices are provincial
+/// to specific sets of atoms, bonds, sets of 3 atoms etc. For a description of fields, see `ForceFieldParams`, or the individual
+/// param-type structs here.
+///
+/// Note: The single-atom fields of `mass` and `partial_charges` are omitted: They're part of our
+/// `AtomDynamics` struct.`
+///
+/// We can use this for fast lookups in rust applications and libraries, or as a precursor to writing
+/// parameter files for other MD engines like GROMACS.
+#[derive(Clone, Debug, Default)]
+pub struct ForceFieldParamsIndexed {
+    pub mass: HashMap<usize, MassParams>,
+    pub bond_stretching: HashMap<(usize, usize), BondStretchingParams>,
+    /// Any bond to Hydrogen if configured as constrained. (Distance^2 in Å, 1 / mass in Daltons)
+    pub bond_rigid_constraints: HashMap<(usize, usize), (f32, f32)>,
+    pub angle: HashMap<(usize, usize, usize), AngleBendingParams>,
+    pub dihedral: HashMap<(usize, usize, usize, usize), Vec<DihedralParams>>,
+    pub improper: HashMap<(usize, usize, usize, usize), Vec<DihedralParams>>,
+    /// We use this to determine which 1-2 exclusions to apply for non-bonded forces. We use this
+    /// instead of `bond_stretching`, because `bond_stretching` omits bonds to Hydrogen, which we need
+    /// to account when applying exclusions.
+    pub bonds_topology: HashSet<(usize, usize)>,
+    pub lennard_jones: HashMap<usize, LjParams>,
 }
 
 /// Force field parameters, e.g. from Amber. Similar to `ForceFieldParams` but

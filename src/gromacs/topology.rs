@@ -29,6 +29,7 @@ use crate::{
     gromacs::{solvate, solvate::WaterModel},
     md_params::ForceFieldParams,
 };
+use crate::md_params::ForceFieldParamsIndexed;
 
 const KCAL_TO_KJ: f32 = 4.184;
 const ANG_TO_NM: f32 = 0.1;
@@ -355,6 +356,11 @@ fn write_molecule_block(
         return Err(io::Error::other("Missing FF params"));
     };
 
+
+    let params_indexed = ForceFieldParamsIndexed::new()
+
+
+    // todo: Do we want this mapping here, or should it be handled by FFParamsIndexed?
     // Build serial-number → 1-based index map.
     let sn_to_idx: HashMap<u32, usize> = mol
         .atoms
@@ -372,8 +378,13 @@ fn write_molecule_block(
     s.push_str("; nr   type    resnr  residue  atom    cgnr   charge     mass\n");
 
     for (i, atom) in mol.atoms.iter().enumerate() {
+
         let nr = i + 1;
-        let ff_type = atom.force_field_type.as_deref().unwrap_or("X");
+
+        let Some(ff_type) = &atom.force_field_type else {
+            return Err(io::Error::other("Missing FF type on atom; aborting"));
+        };
+
         let charge = atom.partial_charge.unwrap_or(0.0);
 
         let mass = mol
@@ -399,6 +410,7 @@ fn write_molecule_block(
                 .or_else(|| atom.type_in_res_general.clone())
                 .unwrap_or_else(|| format!("{}{}", atom.element.to_letter(), nr))
         };
+
         s.push_str(&format!(
             "  {:>4}  {:<6}  {:>5}  {:<8}  {:<6}  {:>4}  {:>8.4}  {:>8.3}\n",
             nr, ff_type, 1, mol.name, atom_name, nr, charge, mass,
@@ -418,32 +430,36 @@ fn write_molecule_block(
                 continue;
             };
 
-            let Some(fft_i) = mol.atoms[ai - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining bond types.",
-                ));
-            };
+            let p = params_indexed.bond_stretching.get((ai, aj));
 
-            let Some(fft_j) = mol.atoms[aj - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining bond types.",
-                ));
-            };
+            //
+            // let Some(fft_i) = &mol.atoms[ai - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining bond types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_j) = &mol.atoms[aj - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining bond types.",
+            //     ));
+            // };
+            //
+            // // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
+            // // todo to nm.
+            // let (r0_nm, kb_kj) = match ff.get_bond(&(fft_i.to_string(), fft_j), true) {
+            //     Some(v) => (v.r_0, v.k_b),
+            //     None => {
+            //         return Err(io::Error::other(format!(
+            //             "Missing bond-stretching params for FF types {fft_i} - {fft_j}"
+            //         )));
+            //     }
+            // };
 
-            // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
-            // todo to nm.
-            let (r0_nm, kb_kj) = match ff.get_bond(&(fft_i, fft_j), true) {
-                Some(v) => (v.r_0, v.k_b),
-                None => {
-                    return Err(io::Error::other(format!(
-                        "Missing bond-stretching params for FF types {fft_i} - {fft_j}"
-                    )));
-                }
-            };
-
+            // todo: QC units.
             s.push_str(&format!(
                 "  {:>4}  {:>4}  1  {:>12.6}  {:>12.1}\n",
-                ai, aj, r0_nm, kb_kj,
+                ai, aj, p.r_0, p.k,
             ));
         }
         s.push('\n');
@@ -454,27 +470,27 @@ fn write_molecule_block(
     if !angle_triples.is_empty() {
         s.push_str("[ angles ]\n; ai   aj   ak   funct  theta0 (deg)  ktheta (kJ/mol/rad²)\n");
         for (ai, aj, ak) in &angle_triples {
-            let Some(fft_i) = mol.atoms[ai - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining angle types.",
-                ));
-            };
-
-            let Some(fft_j) = mol.atoms[aj - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining angle types.",
-                ));
-            };
-
-            let Some(fft_k) = mol.atoms[ak - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining angle types.",
-                ));
-            };
+            // let Some(fft_i) = &mol.atoms[ai - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining angle types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_j) = &mol.atoms[aj - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining angle types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_k) = &mol.atoms[ak - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining angle types.",
+            //     ));
+            // };
 
             // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
             // todo to nm.
-            let (theta_deg, k_kj) = match ff.get_angle(&(fft_i, fft_j, fft_k), true) {
+            let (theta_deg, k_kj) = match ff.get_valence_angle(&(fft_i, fft_j, fft_k), true) {
                 Some(v) => (v.theta_0.to_degrees(), v.k), // Convert from radians in the FF param set.
                 None => {
                     return Err(io::Error::other(format!(
@@ -496,29 +512,29 @@ fn write_molecule_block(
     if !dihedral_quads.is_empty() {
         s.push_str("[ dihedrals ]\n; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
         for (ai, aj, ak, al) in &dihedral_quads {
-            let Some(fft_i) = mol.atoms[ai - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining dihedral types.",
-                ));
-            };
-
-            let Some(fft_j) = mol.atoms[aj - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining dihedral types.",
-                ));
-            };
-
-            let Some(fft_k) = mol.atoms[ak - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining dihedral types.",
-                ));
-            };
-
-            let Some(fft_l) = mol.atoms[al - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining dihedral types.",
-                ));
-            };
+            // let Some(fft_i) = &mol.atoms[ai - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining dihedral types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_j) = &mol.atoms[aj - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining dihedral types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_k) = &mol.atoms[ak - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining dihedral types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_l) = &mol.atoms[al - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining dihedral types.",
+            //     ));
+            // };
 
             // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
             // todo to nm.
@@ -552,29 +568,29 @@ fn write_molecule_block(
     if !improper_quads.is_empty() {
         let mut improper_lines = String::new();
         for (ai, aj, ak, al) in &improper_quads {
-            let Some(fft_i) = mol.atoms[ai - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining improper types.",
-                ));
-            };
-
-            let Some(fft_j) = mol.atoms[aj - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining improper types.",
-                ));
-            };
-
-            let Some(fft_k) = mol.atoms[ak - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining improper types.",
-                ));
-            };
-
-            let Some(fft_l) = mol.atoms[al - 1].force_field_type else {
-                return Err(io::Error::other(
-                    "Missing a FF param when determining improper types.",
-                ));
-            };
+            // let Some(fft_i) = mol.atoms[ai - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining improper types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_j) = mol.atoms[aj - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining improper types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_k) = mol.atoms[ak - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining improper types.",
+            //     ));
+            // };
+            //
+            // let Some(fft_l) = mol.atoms[al - 1].force_field_type else {
+            //     return Err(io::Error::other(
+            //         "Missing a FF param when determining improper types.",
+            //     ));
+            // };
 
             // Impropers are allowed to be missing
             if let Some(params) = ff.get_dihedral(&(fft_i, fft_j, fft_k, fft_l), false, true) {
@@ -592,6 +608,7 @@ fn write_molecule_block(
                 }
             }
         }
+
         if !improper_lines.is_empty() {
             s.push_str("[ dihedrals ] ; improper\n");
             s.push_str("; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
@@ -599,4 +616,6 @@ fn write_molecule_block(
             s.push('\n');
         }
     }
+
+    Ok(())
 }
