@@ -27,9 +27,8 @@ use std::{
 use crate::{
     AtomGeneric, BondGeneric,
     gromacs::{solvate, solvate::WaterModel},
-    md_params::ForceFieldParams,
+    md_params::{ForceFieldParams, ForceFieldParamsIndexed},
 };
-use crate::md_params::ForceFieldParamsIndexed;
 
 const KCAL_TO_KJ: f32 = 4.184;
 const ANG_TO_NM: f32 = 0.1;
@@ -82,23 +81,12 @@ pub fn make_top(
         }
     }
 
-    println!("a");
-
     s.push_str("[ atomtypes ]\n");
     s.push_str("; name  at.num   mass      charge  ptype  sigma (nm)      epsilon (kJ/mol)\n");
 
-    // todo temp
-    for (k, v) in &ff_global.unwrap().lennard_jones {
-        println!("LJ: {k}: {v:?}");
-    }
-
     for ff_type in &all_types {
-        // Try per-molecule params first, then the global fallback — same two-source
-        // chain used by lookup_bond/angle/dihedral. This matters because ff_mol often
-        // carries only bonded terms, while mass/LJ live in ff_global (e.g. GAFF2 table).
-
-        println!("0");
-
+        // Try per-molecule params first, then the global fallback.  This matters because ff_mol
+        // often carries only bonded terms, while mass/LJ live in ff_global (e.g. GAFF2 table).
         let mass_val = molecules
             .iter()
             .find_map(|m| m.ff_mol.and_then(|p| p.mass.get(ff_type.as_str())))
@@ -106,16 +94,12 @@ pub fn make_top(
             .map(|m| m.mass)
             .ok_or_else(|| io::Error::other(format!("Missing mass for FF type {ff_type}")))?;
 
-        println!("1");
-
         let (sigma_nm, eps_kj) = molecules
             .iter()
             .find_map(|m| m.ff_mol.and_then(|p| p.lennard_jones.get(ff_type.as_str())))
             .or_else(|| ff_global.and_then(|p| p.lennard_jones.get(ff_type.as_str())))
             .map(|lj| (lj.sigma * ANG_TO_NM, lj.eps * KCAL_TO_KJ))
             .ok_or_else(|| io::Error::other(format!("Missing LJ params for FF type {ff_type}")))?;
-
-        println!("2");
 
         let at_num = atomic_number_from_mass(mass_val);
 
@@ -125,8 +109,6 @@ pub fn make_top(
         ));
     }
 
-    println!("b");
-
     // Water model atom types
     if let Some(WaterModel::Opc(_)) = water_model {
         s.push_str(&opc_atomtypes());
@@ -135,7 +117,7 @@ pub fn make_top(
 
     // --- Per-molecule blocks -------------------------------------------------
     for mol in molecules {
-        write_molecule_block(&mut s, mol, ff_global);
+        write_molecule_block(&mut s, mol, ff_global)?;
     }
 
     // Water model molecule type (SOL) — must appear before [system]/[molecules]
@@ -178,146 +160,6 @@ fn opc_atomtypes() -> String {
 }
 
 // ---------------------------------------------------------------------------
-// Topology traversal helpers
-// ---------------------------------------------------------------------------
-
-/// Build an adjacency list (1-based index → neighbours) from bonds.
-fn adjacency(sn_to_idx: &HashMap<u32, usize>, bonds: &[BondGeneric]) -> HashMap<usize, Vec<usize>> {
-    let mut adj: HashMap<usize, Vec<usize>> = HashMap::new();
-    for bond in bonds {
-        let (Some(&ai), Some(&aj)) = (
-            sn_to_idx.get(&bond.atom_0_sn),
-            sn_to_idx.get(&bond.atom_1_sn),
-        ) else {
-            continue;
-        };
-        adj.entry(ai).or_default().push(aj);
-        adj.entry(aj).or_default().push(ai);
-    }
-    adj
-}
-
-/// Enumerate all 1-2-3 angle triples (each unique, centre atom = aj).
-pub(in crate::gromacs) fn enumerate_angles(
-    sn_to_idx: &HashMap<u32, usize>,
-    bonds: &[BondGeneric],
-) -> Vec<(usize, usize, usize)> {
-    let adj = adjacency(sn_to_idx, bonds);
-    let mut triples = Vec::new();
-    let mut seen: HashSet<(usize, usize, usize)> = HashSet::new();
-
-    for (&aj, neighbours) in &adj {
-        let n = neighbours.len();
-        for a in 0..n {
-            for b in (a + 1)..n {
-                let ai = neighbours[a];
-                let ak = neighbours[b];
-                let key = if ai < ak { (ai, aj, ak) } else { (ak, aj, ai) };
-                if seen.insert(key) {
-                    triples.push(key);
-                }
-            }
-        }
-    }
-    triples
-}
-
-/// Enumerate all hub-and-spoke improper quads: (sat0, sat1, hub, sat2).
-/// Hub is at index 2 (position 3) — Amber/GAFF convention.
-/// Only atoms with ≥3 neighbours are candidates.
-fn enumerate_impropers(
-    sn_to_idx: &HashMap<u32, usize>,
-    bonds: &[BondGeneric],
-) -> Vec<(usize, usize, usize, usize)> {
-    let adj = adjacency(sn_to_idx, bonds);
-    let mut quads = Vec::new();
-    let mut seen: HashSet<(usize, usize, usize, usize)> = HashSet::new();
-
-    for (&hub, neighbors) in &adj {
-        let n = neighbors.len();
-        if n < 3 {
-            continue;
-        }
-        for a in 0..n - 2 {
-            for b in a + 1..n - 1 {
-                for d in b + 1..n {
-                    let (sat0, sat1, sat2) = (neighbors[a], neighbors[b], neighbors[d]);
-                    let key = (sat0, sat1, hub, sat2);
-                    if seen.insert(key) {
-                        quads.push(key);
-                    }
-                }
-            }
-        }
-    }
-    quads
-}
-
-/// Look up an improper dihedral term.  Satellites are sorted alphabetically
-/// before forming the key, matching Amber's wildcard-lookup convention.
-fn lookup_improper<'a>(
-    sat0: &str,
-    sat1: &str,
-    hub: &str,
-    sat2: &str,
-    ff: Option<&'a crate::md_params::ForceFieldParams>,
-    ff_global: Option<&'a crate::md_params::ForceFieldParams>,
-) -> Option<&'a Vec<crate::md_params::DihedralParams>> {
-    let mut sats = [sat0, sat1, sat2];
-    sats.sort_unstable();
-    let key = (
-        sats[0].to_string(),
-        sats[1].to_string(),
-        hub.to_string(),
-        sats[2].to_string(),
-    );
-    for src in [ff, ff_global].into_iter().flatten() {
-        if let Some(p) = src.get_dihedral(&key, false, true) {
-            return Some(p);
-        }
-    }
-    None
-}
-
-/// Enumerate all 1-2-3-4 proper dihedral quads.
-fn enumerate_dihedrals(
-    sn_to_idx: &HashMap<u32, usize>,
-    bonds: &[BondGeneric],
-) -> Vec<(usize, usize, usize, usize)> {
-    let adj = adjacency(sn_to_idx, bonds);
-    let mut quads = Vec::new();
-    let mut seen: HashSet<(usize, usize, usize, usize)> = HashSet::new();
-
-    for bond in bonds {
-        let (Some(&aj), Some(&ak)) = (
-            sn_to_idx.get(&bond.atom_0_sn),
-            sn_to_idx.get(&bond.atom_1_sn),
-        ) else {
-            continue;
-        };
-        for &ai in adj.get(&aj).into_iter().flatten() {
-            if ai == ak {
-                continue;
-            }
-            for &al in adj.get(&ak).into_iter().flatten() {
-                if al == aj || al == ai {
-                    continue;
-                }
-                let key = if (ai, aj) < (al, ak) {
-                    (ai, aj, ak, al)
-                } else {
-                    (al, ak, aj, ai)
-                };
-                if seen.insert(key) {
-                    quads.push(key);
-                }
-            }
-        }
-    }
-    quads
-}
-
-// ---------------------------------------------------------------------------
 // Misc helpers
 // ---------------------------------------------------------------------------
 
@@ -356,18 +198,26 @@ fn write_molecule_block(
         return Err(io::Error::other("Missing FF params"));
     };
 
-
-    let params_indexed = ForceFieldParamsIndexed::new()
-
-
-    // todo: Do we want this mapping here, or should it be handled by FFParamsIndexed?
-    // Build serial-number → 1-based index map.
-    let sn_to_idx: HashMap<u32, usize> = mol
+    // Build 0-based serial-number → index map and adjacency list.
+    let sn_to_i: HashMap<u32, usize> = mol
         .atoms
         .iter()
         .enumerate()
-        .map(|(i, a)| (a.serial_number, i + 1))
+        .map(|(i, a)| (a.serial_number, i))
         .collect();
+
+    let mut adj_list: Vec<Vec<usize>> = vec![Vec::new(); mol.atoms.len()];
+    for bond in mol.bonds {
+        let (Some(&i0), Some(&i1)) = (sn_to_i.get(&bond.atom_0_sn), sn_to_i.get(&bond.atom_1_sn))
+        else {
+            continue;
+        };
+        adj_list[i0].push(i1);
+        adj_list[i1].push(i0);
+    }
+
+    // Build the indexed params — this handles wildcards, His edge cases, etc.
+    let pi = ForceFieldParamsIndexed::new(ff, mol.atoms, &adj_list, false)?;
 
     // [ moleculetype ]
     s.push_str("[ moleculetype ]\n; molname  nrexcl\n");
@@ -378,21 +228,15 @@ fn write_molecule_block(
     s.push_str("; nr   type    resnr  residue  atom    cgnr   charge     mass\n");
 
     for (i, atom) in mol.atoms.iter().enumerate() {
-
-        let nr = i + 1;
+        let nr = i + 1; // 1-based for GROMACS
 
         let Some(ff_type) = &atom.force_field_type else {
             return Err(io::Error::other("Missing FF type on atom; aborting"));
         };
 
         let charge = atom.partial_charge.unwrap_or(0.0);
-
-        let mass = mol
-            .ff_mol
-            .and_then(|p| p.mass.get(ff_type))
-            .or_else(|| ff_global.and_then(|p| p.mass.get(ff_type)))
-            .map(|m| m.mass)
-            .unwrap_or(12.011);
+        // Use indexed mass which already resolved aliases / element fallbacks.
+        let mass = pi.mass.get(&i).map(|m| m.mass).unwrap_or(12.011);
 
         let atom_name = if atom.hetero {
             // Small molecule / hetero: FF type (e.g. "oh", "c3") takes priority
@@ -419,69 +263,54 @@ fn write_molecule_block(
     s.push('\n');
 
     // [ bonds ]
-    if !mol.bonds.is_empty() {
+    // Iterate over the pre-built indexed params (0-based), emit 1-based for GROMACS.
+    if !pi.bond_stretching.is_empty() {
         s.push_str("[ bonds ]\n; ai   aj   funct  r0 (nm)    kb (kJ/mol/nm²)\n");
-
-        for bond in mol.bonds {
-            let (Some(&ai), Some(&aj)) = (
-                sn_to_idx.get(&bond.atom_0_sn),
-                sn_to_idx.get(&bond.atom_1_sn),
-            ) else {
-                continue;
-            };
-
-            let p = params_indexed.bond_stretching.get((ai, aj));
-
-            // todo: QC units.
+        let mut bonds: Vec<_> = pi.bond_stretching.iter().collect();
+        bonds.sort_by_key(|&(&(i0, i1), _)| (i0, i1));
+        for (&(i0, i1), p) in bonds {
             s.push_str(&format!(
-                "  {:>4}  {:>4}  1  {:>12.6}  {:>12.1}\n",
-                ai, aj, p.r_0, p.k,
+                "  {:>4}  {:>4}  1  {:>12.6e}  {:>12.1}\n",
+                i0 + 1,
+                i1 + 1,
+                p.r_0 * ANG_TO_NM,
+                p.k_b * BOND_K_FACTOR,
             ));
         }
         s.push('\n');
     }
 
     // [ angles ]
-    let angle_triples = enumerate_angles(&sn_to_idx, mol.bonds);
-    if !angle_triples.is_empty() {
+    if !pi.angle.is_empty() {
         s.push_str("[ angles ]\n; ai   aj   ak   funct  theta0 (deg)  ktheta (kJ/mol/rad²)\n");
-        for (ai, aj, ak) in &angle_triples {
-            let p = params_indexed.angle_bending.get((ai, aj, ak));
-
-            // todo: QC units.
+        let mut angles: Vec<_> = pi.angle.iter().collect();
+        angles.sort_by_key(|&(&(n0, ctr, n1), _)| (n0, ctr, n1));
+        for (&(n0, ctr, n1), p) in angles {
             s.push_str(&format!(
                 "  {:>4}  {:>4}  {:>4}  1  {:>10.3}  {:>12.3}\n",
-                ai, aj, ak, p.theta_0.to_degrees(), pk._0,
+                n0 + 1,
+                ctr + 1,
+                n1 + 1,
+                p.theta_0.to_degrees(),
+                p.k * KCAL_TO_KJ,
             ));
         }
         s.push('\n');
     }
 
-    // [ dihedrals ] — proper (funct 9) and improper (funct 4)
-    let dihedral_quads = enumerate_dihedrals(&sn_to_idx, mol.bonds);
-    if !dihedral_quads.is_empty() {
+    // [ dihedrals ] — proper (funct 9)
+    if !pi.dihedral.is_empty() {
         s.push_str("[ dihedrals ]\n; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
-        for (ai, aj, ak, al) in &dihedral_quads {
-            let p = params_indexed.dihedral.get((ai, aj, ak, l));
-
-            // todo: For all these values: QC when you convert from Amber to GROMACS units! E.g. Angstrom
-            // todo to nm.
-            let params = match ff.get_dihedral(&(fft_i, fft_j, fft_k, fft_l), true, true) {
-                Some(v) => v,
-                None => {
-                    return Err(io::Error::other(format!(
-                        "Missing dihedral params for FF types {fft_i} - {fft_j}"
-                    )));
-                }
-            };
-
-            for p in params {
+        let mut dihedrals: Vec<_> = pi.dihedral.iter().collect();
+        dihedrals.sort_by_key(|&(&(i0, i1, i2, i3), _)| (i0, i1, i2, i3));
+        for (&(i0, i1, i2, i3), terms) in dihedrals {
+            for p in terms {
                 s.push_str(&format!(
                     "  {:>4}  {:>4}  {:>4}  {:>4}  9  {:>10.3}  {:>12.4}  {:>4}\n",
-                    ai,
-                    aj,
-                    ak,
-                    al,
+                    i0 + 1,
+                    i1 + 1,
+                    i2 + 1,
+                    i3 + 1,
                     p.phase.to_degrees(),
                     p.barrier_height * KCAL_TO_KJ,
                     p.periodicity,
@@ -492,35 +321,26 @@ fn write_molecule_block(
     }
 
     // [ dihedrals ] — improper (funct 4)
-    let improper_quads = enumerate_impropers(&sn_to_idx, mol.bonds);
-    if !improper_quads.is_empty() {
-        let mut improper_lines = String::new();
-        for (ai, aj, ak, al) in &improper_quads {
-            let p = params_indexed improper.get((ai, aj, ak, l));
-
-            // Impropers are allowed to be missing
-            if let Some(params) = ff.get_dihedral(&(fft_i, fft_j, fft_k, fft_l), false, true) {
-                for p in params {
-                    improper_lines.push_str(&format!(
-                        "  {:>4}  {:>4}  {:>4}  {:>4}  4  {:>10.3}  {:>12.4}  {:>4}\n",
-                        ai,
-                        aj,
-                        ak,
-                        al,
-                        p.phase.to_degrees(),
-                        p.barrier_height * KCAL_TO_KJ,
-                        p.periodicity,
-                    ));
-                }
+    if !pi.improper.is_empty() {
+        s.push_str("[ dihedrals ] ; improper\n");
+        s.push_str("; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
+        let mut impropers: Vec<_> = pi.improper.iter().collect();
+        impropers.sort_by_key(|&(&(i0, i1, i2, i3), _)| (i0, i1, i2, i3));
+        for (&(i0, i1, i2, i3), terms) in impropers {
+            for p in terms {
+                s.push_str(&format!(
+                    "  {:>4}  {:>4}  {:>4}  {:>4}  4  {:>10.3}  {:>12.4}  {:>4}\n",
+                    i0 + 1,
+                    i1 + 1,
+                    i2 + 1,
+                    i3 + 1,
+                    p.phase.to_degrees(),
+                    p.barrier_height * KCAL_TO_KJ,
+                    p.periodicity,
+                ));
             }
         }
-
-        if !improper_lines.is_empty() {
-            s.push_str("[ dihedrals ] ; improper\n");
-            s.push_str("; ai   aj   ak   al   funct  phi0 (deg)  kphi (kJ/mol)  mult\n");
-            s.push_str(&improper_lines);
-            s.push('\n');
-        }
+        s.push('\n');
     }
 
     Ok(())

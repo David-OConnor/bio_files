@@ -10,17 +10,17 @@
 //! For ligands, `atom_type` is a "Type 3". For proteins/AAs, we are currently treating it
 //! as a type 1, but we're unclear on this.
 
-use crate::{LipidStandard, ResidueEnd};
-use na_seq::Element::Hydrogen;
-use na_seq::{AminoAcidGeneral, AtomTypeInRes, Nucleotide};
-use std::collections::HashSet;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs::File,
     io::{self, ErrorKind, Read},
     path::Path,
     str::FromStr,
 };
+
+use na_seq::{AminoAcidGeneral, AtomTypeInRes, Element, Element::Hydrogen, Nucleotide};
+
+use crate::{LipidStandard, ResidueEnd};
 
 /// Data for a MASS entry: e.g. "CT 12.01100" with optional comment.
 #[derive(Debug, Clone)]
@@ -347,6 +347,30 @@ pub struct ForceFieldParamsVec {
     pub mass: Vec<MassParams>,
     pub lennard_jones: Vec<LjParams>,
     pub remarks: Vec<String>,
+}
+
+/// Minimal atom data needed to build a [`ForceFieldParamsIndexed`].
+///
+/// Implemented for [`crate::AtomGeneric`] in this crate.  Downstream crates (e.g. `dynamics`)
+/// implement it for their own atom types without creating a circular dependency.
+pub trait AtomFfSource {
+    /// The Amber/GAFF force-field type string (e.g. `"CT"`, `"ca"`).
+    /// Returns `None` when the atom has no assigned FF type.
+    fn ff_type(&self) -> Option<&str>;
+    fn element(&self) -> Element;
+    fn serial_number(&self) -> u32;
+}
+
+impl AtomFfSource for crate::AtomGeneric {
+    fn ff_type(&self) -> Option<&str> {
+        self.force_field_type.as_deref()
+    }
+    fn element(&self) -> Element {
+        self.element
+    }
+    fn serial_number(&self) -> u32 {
+        self.serial_number
+    }
 }
 
 /// This variant of forcefield parameters offers the fastest lookups. Unlike the Vec and Hashmap
@@ -907,16 +931,21 @@ pub fn load_amino_charges(
 /// This code is straightforward if params are available; much of the logic here is related to handling
 /// missing parameters.
 impl ForceFieldParamsIndexed {
-    pub fn new(
+    pub fn new<A: AtomFfSource>(
         params: &ForceFieldParams,
-        atoms: &[AtomDynamics],
+        atoms: &[A],
         adjacency_list: &[Vec<usize>],
         h_constrained: bool,
     ) -> io::Result<Self> {
         let mut result = Self::default();
 
         for (i, atom) in atoms.iter().enumerate() {
-            let ff_type = &atom.force_field_type;
+            let ff_type = atom.ff_type().ok_or_else(|| {
+                io::Error::other(format!(
+                    "Missing FF type for atom #{}",
+                    atom.serial_number()
+                ))
+            })?;
 
             // Mass
             if let Some(mass) = params.mass.get(ff_type) {
@@ -928,7 +957,7 @@ impl ForceFieldParamsIndexed {
                         println!("Using C fallback mass for {ff_type}");
                     }
                     None => {
-                        return Err(ParamError::new(&format!(
+                        return Err(io::Error::other(format!(
                             "\nMD failure: Missing mass params for {ff_type}"
                         )));
                     }
@@ -940,7 +969,7 @@ impl ForceFieldParamsIndexed {
                         println!("Using N fallback mass for {ff_type}");
                     }
                     None => {
-                        return Err(ParamError::new(&format!(
+                        return Err(io::Error::other(format!(
                             "\nMD failure: Missing mass params for {ff_type}"
                         )));
                     }
@@ -952,7 +981,7 @@ impl ForceFieldParamsIndexed {
                         println!("Using O fallback mass for {ff_type}");
                     }
                     None => {
-                        return Err(ParamError::new(&format!(
+                        return Err(io::Error::other(format!(
                             "\nMD failure: Missing mass params for {ff_type}"
                         )));
                     }
@@ -962,21 +991,22 @@ impl ForceFieldParamsIndexed {
                     i,
                     MassParams {
                         atom_type: "".to_string(),
-                        mass: atom.element.atomic_weight(),
+                        mass: atom.element().atomic_weight(),
                         comment: None,
                     },
                 );
 
-                eprintln!("\nMissing mass params on {atom}; using element default.");
+                eprintln!(
+                    "\nMissing mass params for atom #{} (ff_type: {ff_type}); using element default.",
+                    atom.serial_number()
+                );
             }
 
             // Lennard-Jones / van der Waals
             if let Some(vdw) = params.lennard_jones.get(ff_type) {
                 result.lennard_jones.insert(i, vdw.clone());
-                // If the key is missing for the given FF type in our loaded data, check for certain
-                // special cases.
             } else {
-                // The mass values for all 4 of these are present in frcmod.ff19sb.
+                // Known ff19SB alias mappings: these types share LJ params with a base type.
                 if ff_type == "2C" || ff_type == "3C" || ff_type == "C8" {
                     result
                         .lennard_jones
@@ -993,16 +1023,23 @@ impl ForceFieldParamsIndexed {
                     result
                         .lennard_jones
                         .insert(i, params.lennard_jones.get("N").unwrap().clone());
-                    println!("Using N fallback VdW for {atom}");
+                    println!(
+                        "Using N fallback VdW for atom #{} ({ff_type})",
+                        atom.serial_number()
+                    );
                 } else if ff_type.starts_with("O") {
                     result
                         .lennard_jones
                         .insert(i, params.lennard_jones.get("O").unwrap().clone());
-                    println!("Using O fallback LJ for {atom}");
+                    println!(
+                        "Using O fallback LJ for atom #{} ({ff_type})",
+                        atom.serial_number()
+                    );
                 } else {
-                    println!("\nMissing LJ params for {atom}; setting to 0.");
-                    // 0. no interaction.
-                    // todo: If this is "CG" etc, fall back to other carbon params instead.
+                    println!(
+                        "\nMissing LJ params for atom #{} ({ff_type}); setting to 0.",
+                        atom.serial_number()
+                    );
                     result.lennard_jones.insert(
                         i,
                         LjParams {
@@ -1012,72 +1049,54 @@ impl ForceFieldParamsIndexed {
                         },
                     );
                 }
-
-                // return Err(ParamError::new(&format!(
-                //     "MD failure: Missing Van der Waals params for {ff_type}"
-                // )));
             }
         }
 
-        // Map from serial number fo index, for bonds and the atoms they point ot.
-        // let mut index_map = HashMap::new();
-        // for (i, atom) in atoms.iter().enumerate() {
-        //     index_map.insert(atom.serial_number, i);
-        // }
-
         // Bond lengths.
-        // for bond in bonds {
         for (i0, neighbors) in adjacency_list.iter().enumerate() {
             for &i1 in neighbors {
                 if i0 >= i1 {
                     continue; // Only add each bond once.
                 }
 
-                let type_0 = &atoms[i0].force_field_type;
-                let type_1 = &atoms[i1].force_field_type;
+                let type_0 = atoms[i0].ff_type().ok_or_else(|| {
+                    io::Error::other(format!(
+                        "Missing FF type for atom #{}",
+                        atoms[i0].serial_number()
+                    ))
+                })?;
+                let type_1 = atoms[i1].ff_type().ok_or_else(|| {
+                    io::Error::other(format!(
+                        "Missing FF type for atom #{}",
+                        atoms[i1].serial_number()
+                    ))
+                })?;
 
-                let data = params.get_bond(&(type_0.clone(), type_1.clone()), true);
+                let data = params.get_bond(&(type_0.to_string(), type_1.to_string()), true);
 
                 let Some(data) = data else {
-                    // todo: Consider removing this, and return an error.
-                    eprintln!(
-                        "\nMissing bond parameters for {type_0}-{type_1} on {} - {}. Using a safe default.",
-                        atoms[i0], atoms[i1]
-                    );
-                    result.bond_stretching.insert(
-                        (i0.min(i1), i0.max(i1)),
-                        BondStretchingParams {
-                            atom_types: (String::new(), String::new()),
-                            k_b: 300.,
-                            r_0: (atoms[i0].posit - atoms[i1].posit).magnitude(),
-                            comment: None,
-                        },
-                    );
-                    continue;
+                    return Err(io::Error::other(format!(
+                        "Missing bond params for {type_0}-{type_1} (atoms #{}-#{})",
+                        atoms[i0].serial_number(),
+                        atoms[i1].serial_number(),
+                    )));
                 };
                 let data = data.clone();
 
                 // If using fixed hydrogens, don't add these to our bond stretching params;
                 // add to a separate hydrogen rigid param variable.
-                if h_constrained && (atoms[i0].element == Hydrogen || atoms[i1].element == Hydrogen)
+                if h_constrained
+                    && (atoms[i0].element() == Hydrogen || atoms[i1].element() == Hydrogen)
                 {
-                    // Set up inverse mass using params directly, so we don't have to have
-                    // mass loaded into the atom directly yet.
-                    let ff_type_0 = &atoms[i0].force_field_type;
-                    let ff_type_1 = &atoms[i1].force_field_type;
-
                     // Mass
                     let (Some(mass_0), Some(mass_1)) =
-                        (params.mass.get(ff_type_0), params.mass.get(ff_type_1))
+                        (params.mass.get(type_0), params.mass.get(type_1))
                     else {
-                        return Err(ParamError::new(&format!(
-                            "MD failure: Missing mass params for {ff_type_0} or {ff_type_1}"
+                        return Err(io::Error::other(format!(
+                            "MD failure: Missing mass params for {type_0} or {type_1}"
                         )));
                     };
 
-                    // `bonds_topology` exists separately from `bond_params` specifically so we can
-                    // account for bonds to H in exclusions.
-                    // We will populate inverse mass in a second loop.
                     let inv_mass = 1. / mass_0.mass + 1. / mass_1.mass;
 
                     result
@@ -1093,65 +1112,87 @@ impl ForceFieldParamsIndexed {
         }
 
         // Valence angles: Every connection between 3 atoms bonded linearly.
+        // Keys are canonicalised as (n0.min(n1), ctr, n0.max(n1)) so that topology.rs
+        // can look them up after independent enumeration.
         for (ctr, neighbors) in adjacency_list.iter().enumerate() {
             if neighbors.len() < 2 {
                 continue;
             }
-            for (&n0, &n1) in neighbors.iter().tuple_combinations() {
-                let type_n0 = &atoms[n0].force_field_type;
-                let type_ctr = &atoms[ctr].force_field_type;
-                let type_n1 = &atoms[n1].force_field_type;
+            for a in 0..neighbors.len() {
+                let n0 = neighbors[a];
+                for b in (a + 1)..neighbors.len() {
+                    let n1 = neighbors[b];
 
-                let data = params
-                    .get_valence_angle(&(type_n0.clone(), type_ctr.clone(), type_n1.clone()), true);
+                    let type_n0 = atoms[n0].ff_type().ok_or_else(|| {
+                        io::Error::other(format!(
+                            "Missing FF type for atom #{}",
+                            atoms[n0].serial_number()
+                        ))
+                    })?;
+                    let type_ctr = atoms[ctr].ff_type().ok_or_else(|| {
+                        io::Error::other(format!(
+                            "Missing FF type for atom #{}",
+                            atoms[ctr].serial_number()
+                        ))
+                    })?;
+                    let type_n1 = atoms[n1].ff_type().ok_or_else(|| {
+                        io::Error::other(format!(
+                            "Missing FF type for atom #{}",
+                            atoms[n1].serial_number()
+                        ))
+                    })?;
 
-                let Some(data) = data else {
-                    // This comes up with the Hydrogen bound to NB in His. I don't know what to make of it.
-                    // I'm not sure exactly why I can't find this CR-NB-H angle, but
-                    // try subbing the NA variant:
-                    // "CR-NA-H     50.0      120.00    AA his,    changed based on NMA nmodes"
-                    if (type_n0 == "H" || type_n1 == "H")
-                        && type_ctr == "NB"
-                        && (type_n0 == "CR"
-                            || type_n1 == "CR"
-                            || type_n0 == "CV"
-                            || type_n1 == "CV")
-                    {
-                        // todo: Get to the bottom of this.
-                        println!(
-                            "His HB: Skipping valence angle. For now, inserting a dummy one with no force."
-                        );
-                        result.angle.insert(
-                            (n0, ctr, n1),
-                            AngleBendingParams {
-                                atom_types: (String::new(), String::new(), String::new()),
-                                k: 0.,
-                                theta_0: 0.,
-                                comment: None,
-                            },
-                        );
-                        continue;
+                    let data = params.get_valence_angle(
+                        &(
+                            type_n0.to_string(),
+                            type_ctr.to_string(),
+                            type_n1.to_string(),
+                        ),
+                        true,
+                    );
 
-                        // if let Some(v) = params.get_valence_angle(&(
-                        //     type_n0.clone(),
-                        //     "NA".to_string(),
-                        //     type_n1.clone(),
-                        // )) {
-                        //     println!("Substituting NA for NB in valence angle params");
-                        //     result.angle.insert((n0, ctr, n1), v.clone());
-                        //     continue;
-                        // }
-                    }
+                    let Some(data) = data else {
+                        // This comes up with the Hydrogen bound to NB in His. I don't know what to make of it.
+                        // I'm not sure exactly why I can't find this CR-NB-H angle, but
+                        // try subbing the NA variant:
+                        // "CR-NA-H     50.0      120.00    AA his,    changed based on NMA nmodes"
+                        if (type_n0 == "H" || type_n1 == "H")
+                            && type_ctr == "NB"
+                            && (type_n0 == "CR"
+                                || type_n1 == "CR"
+                                || type_n0 == "CV"
+                                || type_n1 == "CV")
+                        {
+                            // todo: Get to the bottom of this.
+                            println!(
+                                "His HB: Skipping valence angle. For now, inserting a dummy one with no force."
+                            );
+                            let key = (n0.min(n1), ctr, n0.max(n1));
+                            result.angle.insert(
+                                key,
+                                AngleBendingParams {
+                                    atom_types: (String::new(), String::new(), String::new()),
+                                    k: 0.,
+                                    theta_0: 0.,
+                                    comment: None,
+                                },
+                            );
+                            continue;
+                        }
 
-                    return Err(ParamError::new(&format!(
-                        "\nMD failure: Missing valence angle params for {type_n0}-{type_ctr}-{type_n1}. (sns: {} - {} - {})",
-                        atoms[n0].serial_number, atoms[ctr].serial_number, atoms[n1].serial_number,
-                    )));
-                    // }
-                };
-                let data = data.clone();
+                        return Err(io::Error::other(format!(
+                            "\nMD failure: Missing valence angle params for {type_n0}-{type_ctr}-{type_n1}. (sns: {} - {} - {})",
+                            atoms[n0].serial_number(),
+                            atoms[ctr].serial_number(),
+                            atoms[n1].serial_number(),
+                        )));
+                    };
+                    let data = data.clone();
 
-                result.angle.insert((n0, ctr, n1), data);
+                    // Canonicalise outer-atom order so topology lookups are unambiguous.
+                    let key = (n0.min(n1), ctr, n0.max(n1));
+                    result.angle.insert(key, data);
+                }
             }
         }
 
@@ -1181,16 +1222,36 @@ impl ForceFieldParamsIndexed {
                             continue;
                         }
 
-                        let type_0 = &atoms[i0].force_field_type;
-                        let type_1 = &atoms[i1].force_field_type;
-                        let type_2 = &atoms[i2].force_field_type;
-                        let type_3 = &atoms[i3].force_field_type;
+                        let type_0 = atoms[i0].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[i0].serial_number()
+                            ))
+                        })?;
+                        let type_1 = atoms[i1].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[i1].serial_number()
+                            ))
+                        })?;
+                        let type_2 = atoms[i2].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[i2].serial_number()
+                            ))
+                        })?;
+                        let type_3 = atoms[i3].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[i3].serial_number()
+                            ))
+                        })?;
 
                         let key = (
-                            type_0.clone(),
-                            type_1.clone(),
-                            type_2.clone(),
-                            type_3.clone(),
+                            type_0.to_string(),
+                            type_1.to_string(),
+                            type_2.to_string(),
+                            type_3.to_string(),
                         );
 
                         if let Some(dihes) = params.get_dihedral(&key, true, true) {
@@ -1202,24 +1263,10 @@ impl ForceFieldParamsIndexed {
                                 d.divider = 1;
                             }
                             result.dihedral.insert(idx_key, dihes);
-                        // }
-                        // else if allow_missing_dihedral_params {
-                        //     // Default of no constraint
-                        //     result.dihedral.insert(
-                        //         idx_key,
-                        //         vec![DihedralParams {
-                        //             atom_types: key,
-                        //             divider: 1,
-                        //             barrier_height: 0.,
-                        //             phase: 0.,
-                        //             periodicity: 1,
-                        //             comment: None,
-                        //         }],
-                        //     );
                         } else {
-                            return Err(ParamError::new(&format!(
+                            return Err(io::Error::other(format!(
                                 "\nMD failure: Missing dihedral params for {type_0}-{type_1}-{type_2}-{type_3}. (atom0 sn: {})",
-                                atoms[i0].serial_number
+                                atoms[i0].serial_number()
                             )));
                         }
                     }
@@ -1250,31 +1297,47 @@ impl ForceFieldParamsIndexed {
                             continue;
                         }
 
-                        let type_0 = &atoms[sat0].force_field_type;
-                        let type_1 = &atoms[sat1].force_field_type;
-                        let type_ctr = &atoms[ctr].force_field_type;
-                        let type_2 = &atoms[sat2].force_field_type;
+                        let type_0 = atoms[sat0].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[sat0].serial_number()
+                            ))
+                        })?;
+                        let type_1 = atoms[sat1].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[sat1].serial_number()
+                            ))
+                        })?;
+                        let type_ctr = atoms[ctr].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[ctr].serial_number()
+                            ))
+                        })?;
+                        let type_2 = atoms[sat2].ff_type().ok_or_else(|| {
+                            io::Error::other(format!(
+                                "Missing FF type for atom #{}",
+                                atoms[sat2].serial_number()
+                            ))
+                        })?;
 
                         // Sort satellites alphabetically; required to ensure we don't miss combinations.
-                        let mut sat_types = [type_0.clone(), type_1.clone(), type_2.clone()];
+                        let mut sat_types =
+                            [type_0.to_string(), type_1.to_string(), type_2.to_string()];
                         sat_types.sort();
 
                         let key = (
                             sat_types[0].clone(),
                             sat_types[1].clone(),
-                            type_ctr.clone(),
+                            type_ctr.to_string(),
                             sat_types[2].clone(),
                         );
 
-                        // In the case of improper, unlike all other param types, we are allowed to
-                        // have missing values. Impropers are only, by Amber convention, for planar
-                        // hub and spoke setups, so non-planar ones will be omitted. These may occur,
-                        // for example, at ring intersections.
+                        // Impropers are allowed to be missing (only planar hubs have them).
                         if let Some(dihes) = params.get_dihedral(&key, false, true) {
                             let mut dihes = dihes.clone();
                             for d in &mut dihes {
-                                // Generally, there is no divisor for impropers, but set it up here
-                                // to be more general.
                                 d.barrier_height /= d.divider as f32;
                                 d.divider = 1;
                             }
