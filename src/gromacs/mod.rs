@@ -170,7 +170,6 @@ impl GromacsInput {
         save_txt_to_file(dir.join(MDP_NAME), &self.make_mdp())?;
         save_txt_to_file(dir.join(GRO_NAME), &make_gro(&self.molecules, &self.box_nm))?;
         save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;
-        println!("Post make top");
 
         if let Some(WaterModel::Opc(ref template)) = self.water_model {
             save_txt_to_file(dir.join(SOLVENT_GRO_NAME), &template.to_gro())?;
