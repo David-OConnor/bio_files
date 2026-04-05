@@ -850,3 +850,25 @@ pub fn load_amino_charges(
 
     parse_lib_peptide(&data_str)
 }
+
+// // todo: C+P from dynamics, for use in GROMACS functionlity. Currently doesn't
+// // todo have the ff_q_maps. Do we need those for GROMACS? Should we just move this data struct here
+// // todo from dynamics?
+// #[derive(Default, Clone, Debug)]
+// /// A set of general parameters that aren't molecule-specific. E.g. from GAFF2, OL3, RNA, or amino19.
+// /// These are used as a baseline, and in some cases, overridden by molecule-specific parameters.
+// pub struct FfParamSet2 {
+//     pub peptide: Option<ForceFieldParams>,
+//     pub small_mol: Option<ForceFieldParams>,
+//     pub dna: Option<ForceFieldParams>,
+//     pub rna: Option<ForceFieldParams>,
+//     pub lipids: Option<ForceFieldParams>,
+//     pub carbohydrates: Option<ForceFieldParams>,
+//     // /// In addition to charge, this also contains the mapping of res type to FF type; required to map
+//     // /// other parameters to protein atoms. E.g. from `amino19.lib`, and its N and C-terminus variants.
+//     // pub peptide_ff_q_map: Option<ProtFfChargeMapSet>,
+//     // pub lipid_ff_q_map: Option<LipidFfChargeMap>,
+//     // // todo: QC these types; lipid as place holder. See how they parse.
+//     // pub dna_ff_q_map: Option<NucleicAcidFfChargeMap>,
+//     // pub rna_ff_q_map: Option<NucleicAcidFfChargeMap>,
+// }
