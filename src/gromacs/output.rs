@@ -478,6 +478,8 @@ pub struct GromacsFrame {
 pub struct GromacsOutput {
     /// Full text of the GROMACS `.log` file.
     pub log_text: String,
+    /// We flag this manually from a rust error code.
+    pub setup_failure: bool,
     /// Parsed trajectory frames.
     pub trajectory: Vec<GromacsFrame>,
     /// Number of solute (non-water) atoms per frame. Atoms beyond this index
@@ -500,16 +502,15 @@ impl GromacsOutput {
     /// time does not align with any energy record will have `energy: None`.
     pub fn new(
         log_text: String,
-        // traj_gro: &str,
         mut trajectory: Vec<GromacsFrame>,
         energies: Vec<OutputEnergy>,
         solute_atom_count: usize,
     ) -> io::Result<Self> {
-        // let mut trajectory/ = parse_multi_gro(traj_gro)?;
         attach_energies(&mut trajectory, energies);
 
         Ok(Self {
             log_text,
+            setup_failure: false,
             trajectory,
             solute_atom_count,
             gro_path: None,

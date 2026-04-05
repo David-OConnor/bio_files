@@ -81,18 +81,26 @@ pub fn make_top(
         }
     }
 
+    println!("a");
+
     s.push_str("[ atomtypes ]\n");
     s.push_str("; name  at.num   mass      charge  ptype  sigma (nm)      epsilon (kJ/mol)\n");
+
     for ff_type in &all_types {
         // Try per-molecule params first, then the global fallback — same two-source
         // chain used by lookup_bond/angle/dihedral. This matters because ff_mol often
         // carries only bonded terms, while mass/LJ live in ff_global (e.g. GAFF2 table).
+
+        println!("0");
+
         let mass_val = molecules
             .iter()
             .find_map(|m| m.ff_mol.and_then(|p| p.mass.get(ff_type.as_str())))
             .or_else(|| ff_global.and_then(|p| p.mass.get(ff_type.as_str())))
             .map(|m| m.mass)
             .ok_or_else(|| io::Error::other(format!("Missing mass for FF type {ff_type}")))?;
+
+        println!("1");
 
         let (sigma_nm, eps_kj) = molecules
             .iter()
@@ -101,6 +109,8 @@ pub fn make_top(
             .map(|lj| (lj.sigma * ANG_TO_NM, lj.eps * KCAL_TO_KJ))
             .ok_or_else(|| io::Error::other(format!("Missing LJ params for FF type {ff_type}")))?;
 
+        println!("2");
+
         let at_num = atomic_number_from_mass(mass_val);
 
         s.push_str(&format!(
@@ -108,6 +118,8 @@ pub fn make_top(
             ff_type, at_num, mass_val, sigma_nm, eps_kj,
         ));
     }
+
+    println!("b");
 
     // Water model atom types
     if let Some(WaterModel::Opc(_)) = water_model {
