@@ -14,7 +14,7 @@ use std::{
 
 use bio_apis::amber_geostd;
 use lin_alg::f64::Vec3;
-use na_seq::{AtomTypeInRes, Element};
+use na_seq::AtomTypeInRes;
 
 use crate::{
     AtomGeneric, BondGeneric, BondType, PharmacophoreFeatureGeneric, Sdf, el_from_atom_name,

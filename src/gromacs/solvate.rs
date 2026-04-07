@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use lin_alg::f32::Vec3;
 
-use crate::gromacs::SOLVENT_GRO_NAME;
+use crate::gromacs::{CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER};
 
 /// C+P from `dynamics`.
 #[derive(Clone, Debug, PartialEq)]
@@ -23,6 +23,7 @@ pub struct WaterInitTemplate {
 }
 
 impl WaterInitTemplate {
+    // todo: This may be hard-coded for OPC, but we use Gromacs' built-in OPC template.
     /// Create `.gro` file text for use as the `gmx solvate -cs` template.
     ///
     /// Writes 4 atoms per molecule (OW, HW1, HW2, MW) in GROMACS `.gro` format.
@@ -101,55 +102,60 @@ impl WaterInitTemplate {
 /// 1. Include the model's atom-type and molecule-type sections in the topology.
 /// 2. Run `gmx solvate` to fill the simulation box with water before `grompp`.
 #[derive(Clone, Debug, PartialEq)]
-pub enum WaterModel {
+pub enum Solvent {
     /// OPC 4-point rigid water (recommended with Amber ff19SB).
     /// Requires GROMACS 2022+ which ships `opc.gro` in its data directory.
-    Opc(WaterInitTemplate),
+    /// Note: We don't actually
+    // Opc(WaterInitTemplate),
+    Opc,
+    Custom(WaterInitTemplate),
 }
 
-impl WaterModel {
+impl Solvent {
     /// Pre-equilibrated water-box filename written by `save()` and passed to `gmx solvate -cs`.
     pub(in crate::gromacs) fn gro_filename(&self) -> &'static str {
         match self {
-            Self::Opc(_) => SOLVENT_GRO_NAME,
+            // 4-site model is fine for OPC; we just use a different force field.
+            Self::Opc => GMX_BUILTIN_TIP4P_WATER,
+            Self::Custom(solvent) => CUSTOM_SOLVENT_GRO,
         }
     }
 }
 
-/// Topology: Complete `SOL` molecule-type block for OPC 4-point water.
-///
-/// Geometry:
-/// - d(O–H) = 0.08724 nm
-/// - ∠H–O–H = 103.6° → d(H–H) = 0.13712 nm
-/// - d(O–MW) = 0.01594 nm along the H–O–H bisector → virtual-site coefficients a = b = 0.147803
-///
-/// `gmx solvate -p` appends the molecule count; we only define the type here.
-pub(in crate::gromacs) fn opc_sol_moleculetype() -> String {
-    String::from(
-        "[ moleculetype ]\n\
-         ; molname  nrexcl\n\
-         SOL        2\n\
-         \n\
-         [ atoms ]\n\
-         ; nr  type    resnr  residue  atom  cgnr   charge     mass\n\
-            1  OW_opc  1      SOL      OW    1       0.0000   15.99940\n\
-            2  HW_opc  1      SOL      HW1   2       0.6791    1.00800\n\
-            3  HW_opc  1      SOL      HW2   3       0.6791    1.00800\n\
-            4  MW      1      SOL      MW    4      -1.3582    0.00000\n\
-         \n\
-         [ settles ]\n\
-         ; OW  funct  dOH (nm)  dHH (nm)\n\
-            1   1      0.08724   0.13712\n\
-         \n\
-         [ virtual_sites3 ]\n\
-         ; MW  OW  HW1  HW2  funct  a         b\n\
-            4   1    2    3   1     0.147803  0.147803\n\
-         \n\
-         [ exclusions ]\n\
-         1  2  3  4\n\
-         2  1  3  4\n\
-         3  1  2  4\n\
-         4  1  2  3\n\
-         \n",
-    )
-}
+// /// Topology: Complete `SOL` molecule-type block for OPC 4-point water.
+// ///
+// /// Geometry:
+// /// - d(O–H) = 0.08724 nm
+// /// - ∠H–O–H = 103.6° → d(H–H) = 0.13712 nm
+// /// - d(O–MW) = 0.01594 nm along the H–O–H bisector → virtual-site coefficients a = b = 0.147803
+// ///
+// /// `gmx solvate -p` appends the molecule count; we only define the type here.
+// pub(in crate::gromacs) fn opc_sol_moleculetype() -> String {
+//     // String::from(
+//     //     "[ moleculetype ]\n\
+//     //      ; molname  nrexcl\n\
+//     //      SOL        2\n\
+//     //      \n\
+//     //      [ atoms ]\n\
+//     //      ; nr  type    resnr  residue  atom  cgnr   charge     mass\n\
+//     //         1  OW_opc  1      SOL      OW    1       0.0000   15.99940\n\
+//     //         2  HW_opc  1      SOL      HW1   2       0.6791    1.00800\n\
+//     //         3  HW_opc  1      SOL      HW2   3       0.6791    1.00800\n\
+//     //         4  MW      1      SOL      MW    4      -1.3582    0.00000\n\
+//     //      \n\
+//     //      [ settles ]\n\
+//     //      ; OW  funct  dOH (nm)  dHH (nm)\n\
+//     //         1   1      0.08724   0.13712\n\
+//     //      \n\
+//     //      [ virtual_sites3 ]\n\
+//     //      ; MW  OW  HW1  HW2  funct  a         b\n\
+//     //         4   1    2    3   1     0.147803  0.147803\n\
+//     //      \n\
+//     //      [ exclusions ]\n\
+//     //      1  2  3  4\n\
+//     //      2  1  3  4\n\
+//     //      3  1  2  4\n\
+//     //      4  1  2  3\n\
+//     //      \n",
+//     // )
+// }

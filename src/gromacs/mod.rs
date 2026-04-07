@@ -44,7 +44,7 @@ use std::{
 
 pub use mdp::{MdpParams, OutputControl};
 pub use output::{GromacsFrame, GromacsOutput, OutputEnergy};
-use solvate::WaterModel;
+use solvate::Solvent;
 pub use topology::MoleculeTopology;
 
 use crate::{
@@ -61,7 +61,12 @@ const MD_OUT_DIR: &str = "md_out";
 pub(in crate::gromacs) const GRO_NAME: &str = "conf.gro";
 pub(in crate::gromacs) const TOP_NAME: &str = "topo.top";
 pub(in crate::gromacs) const MDP_NAME: &str = "md.mdp";
-pub(in crate::gromacs) const SOLVENT_GRO_NAME: &str = "opc.gro";
+
+pub(in crate::gromacs) const CUSTOM_SOLVENT_GRO: &str = "solvent.gro";
+
+// This must match the 4-site water template in the GROMACS data dir.
+pub(in crate::gromacs) const GMX_BUILTIN_TIP4P_WATER: &str = "tip4p.gro";
+
 pub(in crate::gromacs) const SOLVATED_NAME: &str = "mols_in_solvated.gro";
 pub(in crate::gromacs) const IONIZED_NAME: &str = "ionized.gro";
 
@@ -107,7 +112,7 @@ pub struct GromacsInput {
     pub ff_global: Option<ForceFieldParams>,
     /// When set, `run()` will call `gmx solvate` to fill the box with water
     /// before preprocessing, and include the model's topology in the `.top`.
-    pub water_model: Option<WaterModel>,
+    pub solvent: Option<Solvent>,
     pub minimize_energy: bool,
 }
 
@@ -118,7 +123,7 @@ impl Default for GromacsInput {
             molecules: Vec::new(),
             box_nm: None,
             ff_global: None,
-            water_model: None,
+            solvent: None,
             minimize_energy: true,
         }
     }
@@ -148,11 +153,7 @@ impl GromacsInput {
             })
             .collect();
 
-        topology::make_top(
-            &mol_tops,
-            self.ff_global.as_ref(),
-            self.water_model.as_ref(),
-        )
+        topology::make_top(&mol_tops, self.ff_global.as_ref(), self.solvent.as_ref())
     }
 
     /// Total number of solute (non-water) atoms across all molecule copies.
@@ -171,8 +172,8 @@ impl GromacsInput {
         save_txt_to_file(dir.join(GRO_NAME), &make_gro(&self.molecules, &self.box_nm))?;
         save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;
 
-        if let Some(WaterModel::Opc(ref template)) = self.water_model {
-            save_txt_to_file(dir.join(SOLVENT_GRO_NAME), &template.to_gro())?;
+        if let Some(Solvent::Custom(template)) = &self.solvent {
+            save_txt_to_file(dir.join(CUSTOM_SOLVENT_GRO), &template.to_gro())?;
         }
 
         Ok(())
@@ -207,8 +208,13 @@ impl GromacsInput {
             })
             .unwrap_or(1);
 
+        // todo: Support custom solvents.
+
         // Solvation: fill the box with water before preprocessing.
-        let structure_gro = if let Some(ref wm) = self.water_model {
+        // We don't specify `box` (aka cell/sim box); it's present in the solute coordinate file (`-cp`).
+        // -cs specifies the solute template. `opc.gro` is included with GROMACS; we use that.
+        // [Docs for GMX solvate](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
+        let structure_gro = if let Some(ref wm) = self.solvent {
             run_gmx(
                 dir,
                 &[
@@ -243,7 +249,7 @@ impl GromacsInput {
             })
             .sum();
 
-        let structure_gro = if self.water_model.is_some() && net_q.abs() >= 0.5 {
+        let structure_gro = if self.solvent.is_some() && net_q.abs() >= 0.5 {
             // grompp needs a valid MDP to build ions.tpr; reuse the EM MDP.
             save_txt_to_file(dir.join("ions.mdp"), em_mdp_str())?;
             run_gmx(
