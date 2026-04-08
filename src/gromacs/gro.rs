@@ -24,6 +24,7 @@ pub struct AtomGro {
     pub atom_type: String,
     pub serial_number: u32,
     pub posit: Vec3,
+    pub velocity: Option<Vec3>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -105,6 +106,23 @@ impl Gro {
                 io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate")
             })?;
 
+            // Optional velocity columns: vx[44..52] vy[52..60] vz[60..68] (8.4f, nm/ps)
+            let velocity = if line.len() >= 68 {
+                let vx = gro_slice(44, 52).parse::<f64>().ok();
+                let vy = gro_slice(52, 60).parse::<f64>().ok();
+                let vz = gro_slice(60, 68).parse::<f64>().ok();
+                match (vx, vy, vz) {
+                    (Some(vx), Some(vy), Some(vz)) => Some(Vec3 {
+                        x: vx,
+                        y: vy,
+                        z: vz,
+                    }),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+
             atoms.push(AtomGro {
                 mol_id,
                 mol_name,
@@ -112,6 +130,7 @@ impl Gro {
                 atom_type,
                 serial_number,
                 posit: Vec3 { x, y, z },
+                velocity,
             });
         }
 
@@ -149,17 +168,34 @@ impl Gro {
 
         for atom in &self.atoms {
             // Standard GRO fixed-width: resid(5) resname(5) atomname(5) atomserial(5) x(8.3) y(8.3) z(8.3)
-            writeln!(
-                w,
-                "{:>5}{:<5}{:>5}{:>5}{:>8.3}{:>8.3}{:>8.3}",
-                atom.mol_id % 100_000,
-                &atom.mol_name[..atom.mol_name.len().min(5)],
-                &atom.atom_type[..atom.atom_type.len().min(5)],
-                atom.serial_number % 100_000,
-                atom.posit.x,
-                atom.posit.y,
-                atom.posit.z,
-            )?;
+            // Optional velocities: vx(8.4) vy(8.4) vz(8.4)
+            match atom.velocity {
+                Some(v) => writeln!(
+                    w,
+                    "{:>5}{:<5}{:>5}{:>5}{:>8.3}{:>8.3}{:>8.3}{:>8.4}{:>8.4}{:>8.4}",
+                    atom.mol_id % 100_000,
+                    &atom.mol_name[..atom.mol_name.len().min(5)],
+                    &atom.atom_type[..atom.atom_type.len().min(5)],
+                    atom.serial_number % 100_000,
+                    atom.posit.x,
+                    atom.posit.y,
+                    atom.posit.z,
+                    v.x,
+                    v.y,
+                    v.z,
+                )?,
+                None => writeln!(
+                    w,
+                    "{:>5}{:<5}{:>5}{:>5}{:>8.3}{:>8.3}{:>8.3}",
+                    atom.mol_id % 100_000,
+                    &atom.mol_name[..atom.mol_name.len().min(5)],
+                    &atom.atom_type[..atom.atom_type.len().min(5)],
+                    atom.serial_number % 100_000,
+                    atom.posit.x,
+                    atom.posit.y,
+                    atom.posit.z,
+                )?,
+            }
         }
 
         writeln!(
