@@ -5,7 +5,7 @@ use std::fmt::Write as _;
 
 use lin_alg::f32::Vec3;
 
-use crate::gromacs::{CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER};
+use crate::gromacs::{CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER, MoleculeInput};
 
 /// C+P from `dynamics`.
 #[derive(Clone, Debug, PartialEq)]
@@ -95,20 +95,44 @@ impl WaterInitTemplate {
     }
 }
 
+/// Generic custom solvent-box template passed to `gmx solvate -cs`.
+///
+/// `gro_text` is written verbatim to `solvent.gro`. Any residue names present in that
+/// coordinate file that are not built into the selected force field must also be described
+/// in `topology_molecules` so the generated topology remains self-contained after
+/// `gmx solvate -p` appends the molecule counts.
+#[derive(Clone, Debug)]
+pub struct CustomSolventTemplate {
+    pub gro_text: String,
+    pub topology_molecules: Vec<MoleculeInput>,
+    /// Include the Amber OPC water molecule type (`SOL`) in the topology.
+    pub include_opc_water: bool,
+}
+
+impl CustomSolventTemplate {
+    pub fn from_water(template: WaterInitTemplate) -> Self {
+        Self {
+            gro_text: template.to_gro(),
+            topology_molecules: Vec::new(),
+            include_opc_water: false,
+        }
+    }
+}
+
 /// Water model to use for explicit solvation via `gmx solvate`.
 /// [solvate docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
 ///
 /// Selecting a model causes the pipeline to:
 /// 1. Include the model's atom-type and molecule-type sections in the topology.
 /// 2. Run `gmx solvate` to fill the simulation box with water before `grompp`.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub enum Solvent {
     /// OPC 4-point rigid water (recommended with Amber ff19SB).
     /// Requires GROMACS 2022+ which ships `opc.gro` in its data directory.
     /// Note: We don't actually
     // Opc(WaterInitTemplate),
     Opc,
-    Custom(WaterInitTemplate),
+    Custom(CustomSolventTemplate),
 }
 
 impl Solvent {
@@ -117,7 +141,7 @@ impl Solvent {
         match self {
             // 4-site model is fine for OPC; we just use a different force field.
             Self::Opc => GMX_BUILTIN_TIP4P_WATER,
-            Self::Custom(solvent) => CUSTOM_SOLVENT_GRO,
+            Self::Custom(_) => CUSTOM_SOLVENT_GRO,
         }
     }
 }

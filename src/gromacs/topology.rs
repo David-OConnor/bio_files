@@ -54,6 +54,7 @@ pub struct MoleculeTopology<'a> {
 /// as a fall-back when a term is absent from the per-molecule `ff_mol`.
 pub fn make_top(
     molecules: &[MoleculeTopology<'_>],
+    solvent_molecules: &[MoleculeTopology<'_>],
     ff_global: Option<&ForceFieldParams>,
     solvent: Option<&Solvent>,
 ) -> io::Result<String> {
@@ -62,7 +63,10 @@ pub fn make_top(
     // --- Pre-build indexed params for every molecule -------------------------
     // Do this first so [atomtypes] can read resolved mass/LJ without duplicating
     // alias logic — ForceFieldParamsIndexed::new is the single source of truth.
-    let mol_params: Vec<ForceFieldParamsIndexed> = molecules
+    let all_molecules: Vec<&MoleculeTopology<'_>> =
+        molecules.iter().chain(solvent_molecules.iter()).collect();
+
+    let mol_params: Vec<ForceFieldParamsIndexed> = all_molecules
         .iter()
         .map(|mol| build_indexed(mol, ff_global))
         .collect::<io::Result<Vec<_>>>()?;
@@ -76,7 +80,7 @@ pub fn make_top(
     // Read mass/LJ from the already-resolved indexed params — no alias logic here.
     // (ff_type → first atom we encounter that carries it)
     let mut atomtypes: HashMap<String, (f32, f32, f32)> = HashMap::new(); // ff_type → (mass, sigma, eps)
-    for (mol, pi) in molecules.iter().zip(&mol_params) {
+    for (mol, pi) in all_molecules.iter().zip(&mol_params) {
         for (i, atom) in mol.atoms.iter().enumerate() {
             if let Some(ff_type) = &atom.force_field_type {
                 if !atomtypes.contains_key(ff_type) {
@@ -110,7 +114,9 @@ pub fn make_top(
     }
 
     // OPC water atom types — required when opc.itp is included below.
-    if matches!(solvent, Some(Solvent::Opc)) {
+    if matches!(solvent, Some(Solvent::Opc))
+        || matches!(solvent, Some(Solvent::Custom(template)) if template.include_opc_water)
+    {
         s.push_str(opc_atomtypes());
     }
     // Always include ion atom types — gmx genion may add NA/CL regardless of water model.
@@ -118,7 +124,7 @@ pub fn make_top(
     s.push('\n');
 
     // --- Per-molecule blocks -------------------------------------------------
-    for (mol, pi) in molecules.iter().zip(&mol_params) {
+    for (mol, pi) in all_molecules.iter().zip(&mol_params) {
         write_molecule_block(&mut s, mol, pi)?;
     }
 
@@ -133,10 +139,10 @@ pub fn make_top(
         Some(Solvent::Opc) => {
             s.push_str("#include \"amber19sb.ff/opc.itp\"\n\n");
         }
-        Some(Solvent::Custom(_)) => {
-
-            // todo: A/R
-            // s.push_str(&solvate::opc_sol_moleculetype());
+        Some(Solvent::Custom(template)) => {
+            if template.include_opc_water {
+                s.push_str("#include \"amber19sb.ff/opc.itp\"\n\n");
+            }
         }
         None => {}
     }

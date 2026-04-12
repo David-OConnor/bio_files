@@ -34,7 +34,6 @@ pub mod solvate;
 pub mod topology;
 
 use std::{
-    fmt::Write as _,
     fs,
     fs::File,
     io::{self, ErrorKind, Write},
@@ -153,7 +152,27 @@ impl GromacsInput {
             })
             .collect();
 
-        topology::make_top(&mol_tops, self.ff_global.as_ref(), self.solvent.as_ref())
+        let solvent_mol_tops: Vec<MoleculeTopology<'_>> = match &self.solvent {
+            Some(Solvent::Custom(template)) => template
+                .topology_molecules
+                .iter()
+                .map(|m| MoleculeTopology {
+                    name: &m.name,
+                    atoms: &m.atoms,
+                    bonds: &m.bonds,
+                    ff_mol: m.ff_params.as_ref(),
+                    count: m.count,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+
+        topology::make_top(
+            &mol_tops,
+            &solvent_mol_tops,
+            self.ff_global.as_ref(),
+            self.solvent.as_ref(),
+        )
     }
 
     /// Total number of solute (non-water) atoms across all molecule copies.
@@ -173,7 +192,7 @@ impl GromacsInput {
         save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;
 
         if let Some(Solvent::Custom(template)) = &self.solvent {
-            save_txt_to_file(dir.join(CUSTOM_SOLVENT_GRO), &template.to_gro())?;
+            save_txt_to_file(dir.join(CUSTOM_SOLVENT_GRO), &template.gro_text)?;
         }
 
         Ok(())
