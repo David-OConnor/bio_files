@@ -303,15 +303,28 @@ pub fn read_trr(trr: &Path, slice: FrameSlice) -> io::Result<Vec<GromacsFrame>> 
             }
         }
 
-        // Skip forces.
+        // Decode forces (kJ/(mol·nm) — GROMACS native units).
+        let mut atom_forces = Vec::with_capacity(if f_size > 0 { natoms } else { 0 });
         if f_size > 0 {
-            r.seek(SeekFrom::Current(f_size as i64))?;
+            for _ in 0..natoms {
+                let (x, y, z) = if double_prec {
+                    (trr_f64(&mut r)?, trr_f64(&mut r)?, trr_f64(&mut r)?)
+                } else {
+                    (
+                        trr_f32(&mut r)? as f64,
+                        trr_f32(&mut r)? as f64,
+                        trr_f32(&mut r)? as f64,
+                    )
+                };
+                atom_forces.push(Vec3 { x, y, z });
+            }
         }
 
         frames.push(GromacsFrame {
             time: time_ps,
             atom_posits,
             atom_velocities,
+            atom_forces,
             energy: None,
         });
     }
@@ -338,9 +351,15 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
     for frame in frames {
         let natoms = frame.atom_posits.len();
         let has_vel = frame.atom_velocities.len() == natoms && natoms > 0;
+        let has_forces = frame.atom_forces.len() == natoms && natoms > 0;
 
         let x_size = (natoms * 3 * 4) as i32;
         let v_size = if has_vel { (natoms * 3 * 4) as i32 } else { 0 };
+        let f_size = if has_forces {
+            (natoms * 3 * 4) as i32
+        } else {
+            0
+        };
 
         // Magic
         w.write_all(&1993_i32.to_be_bytes())?;
@@ -361,7 +380,7 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
             0,
             x_size,
             v_size,
-            0,
+            f_size,
             natoms as i32,
             0,
             0,
@@ -386,6 +405,15 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
                 w.write_all(&(v.x as f32).to_be_bytes())?;
                 w.write_all(&(v.y as f32).to_be_bytes())?;
                 w.write_all(&(v.z as f32).to_be_bytes())?;
+            }
+        }
+
+        // Forces: kJ/(mol·nm), cast to f32.
+        if has_forces {
+            for f in &frame.atom_forces {
+                w.write_all(&(f.x as f32).to_be_bytes())?;
+                w.write_all(&(f.y as f32).to_be_bytes())?;
+                w.write_all(&(f.z as f32).to_be_bytes())?;
             }
         }
     }
@@ -468,6 +496,8 @@ pub struct GromacsFrame {
     pub atom_posits: Vec<Vec3>,
     /// nm/ps
     pub atom_velocities: Vec<Vec3>,
+    /// Forces in **kJ/(mol·nm)** (GROMACS native units).
+    pub atom_forces: Vec<Vec3>,
     /// Energy data for this frame, if the energy recording interval
     /// (`nstenergy`) aligns with the trajectory interval (`nstxout`).
     pub energy: Option<OutputEnergy>,
@@ -584,6 +614,7 @@ pub fn parse_multi_gro(text: &str) -> io::Result<Vec<GromacsFrame>> {
             time: time_ps,
             atom_posits: posits,
             atom_velocities: Vec::new(),
+            atom_forces: Vec::new(),
             energy: None,
         });
     }
