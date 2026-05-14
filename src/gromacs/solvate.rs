@@ -7,6 +7,33 @@ use lin_alg::f32::Vec3;
 
 use crate::gromacs::{CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER, MoleculeInput};
 
+/// Water model to use for explicit solvation via `gmx solvate`.
+/// [solvate docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
+///
+/// Selecting a model causes the pipeline to:
+/// 1. Include the model's atom-type and molecule-type sections in the topology.
+/// 2. Run `gmx solvate` to fill the simulation box with water before `grompp`.
+#[derive(Clone, Debug)]
+pub enum Solvent {
+    /// OPC 4-point rigid water (recommended with Amber ff19SB).
+    /// Requires GROMACS 2022+ which ships `tip4p.gro` and `opc.itp` in its data directory.
+    /// We use Gromac's TIP4P water molecule, which is suitable for some
+    /// 4-point rigid water models including OPC.
+    Opc,
+    Custom(CustomSolventTemplate),
+}
+
+impl Solvent {
+    /// Pre-equilibrated water-box filename written by `save()` and passed to `gmx solvate -cs`.
+    pub(in crate::gromacs) fn gro_filename(&self) -> &'static str {
+        match self {
+            // 4-site model is fine for OPC; we just use a different force field.
+            Self::Opc => GMX_BUILTIN_TIP4P_WATER,
+            Self::Custom(_) => CUSTOM_SOLVENT_GRO,
+        }
+    }
+}
+
 /// C+P from `dynamics`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct WaterInitTemplate {
@@ -115,33 +142,6 @@ impl CustomSolventTemplate {
             gro_text: template.to_gro(),
             topology_molecules: Vec::new(),
             include_opc_water: false,
-        }
-    }
-}
-
-/// Water model to use for explicit solvation via `gmx solvate`.
-/// [solvate docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
-///
-/// Selecting a model causes the pipeline to:
-/// 1. Include the model's atom-type and molecule-type sections in the topology.
-/// 2. Run `gmx solvate` to fill the simulation box with water before `grompp`.
-#[derive(Clone, Debug)]
-pub enum Solvent {
-    /// OPC 4-point rigid water (recommended with Amber ff19SB).
-    /// Requires GROMACS 2022+ which ships `tip4p.gro` and `opc.itp` in its data directory.
-    /// We use Gromac's TIP4P water molecule, which is suitable for some
-    /// 4-point rigid water models including OPC.
-    Opc,
-    Custom(CustomSolventTemplate),
-}
-
-impl Solvent {
-    /// Pre-equilibrated water-box filename written by `save()` and passed to `gmx solvate -cs`.
-    pub(in crate::gromacs) fn gro_filename(&self) -> &'static str {
-        match self {
-            // 4-site model is fine for OPC; we just use a different force field.
-            Self::Opc => GMX_BUILTIN_TIP4P_WATER,
-            Self::Custom(_) => CUSTOM_SOLVENT_GRO,
         }
     }
 }
