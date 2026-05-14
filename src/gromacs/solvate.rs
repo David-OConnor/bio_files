@@ -128,9 +128,9 @@ impl CustomSolventTemplate {
 #[derive(Clone, Debug)]
 pub enum Solvent {
     /// OPC 4-point rigid water (recommended with Amber ff19SB).
-    /// Requires GROMACS 2022+ which ships `opc.gro` in its data directory.
-    /// Note: We don't actually
-    // Opc(WaterInitTemplate),
+    /// Requires GROMACS 2022+ which ships `tip4p.gro` and `opc.itp` in its data directory.
+    /// We use Gromac's TIP4P water molecule, which is suitable for some
+    /// 4-point rigid water models including OPC.
     Opc,
     Custom(CustomSolventTemplate),
 }
@@ -145,41 +145,3 @@ impl Solvent {
         }
     }
 }
-
-// /// Topology: Complete `SOL` molecule-type block for OPC 4-point water.
-// ///
-// /// Geometry:
-// /// - d(O–H) = 0.08724 nm
-// /// - ∠H–O–H = 103.6° → d(H–H) = 0.13712 nm
-// /// - d(O–MW) = 0.01594 nm along the H–O–H bisector → virtual-site coefficients a = b = 0.147803
-// ///
-// /// `gmx solvate -p` appends the molecule count; we only define the type here.
-// pub(in crate::gromacs) fn opc_sol_moleculetype() -> String {
-//     // String::from(
-//     //     "[ moleculetype ]\n\
-//     //      ; molname  nrexcl\n\
-//     //      SOL        2\n\
-//     //      \n\
-//     //      [ atoms ]\n\
-//     //      ; nr  type    resnr  residue  atom  cgnr   charge     mass\n\
-//     //         1  OW_opc  1      SOL      OW    1       0.0000   15.99940\n\
-//     //         2  HW_opc  1      SOL      HW1   2       0.6791    1.00800\n\
-//     //         3  HW_opc  1      SOL      HW2   3       0.6791    1.00800\n\
-//     //         4  MW      1      SOL      MW    4      -1.3582    0.00000\n\
-//     //      \n\
-//     //      [ settles ]\n\
-//     //      ; OW  funct  dOH (nm)  dHH (nm)\n\
-//     //         1   1      0.08724   0.13712\n\
-//     //      \n\
-//     //      [ virtual_sites3 ]\n\
-//     //      ; MW  OW  HW1  HW2  funct  a         b\n\
-//     //         4   1    2    3   1     0.147803  0.147803\n\
-//     //      \n\
-//     //      [ exclusions ]\n\
-//     //      1  2  3  4\n\
-//     //      2  1  3  4\n\
-//     //      3  1  2  4\n\
-//     //      4  1  2  3\n\
-//     //      \n",
-//     // )
-// }

@@ -1,4 +1,24 @@
-//! For reading and writing .GRO files
+//! For reading and writing .GRO files. These are to some extent similar to Mol2 and SDF:
+//! they list atom positions for small molecules. Notably, they usually include multiple small
+//! molecules. They are used to describe the set of molecules used in an MD run. They're useful
+//! as inputs for MD runs, and to correlate atom positions in trajectories to molecules for display
+//! during output.
+//!
+//! Like elsewhere in GROMACS, units are in nm, not Å.
+//!
+//! Example start of a file:
+//! ```gro
+//! Solvent template: octanol
+//! 10152
+//!     1octan   oh    1  -1.063  -1.860  -2.068  0.0940  0.2733 -0.2102
+//!     1octan   c3    2  -1.453  -1.931  -1.897  0.4551  0.8088  0.2946
+//!     1octan   c3    3  -1.602  -1.964  -1.855  0.0347  0.0728  0.4053
+//!     1octan   c3    4  -1.409  -2.011  -2.011 -0.0144  0.1615  0.5193
+//!     1octan   c3    5  -1.710  -1.917  -1.946 -0.0977  0.4757  0.7608
+//!     // ...
+//!     2octan   oh   28  -1.084  -1.671  -2.300 -0.1201 -0.5026  0.1343
+//!     2octan   c3   29  -1.105  -2.120  -2.525 -0.0625  0.4339  0.0275
+//! ```
 
 use std::{
     fmt::Write as _,
@@ -111,6 +131,7 @@ impl Gro {
                 let vx = gro_slice(44, 52).parse::<f64>().ok();
                 let vy = gro_slice(52, 60).parse::<f64>().ok();
                 let vz = gro_slice(60, 68).parse::<f64>().ok();
+
                 match (vx, vy, vz) {
                     (Some(vx), Some(vy), Some(vz)) => Some(Vec3 {
                         x: vx,
@@ -148,11 +169,7 @@ impl Gro {
                 z: box_cols[2],
             }
         } else {
-            Vec3 {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            }
+            Vec3::new_zero()
         };
 
         Ok(Self {
@@ -232,6 +249,7 @@ pub fn make_gro(mols: &[MoleculeInput], box_nm: &Option<(f64, f64, f64)>) -> Str
     let (shift_x, shift_y, shift_z) = if let Some((bx, by, bz)) = box_nm {
         let (mut sx, mut sy, mut sz) = (0.0, 0.0, 0.0);
         let mut n = 0usize;
+
         for mol in mols {
             for _ in 0..mol.count {
                 for atom in &mol.atoms {
@@ -247,6 +265,7 @@ pub fn make_gro(mols: &[MoleculeInput], box_nm: &Option<(f64, f64, f64)>) -> Str
             let cx = sx / n as f64 / 10.0;
             let cy = sy / n as f64 / 10.0;
             let cz = sz / n as f64 / 10.0;
+
             (bx / 2.0 - cx, by / 2.0 - cy, bz / 2.0 - cz)
         } else {
             (0.0, 0.0, 0.0)

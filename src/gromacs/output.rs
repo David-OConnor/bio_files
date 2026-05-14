@@ -1,4 +1,7 @@
-//! Parsing GROMACS simulation output.
+//! Parsing GROMACS simulation output. See also `trr.rs` for information on that format
+//! specifically. Note that GROMACS does not support the DCD format; it uses TRR (full precision),
+//! and XTC (Lossily compressed). We currently don't support XTC, but would like to in the future.
+//! It is more complicated to read and write.
 //!
 //! After an `mdrun`, we use `gmx trjconv` to export the trajectory as a
 //! multi-model `.gro` file, then parse each frame here into [`GromacsFrame`].
@@ -7,16 +10,13 @@
 
 use std::{
     collections::HashMap,
-    fs::{File, OpenOptions},
-    io::{self, BufReader, BufWriter, ErrorKind, Read, Seek, SeekFrom, Write as _},
+    io::{self, ErrorKind, Read, Write as _},
     path::Path,
     process::{Command, Stdio},
-    time::Instant,
 };
 
 use lin_alg::f64::Vec3;
 
-use crate::FrameSlice;
 // todo: Consider structs that are "file-like" etc, and impl std traits to read/write etc? (Check examples
 // todo in other libs) instead of free-stnading fns.
 
@@ -42,383 +42,6 @@ pub struct OutputEnergy {
     pub volume: Option<f32>,
     /// System density in **kg/m³**.
     pub density: Option<f32>,
-}
-
-/// This isn't stored directly in the file; transverse frame headers to collect this. Not too
-/// slow, as it doesn't load the frame coordinates.
-pub struct TrrMetadata {
-    pub num_atoms: usize,
-    pub num_frames: usize,
-    pub start_step: f32,
-    pub save_interval_steps: usize,
-    pub dt: f32,
-    pub end_time: f32,
-}
-
-impl TrrMetadata {
-    /// Scan all frame headers without decoding coordinate data to collect metadata.
-    pub fn read(path: &Path) -> io::Result<Self> {
-        let start = Instant::now();
-        println!("Starting TRR frame scan to load metadata...");
-        const TRR_MAGIC: i32 = 1993;
-
-        let mut r = BufReader::new(File::open(path)?);
-
-        let mut num_atoms = 0usize;
-        let mut num_frames = 0usize;
-        let mut start_step = 0i32;
-        let mut first_time = 0.0f64;
-        let mut dt = 0.0f32;
-        let mut save_interval_steps = 0usize;
-        let mut end_time = 0.0f32;
-
-        loop {
-            let magic = {
-                let mut b = [0; 4];
-                match r.read_exact(&mut b) {
-                    Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
-                    other => other?,
-                }
-                i32::from_be_bytes(b)
-            };
-            if magic != TRR_MAGIC {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("TRR bad magic: expected {TRR_MAGIC}, got {magic}"),
-                ));
-            }
-
-            // Version string: u32 length + bytes + padding to 4B boundary.
-            let ver_len = trr_u32(&mut r)? as usize;
-            let ver_pad = (4 - (ver_len % 4)) % 4;
-            r.seek(SeekFrom::Current((ver_len + ver_pad) as i64))?;
-
-            // Header fields.
-            let ir_size = trr_i32(&mut r)? as usize;
-            let e_size = trr_i32(&mut r)? as usize;
-            let box_size = trr_i32(&mut r)? as usize;
-            let vir_size = trr_i32(&mut r)? as usize;
-            let pres_size = trr_i32(&mut r)? as usize;
-            let top_size = trr_i32(&mut r)? as usize;
-            let sym_size = trr_i32(&mut r)? as usize;
-            let x_size = trr_i32(&mut r)? as usize;
-            let v_size = trr_i32(&mut r)? as usize;
-            let f_size = trr_i32(&mut r)? as usize;
-            let natoms = trr_i32(&mut r)? as usize;
-            let step = trr_i32(&mut r)?;
-            let _nre = trr_i32(&mut r)?;
-
-            let double_prec = if x_size > 0 && natoms > 0 {
-                x_size == natoms * 3 * 8
-            } else if box_size > 0 {
-                box_size == 9 * 8
-            } else {
-                false
-            };
-
-            let time_ps: f64 = if double_prec {
-                trr_f64(&mut r)?
-            } else {
-                trr_f32(&mut r)? as f64
-            };
-            // lambda — same width, skip.
-            if double_prec {
-                trr_f64(&mut r)?;
-            } else {
-                trr_f32(&mut r)?;
-            }
-
-            if num_frames == 0 {
-                num_atoms = natoms;
-                start_step = step;
-                first_time = time_ps;
-            } else if num_frames == 1 {
-                dt = (time_ps - first_time) as f32;
-                save_interval_steps = (step - start_step).unsigned_abs() as usize;
-            }
-            end_time = time_ps as f32;
-            num_frames += 1;
-
-            // Seek past all data blocks.
-            let skip = ir_size
-                + e_size
-                + box_size
-                + vir_size
-                + pres_size
-                + top_size
-                + sym_size
-                + x_size
-                + v_size
-                + f_size;
-            if skip > 0 {
-                r.seek(SeekFrom::Current(skip as i64))?;
-            }
-        }
-
-        let elapsed = start.elapsed().as_millis();
-        println!("Scan complete in {elapsed} ms");
-
-        Ok(Self {
-            num_atoms,
-            num_frames,
-            start_step: start_step as f32,
-            save_interval_steps,
-            dt,
-            end_time,
-        })
-    }
-}
-
-/// Parse a GROMACS `.trr` trajectory file into a sequence of [`GromacsFrame`]
-/// values, optionally filtered to a time window (in ps).
-///
-/// The TRR format is XDR-encoded (big-endian). Each frame contains a header
-/// with block sizes that determine both the atom count and the floating-point
-/// precision (single vs double) used for that run. Only coordinate blocks are
-/// decoded; box, virial, pressure, velocity, and force blocks are skipped.
-///
-/// Positions are converted from GROMACS native units (nm) to Å on read.
-///
-/// [Format reference](https://manual.gromacs.org/current/reference-manual/file-formats.html#trr)
-pub fn read_trr(trr: &Path, slice: FrameSlice) -> io::Result<Vec<GromacsFrame>> {
-    const TRR_MAGIC: i32 = 1993;
-
-    let mut r = BufReader::new(File::open(trr)?);
-    let mut frames = Vec::new();
-    let mut frame_idx: usize = 0;
-
-    loop {
-        // Magic — EOF here is the normal loop termination.
-        let magic = {
-            let mut b = [0; 4];
-            match r.read_exact(&mut b) {
-                Err(e) if e.kind() == ErrorKind::UnexpectedEof => break,
-                other => other?,
-            }
-            i32::from_be_bytes(b)
-        };
-        if magic != TRR_MAGIC {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("TRR bad magic: expected {TRR_MAGIC}, got {magic}"),
-            ));
-        }
-
-        // Version string: XDR encoding is u32 length + bytes + padding to 4B boundary.
-        let ver_len = trr_u32(&mut r)? as usize;
-        let ver_pad = (4 - (ver_len % 4)) % 4;
-        r.seek(SeekFrom::Current((ver_len + ver_pad) as i64))?;
-
-        // Header — all sizes in bytes.
-        let ir_size = trr_i32(&mut r)? as usize;
-        let e_size = trr_i32(&mut r)? as usize;
-        let box_size = trr_i32(&mut r)? as usize;
-        let vir_size = trr_i32(&mut r)? as usize;
-        let pres_size = trr_i32(&mut r)? as usize;
-        let top_size = trr_i32(&mut r)? as usize;
-        let sym_size = trr_i32(&mut r)? as usize;
-        let x_size = trr_i32(&mut r)? as usize;
-        let v_size = trr_i32(&mut r)? as usize;
-        let f_size = trr_i32(&mut r)? as usize;
-        let natoms = trr_i32(&mut r)? as usize;
-        let _step = trr_i32(&mut r)?;
-        let _nre = trr_i32(&mut r)?;
-
-        // Precision: bytes per coordinate component tells us f32 vs f64.
-        // Fall back to box_size (9 reals for a 3×3 matrix) if x is absent.
-        let double_prec = if x_size > 0 && natoms > 0 {
-            x_size == natoms * 3 * 8
-        } else if box_size > 0 {
-            box_size == 9 * 8
-        } else {
-            false
-        };
-
-        // Time (ps) and lambda — same float width as coordinates.
-        let time_ps: f64 = if double_prec {
-            trr_f64(&mut r)?
-        } else {
-            trr_f32(&mut r)? as f64
-        };
-        let _lambda: f64 = if double_prec {
-            trr_f64(&mut r)?
-        } else {
-            trr_f32(&mut r)? as f64
-        };
-
-        // Skip all pre-coordinate data blocks (ir, energy, box, vir, pres, top, sym).
-        let pre_skip = ir_size + e_size + box_size + vir_size + pres_size + top_size + sym_size;
-        if pre_skip > 0 {
-            r.seek(SeekFrom::Current(pre_skip as i64))?;
-        }
-
-        // Slice filter — seek past this frame if it's out of range.
-        let in_range = match slice {
-            FrameSlice::Time { start, end } => {
-                start.map_or(true, |t| time_ps >= t) && end.map_or(true, |t| time_ps <= t)
-            }
-            FrameSlice::Index { start, end } => {
-                start.map_or(true, |s| frame_idx >= s) && end.map_or(true, |e| frame_idx <= e)
-            }
-        };
-        frame_idx += 1;
-        if !in_range {
-            r.seek(SeekFrom::Current((x_size + v_size + f_size) as i64))?;
-            continue;
-        }
-
-        // Decode positions (nm → Å).
-        let mut atom_posits = Vec::with_capacity(natoms);
-        if x_size > 0 {
-            for _ in 0..natoms {
-                let (x, y, z) = if double_prec {
-                    (trr_f64(&mut r)?, trr_f64(&mut r)?, trr_f64(&mut r)?)
-                } else {
-                    (
-                        trr_f32(&mut r)? as f64,
-                        trr_f32(&mut r)? as f64,
-                        trr_f32(&mut r)? as f64,
-                    )
-                };
-
-                // These are in nm.
-                atom_posits.push(Vec3 { x, y, z });
-            }
-        }
-
-        // Decode velocities (nm/ps — stored in the same units GROMACS uses internally).
-        let mut atom_velocities = Vec::with_capacity(if v_size > 0 { natoms } else { 0 });
-        if v_size > 0 {
-            for _ in 0..natoms {
-                let (x, y, z) = if double_prec {
-                    (trr_f64(&mut r)?, trr_f64(&mut r)?, trr_f64(&mut r)?)
-                } else {
-                    (
-                        trr_f32(&mut r)? as f64,
-                        trr_f32(&mut r)? as f64,
-                        trr_f32(&mut r)? as f64,
-                    )
-                };
-                atom_velocities.push(Vec3 { x, y, z });
-            }
-        }
-
-        // Decode forces (kJ/(mol·nm) — GROMACS native units).
-        let mut atom_forces = Vec::with_capacity(if f_size > 0 { natoms } else { 0 });
-        if f_size > 0 {
-            for _ in 0..natoms {
-                let (x, y, z) = if double_prec {
-                    (trr_f64(&mut r)?, trr_f64(&mut r)?, trr_f64(&mut r)?)
-                } else {
-                    (
-                        trr_f32(&mut r)? as f64,
-                        trr_f32(&mut r)? as f64,
-                        trr_f32(&mut r)? as f64,
-                    )
-                };
-                atom_forces.push(Vec3 { x, y, z });
-            }
-        }
-
-        frames.push(GromacsFrame {
-            time: time_ps,
-            atom_posits,
-            atom_velocities,
-            atom_forces,
-            energy: None,
-        });
-    }
-
-    Ok(frames)
-}
-
-/// Write frames to a TRR file, appending if it already exists.
-///
-/// TRR frames are self-contained, so appending is the canonical way to build
-/// up a trajectory incrementally — `gmx traj`, `gmx trjcat`, VMD, and MDAnalysis
-/// all read frames sequentially until EOF, with no file-level header to maintain.
-///
-/// Coordinates are written in GROMACS native units (nm: not Å!).
-/// Velocities are written as-is (nm/ps). Both use single-precision (`f32`),
-/// which is the GROMACS default. Frames with no velocity data (`atom_velocities`
-/// empty or length-mismatched) omit the velocity block (`v_size = 0`).
-pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
-    // XDR version string — 12 bytes, already 4B-aligned so no padding needed.
-    const VERSION: &[u8] = b"GMX_trn_file";
-
-    let mut w = BufWriter::new(OpenOptions::new().create(true).append(true).open(&*path)?);
-
-    for frame in frames {
-        let natoms = frame.atom_posits.len();
-        let has_vel = frame.atom_velocities.len() == natoms && natoms > 0;
-        let has_forces = frame.atom_forces.len() == natoms && natoms > 0;
-
-        let x_size = (natoms * 3 * 4) as i32;
-        let v_size = if has_vel { (natoms * 3 * 4) as i32 } else { 0 };
-        let f_size = if has_forces {
-            (natoms * 3 * 4) as i32
-        } else {
-            0
-        };
-
-        // Magic
-        w.write_all(&1993_i32.to_be_bytes())?;
-
-        // Version string: XDR u32 length + bytes (no padding, len is 4B-aligned)
-        w.write_all(&(VERSION.len() as u32).to_be_bytes())?;
-        w.write_all(VERSION)?;
-
-        // Header: ir, e, box, vir, pres, top, sym sizes (all 0), then x/v/f,
-        // then natoms, step, nre.
-        for val in [
-            0i32,
-            0,
-            0,
-            0,
-            0,
-            0,
-            0,
-            x_size,
-            v_size,
-            f_size,
-            natoms as i32,
-            0,
-            0,
-        ] {
-            w.write_all(&val.to_be_bytes())?;
-        }
-
-        // Time (ps) and lambda — single precision, no lambda in our data.
-        w.write_all(&(frame.time as f32).to_be_bytes())?;
-        w.write_all(&0_f32.to_be_bytes())?;
-
-        // These stay in nm.
-        for p in &frame.atom_posits {
-            w.write_all(&(p.x as f32).to_be_bytes())?;
-            w.write_all(&(p.y as f32).to_be_bytes())?;
-            w.write_all(&(p.z as f32).to_be_bytes())?;
-        }
-
-        // Velocities: nm/ps, cast to f32.
-        if has_vel {
-            for v in &frame.atom_velocities {
-                w.write_all(&(v.x as f32).to_be_bytes())?;
-                w.write_all(&(v.y as f32).to_be_bytes())?;
-                w.write_all(&(v.z as f32).to_be_bytes())?;
-            }
-        }
-
-        // Forces: kJ/(mol·nm), cast to f32.
-        if has_forces {
-            for f in &frame.atom_forces {
-                w.write_all(&(f.x as f32).to_be_bytes())?;
-                w.write_all(&(f.y as f32).to_be_bytes())?;
-                w.write_all(&(f.z as f32).to_be_bytes())?;
-            }
-        }
-    }
-
-    Ok(())
 }
 
 impl OutputEnergy {
@@ -552,7 +175,9 @@ impl GromacsOutput {
 
 /// Parse a multi-model `.gro` file (as produced by `gmx trjconv`) into a
 /// sequence of [`GromacsFrame`] values. We prefer to parse trajectories from TRR files, but this
-/// can serve as a backup.
+/// can serve as a backup, for trajectories stored in `gro` format. This format is larger than TRR and
+/// XTC. This reads all frames in the file, unlike our APIs for other traj formats, which read
+/// ranges of frames. (From potentially large files)
 ///
 /// Each model block has the layout:
 /// ```text
@@ -561,24 +186,22 @@ impl GromacsOutput {
 /// <atom lines…>
 /// <box vector line>
 /// ```
-pub fn parse_multi_gro(text: &str) -> io::Result<Vec<GromacsFrame>> {
+pub fn parse_gro_traj(text: &str) -> io::Result<Vec<GromacsFrame>> {
     let mut frames = Vec::new();
     let mut lines = text.lines().peekable();
 
     while lines.peek().is_some() {
-        // Title line
         let title = match lines.next() {
             Some(l) => l,
             None => break,
         };
 
-        // Extract time from title if present, e.g. "MD of system, t= 0.00000"
         let time_ps = extract_time(title);
 
-        // Atom count
         let natoms_str = lines.next().ok_or_else(|| {
             io::Error::new(ErrorKind::UnexpectedEof, "Expected atom count after title")
         })?;
+
         let natoms: usize = natoms_str
             .trim()
             .split_whitespace()
@@ -607,7 +230,7 @@ pub fn parse_multi_gro(text: &str) -> io::Result<Vec<GromacsFrame>> {
             });
         }
 
-        // Box vector line — consume it even if we don't use the value.
+        // Box vector line - consume it even if we don't use the value.
         lines.next();
 
         frames.push(GromacsFrame {
@@ -632,6 +255,7 @@ fn attach_energies(frames: &mut Vec<GromacsFrame>, energies: Vec<OutputEnergy>) 
     if energies.is_empty() {
         return;
     }
+
     // Key: time rounded to nearest 0.001 ps expressed as integer (avoids f64 hashing).
     let map: HashMap<i64, OutputEnergy> = energies
         .into_iter()
@@ -643,10 +267,6 @@ fn attach_energies(frames: &mut Vec<GromacsFrame>, energies: Vec<OutputEnergy>) 
         frame.energy = map.get(&key).cloned();
     }
 }
-
-// ---------------------------------------------------------------------------
-// XVG parsing
-// ---------------------------------------------------------------------------
 
 /// Parse an XVG file produced by `gmx energy` into a sequence of
 /// [`OutputEnergy`] values.
@@ -734,10 +354,6 @@ fn parse_xvg_legend(line: &str) -> Option<String> {
     }
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 /// Extract simulation time (ps) from a GRO title line such as
 /// `"Protein in water, t= 12.00000"`. Returns `0.0` if not found.
 fn extract_time(title: &str) -> f64 {
@@ -770,32 +386,4 @@ fn parse_col(line: &str, start: usize, end: usize) -> io::Result<f64> {
     }
     s.parse::<f64>()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, format!("Cannot parse '{s}' as f64")))
-}
-
-// ---------------------------------------------------------------------------
-// TRR / XDR low-level readers (big-endian IEEE 754)
-// ---------------------------------------------------------------------------
-
-fn trr_i32(r: &mut impl Read) -> io::Result<i32> {
-    let mut b = [0u8; 4];
-    r.read_exact(&mut b)?;
-    Ok(i32::from_be_bytes(b))
-}
-
-fn trr_u32(r: &mut impl Read) -> io::Result<u32> {
-    let mut b = [0u8; 4];
-    r.read_exact(&mut b)?;
-    Ok(u32::from_be_bytes(b))
-}
-
-fn trr_f32(r: &mut impl Read) -> io::Result<f32> {
-    let mut b = [0u8; 4];
-    r.read_exact(&mut b)?;
-    Ok(f32::from_be_bytes(b))
-}
-
-fn trr_f64(r: &mut impl Read) -> io::Result<f64> {
-    let mut b = [0u8; 8];
-    r.read_exact(&mut b)?;
-    Ok(f64::from_be_bytes(b))
 }

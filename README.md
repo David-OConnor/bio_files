@@ -7,9 +7,7 @@
 
 [Home page](https://www.athanorlab.com/rust-tools)
 
-This Rust and Python library contains functionality to load and save data in common biology file formats. It operates
-on data structures that are specific to each file format; you will need to convert to and from the structures
-used by your application. The API docs, and examples below are sufficient to get started.
+This Rust and Python library contains functionality to load and save data in common biology file formats. It operates on data structures that are specific to each file format; you will need to convert to and from the structures used by your application. The API docs, and examples below are sufficient to get started.
 
 Note: Install the pip version with `pip install biology-files` due to a name conflict.
 
@@ -42,9 +40,7 @@ Note: Install the pip version with `pip install biology-files` due to a name con
 
 ## Generic data types
 
-This library includes a number of relatively generic data types which are returned by various load functions,
-and required to save data. These may be used in your application directly, or converted into a more specific
-format. Examples:
+This library includes a number of relatively generic data types which are returned by various load functions, and required to save data. These may be used in your application directly, or converted into a more specific format. Examples:
 
 - [AtomGeneric](https://docs.rs/bio_files/latest/bio_files/struct.AtomGeneric.html)
 - [BondGeneric](https://docs.rs/bio_files/latest/bio_files/struct.BondGeneric.html)
@@ -52,60 +48,45 @@ format. Examples:
 - [BondType](https://docs.rs/bio_files/latest/bio_files/enum.BondType.html)
 - [LipidStandard](https://docs.rs/bio_files/latest/bio_files/enum.LipidStandard.html)
 
-For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/). We do not plan to support this format, due to
-this high quality library.
+For Genbank, we recommend [gb-io](https://docs.rs/gb-io/latest/gb_io/). We do not plan to support this format, due to this high quality library.
 
 Each module represents a file format, and most have dedicated structs dedicated to operating on that format.
 
-It operates using structs with public fields, which you can explore
-using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods:
-`new()`,
-`save()` and `load()`. `new()` accepts `&str` for text files, and a `R: Read + Seek` for binary. `save()` and
-`load()` accept `&Path`.
-The Force Field formats use `load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
+It operates using structs with public fields, which you can explore using the [API docs](https://docs.rs/bio_files), or your IDE. These structs generally include these three methods:
+`new()`, `save()` and `load()`. `new()` accepts `&str` for text files, and a
+`R: Read + Seek` for binary. `save()` and `load()` accept `&Path`. The Force Field formats use
+`load_dat`, `save_frcmod` instead, as they use the same structs for both formats.
 
 ## Serial numbers
 
-Serial numbers for atoms, residues, secondary structure, and chains are generally pulled directly from atom data files
-(mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as `Vec<u32>`, with the `u32` being the serial
-number.
-In your application, you may wish to adapt these generic types to custom ones that use index lookups
-instead of serial numbers. We use SNs here because they're more robust, and match the input files directly;
-add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the
-residue
-an atom's in, in your derived Atom struct).
+Serial numbers for atoms, residues, secondary structure, and chains are generally pulled directly from atom data files (mmCIF, Mol2 etc). These lists reference atoms, or residues, stored as
+`Vec<u32>`, with the `u32` being the serial number.
+
+In your application, you may wish to adapt these generic types to custom ones that use index lookups instead of serial numbers. We use SNs here because they're more robust, and match the input files directly; add optimizations downstream, like converting to indices, and/or applying back-references. (e.g. the index of the residue an atom's in, in your derived Atom struct).
 
 ## ORCA interface
 
-This library provides an interface to build Orca inputs, execute commands, and parse outputs. It uses Rust
-datastructures to contrain input choices into valid ones when possible, and allows you to integrate Orca into Rust
-programs and libraries. For example, [Molchanica](https://github.com/david-oconnor/molchanica) uses it to minimize
-energy on organic molecules, and augment traditional MD technique with quantum mechanics. See
+This library provides an interface to build Orca inputs, execute commands, and parse outputs. It uses Rust datastructures to contrain input choices into valid ones when possible, and allows you to integrate Orca into Rust programs and libraries. For example, [Molchanica](https://github.com/david-oconnor/molchanica) uses it to minimize energy on organic molecules, and augment traditional MD technique with quantum mechanics. See
 the [API docs](https://docs.rs/bio_files/latest/bio_files/orca/index.html) for details.
 
 ORCA support in this library is limited to Rust only. If you wish to use Orca with Python,
 use [OPI, the official FACCTS library](https://github.com/faccts/opi).
 
-Note: Orca support is currently limited to a subset of features. We plan to gradually expand this. If you're looking for
-specific functionality, please open an Issue or PR on Github.
+Note: Orca support is currently limited to a subset of features. We plan to gradually expand this. If you're looking for specific functionality, please open an Issue or PR on Github.
 
 Can generate and run [ORCA](https://www.faccts.de/orca/) commands, and parse the result. Example:
 (todo )
 
 ## GROMACS interface
 
-This library provides an interface to build [GROMACS](https://www.gromacs.org/) inputs, run MD, and parse outputs. This
-is similar conceptually to the ORCA interface. We use it in [Molchanica](https://github.com/david-oconnor/molchanica) as
-an optional backend for MD. See the [API docs](https://docs.rs/bio_files/latest/bio_files/gromacs/index.html). To use
-it, GROMACS must be installed, and available on the system path.
+This library provides an interface to build [GROMACS](https://www.gromacs.org/) inputs, run MD, and parse outputs. This is similar conceptually to the ORCA interface. We use it in [Molchanica](https://github.com/david-oconnor/molchanica) as an optional backend for MD. See the [API docs](https://docs.rs/bio_files/latest/bio_files/gromacs/index.html). To use it, GROMACS must be installed, and available on the system path.
 
-It constructs an [MDP](https://manual.gromacs.org/current/user-guide/mdp-options.html) configuration, converts
-molecules (From atoms and bonds) into a .gro files, and creates a topology from force field parameters. It launches
-`grompp` and `gmx` to prepare and run MD. Once complete, it collects data from the files GROMACS generates: `.trr` for
-trajectory data, `.edr` for thermodynamic properties, and `.log` for general information.
+It constructs an [MDP](https://manual.gromacs.org/current/user-guide/mdp-options.html) configuration, converts molecules (From atoms and bonds) into a .gro files, and creates a topology from force field parameters. It launches
+`grompp` and
+`gmx` to prepare and run MD. Once complete, it collects data from the files GROMACS generates:
+`.trr` for trajectory data, `.edr` for thermodynamic properties, and `.log` for general information.
 
-We do not provide Python bindings to this functionality, as it's handled by
-the [official gmxapi library](https://manual.gromacs.org/current/gmxapi/userguide/usage.html).
+We do not provide Python bindings to this functionality, as it's handled by the [official gmxapi library](https://manual.gromacs.org/current/gmxapi/userguide/usage.html).
 
 It also offers standalone functionality to read and write TRR and other files.
 
@@ -178,8 +159,7 @@ fn run_gromacs() -> io::Result<()> {
 
 ## Loading building-block molecules from templates
 
-We can load amino acids, nucleic acids, and lipids from Amber template files. These are standard
-molecule segments used to build common biological molecules. Example usage:
+We can load amino acids, nucleic acids, and lipids from Amber template files. These are standard molecule segments used to build common biological molecules. Example usage:
 
 ```rust
 use dynamics::{LIPID_21_LIB, AMINO_19, RNA_LIB, OL24_LIB};
@@ -333,16 +313,15 @@ You can use similar syntax for mmCIF protein files.
 
 Reference the [Amber 2025 Reference Manual, section 15](https://ambermd.org/doc12/Amber25.pdf)
 for details on how we parse its files, and how to use the results. In some cases, we change the format from
-the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for Van der Waals
-parameters. Structs and fields are documented with reference manual references.
+the raw Amber data. For example, we store angles as radians (vice degrees), and σ vice R_min for
+Van der Waals parameters. Structs and fields are documented with reference manual references.
 
-The Amber forcefield parameter format has fields which each contain a `Vec` of a certain type of data. (Bond stretching
-parameters,
-angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups
-for your application.
+The Amber forcefield parameter format has fields which each contain a
+`Vec` of a certain type of data. (Bond stretching parameters, angle between 3 atoms, torsion/dihedral angles etc.) You may wish to parse these into a format that has faster lookups for your application.
 
 Note that the above examples expect that your application has a struct representing the molecule that has
-`From<Mol2>`, and `to_mol2(&self)` (etc) methods. The details of these depend on the application. For example:
+`From<Mol2>`, and
+`to_mol2(&self)` (etc) methods. The details of these depend on the application. For example:
 
 ```rust
 impl From<Sdf> for Molecule {
@@ -357,7 +336,8 @@ impl From<Sdf> for Molecule {
 }
 ```
 
-A practical example of parsing a molecule from a `mmCIF` as parsed from `bio_files` into an application-specific format:
+A practical example of parsing a molecule from a `mmCIF` as parsed from
+`bio_files` into an application-specific format:
 
 ```rust
 fn load() {

@@ -29,14 +29,12 @@ use crate::{
 
 const KCAL_TO_KJ: f32 = 4.184;
 const ANG_TO_NM: f32 = 0.1;
-/// kcal/mol/Å² → kJ/mol/nm²
+
+/// Convert kcal/mol/Å² (e.g. as used in force fields from `dynamics`, and Amber) to kJ/mol/nm²
+/// (used by GROmACS).
 const BOND_K_FACTOR: f32 = KCAL_TO_KJ * 100.0;
 
-// ---------------------------------------------------------------------------
-// Public entry point
-// ---------------------------------------------------------------------------
-
-/// One molecule type entry — atoms, bonds, a name, and an optional copy count.
+/// A single molecule, as represented in GROMACS topologies.
 pub struct MoleculeTopology<'a> {
     pub name: &'a str,
     pub atoms: &'a [AtomGeneric],
@@ -195,10 +193,6 @@ fn build_indexed(
     ForceFieldParamsIndexed::new(ff, mol.atoms, &adj_list, false)
 }
 
-// ---------------------------------------------------------------------------
-// OPC water topology helpers
-// ---------------------------------------------------------------------------
-
 /// Atom-type lines for OPC water to append to the `[atomtypes]` section.
 ///
 /// Values taken verbatim from `amber19sb.ff/ffnonbonded.itp` (GROMACS 2025.3).
@@ -249,10 +243,6 @@ fn ion_moleculetypes() -> &'static str {
     )
 }
 
-// ---------------------------------------------------------------------------
-// Misc helpers
-// ---------------------------------------------------------------------------
-
 /// Very coarse atomic-number estimate from atomic mass — sufficient for the
 /// informational `at.num` field in `[ atomtypes ]`, which GROMACS uses only for
 /// visualisation and does not affect energetics.
@@ -284,11 +274,9 @@ fn write_molecule_block(
     mol: &MoleculeTopology<'_>,
     pi: &ForceFieldParamsIndexed,
 ) -> io::Result<()> {
-    // [ moleculetype ]
     s.push_str("[ moleculetype ]\n; molname  nrexcl\n");
     s.push_str(&format!("  {}        3\n\n", mol.name));
 
-    // [ atoms ]
     s.push_str("[ atoms ]\n");
     s.push_str("; nr   type    resnr  residue  atom    cgnr   charge     mass\n");
 
@@ -307,8 +295,6 @@ fn write_molecule_block(
             // Small molecule / hetero: FF type (e.g. "oh", "c3") takes priority
             atom.force_field_type
                 .clone()
-                // .or_else(|| atom.type_in_res.as_ref().map(|t| t.to_string()))
-                // .or_else(|| atom.type_in_res_general.clone())
                 .unwrap_or_else(|| format!("{}{}", atom.element.to_letter(), nr))
         } else {
             // todo: QC this logic of ff_type vs TIR general... Sus. They are NOT the same!
@@ -316,8 +302,6 @@ fn write_molecule_block(
             atom.type_in_res
                 .as_ref()
                 .map(|t| t.to_string())
-                // .or_else(|| atom.force_field_type.clone())
-                // .or_else(|| atom.type_in_res_general.clone())
                 .unwrap_or_else(|| format!("{}{}", atom.element.to_letter(), nr))
         };
 

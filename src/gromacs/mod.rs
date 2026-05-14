@@ -32,6 +32,7 @@ pub mod mdp;
 pub mod output;
 pub mod solvate;
 pub mod topology;
+pub mod trr;
 
 use std::{
     fs,
@@ -45,11 +46,10 @@ pub use mdp::{MdpParams, OutputControl};
 pub use output::{GromacsFrame, GromacsOutput, OutputEnergy};
 use solvate::Solvent;
 pub use topology::MoleculeTopology;
+use trr::read_trr;
 
 use crate::{
-    AtomGeneric, BondGeneric, FrameSlice,
-    gromacs::{gro::make_gro, output::read_trr},
-    md_params::ForceFieldParams,
+    AtomGeneric, BondGeneric, FrameSlice, gromacs::gro::make_gro, md_params::ForceFieldParams,
 };
 
 // Used for creating intermediate files
@@ -93,7 +93,7 @@ pub struct MoleculeInput {
     pub count: usize,
 }
 
-/// GROMACS simulation input.
+/// GROMACS simulation input. This contains everything required to launch a simulation.
 ///
 /// Analogous to `orca::OrcaInput`.
 #[derive(Clone, Debug)]
@@ -127,10 +127,6 @@ impl Default for GromacsInput {
         }
     }
 }
-
-// ---------------------------------------------------------------------------
-// File generation
-// ---------------------------------------------------------------------------
 
 impl GromacsInput {
     /// Generate the `.mdp` file contents.
@@ -181,7 +177,7 @@ impl GromacsInput {
     }
 
     /// Write all input files (`conf.gro`, `topol.top`, `md.mdp`) to `dir`.
-    /// When a water model is set, also writes the solvent box (e.g. `opc.gro`)
+    /// When a water model is set, also writes the solvent box
     /// so that `gmx solvate -cs <model>.gro` works without requiring the file
     /// to be pre-installed in the GROMACS data directory.
     pub fn save(&self, dir: &Path) -> io::Result<()> {
@@ -231,7 +227,7 @@ impl GromacsInput {
 
         // Solvation: fill the box with water before preprocessing.
         // We don't specify `box` (aka cell/sim box); it's present in the solute coordinate file (`-cp`).
-        // -cs specifies the solute template. `opc.gro` is included with GROMACS; we use that.
+        // -cs specifies the solute template. `tip4p.gro` is included with GROMACS; we use that.
         // [Docs for GMX solvate](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
         let structure_gro = if let Some(ref wm) = self.solvent {
             run_gmx(
@@ -426,7 +422,7 @@ impl GromacsInput {
         )?;
 
         // Energy data is optional: if gmx energy fails or is unavailable, run()
-        // still returns a valid trajectory — frames just have `energy: None`.
+        // still returns a valid trajectory - frames just have `energy: None`.
         let energies = OutputEnergy::from_edr(&dir.join(ENERGY_OUT_NAME)).unwrap_or_default();
 
         let mut result = GromacsOutput::new(log_text, trr_frames, energies, solute_atom_count)?;
@@ -435,6 +431,7 @@ impl GromacsInput {
         } else {
             None
         };
+
         result.xtc_path = xtc_dest;
         result.gro_path = if gro_dest.exists() {
             Some(gro_dest)
@@ -445,10 +442,6 @@ impl GromacsInput {
         Ok(result)
     }
 }
-
-// ---------------------------------------------------------------------------
-// Internal helpers
-// ---------------------------------------------------------------------------
 
 /// Minimal MDP for a steep-descent energy minimization pass.
 ///
