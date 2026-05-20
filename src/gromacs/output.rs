@@ -10,7 +10,7 @@
 
 use std::{
     collections::HashMap,
-    io::{self, ErrorKind, Read, Write as _},
+    io::{self, ErrorKind, Write as _},
     path::Path,
     process::{Command, Stdio},
 };
