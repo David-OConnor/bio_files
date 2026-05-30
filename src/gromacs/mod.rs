@@ -255,24 +255,28 @@ impl GromacsInput {
         // We don't specify `box` (aka cell/sim box); it's present in the solute coordinate file (`-cp`).
         // -cs specifies the solute template. `tip4p.gro` is included with GROMACS; we use that.
         // [Docs for GMX solvate](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
-        let structure_gro = if self.initial_gro.is_none()
-            && let Some(ref wm) = self.solvent
-        {
-            run_gmx(
-                dir,
-                &[
-                    "solvate",
-                    "-cp",
-                    GRO_NAME,
-                    "-cs",
-                    wm.gro_filename(),
-                    "-o",
-                    SOLVATED_NAME,
-                    "-p",
-                    TOP_NAME,
-                ],
-            )?;
-            SOLVATED_NAME
+        let structure_gro = if self.initial_gro.is_none() {
+            if let Some(ref wm) = self.solvent
+                && let Some(solvent_gro) = wm.prepare_gro(dir, self.box_nm)?
+            {
+                run_gmx(
+                    dir,
+                    &[
+                        "solvate",
+                        "-cp",
+                        GRO_NAME,
+                        "-cs",
+                        solvent_gro,
+                        "-o",
+                        SOLVATED_NAME,
+                        "-p",
+                        TOP_NAME,
+                    ],
+                )?;
+                SOLVATED_NAME
+            } else {
+                GRO_NAME
+            }
         } else {
             GRO_NAME
         };

@@ -112,8 +112,10 @@ pub fn make_top(
     }
 
     // OPC water atom types — required when opc.itp is included below.
-    if matches!(solvent, Some(Solvent::Opc))
-        || matches!(solvent, Some(Solvent::Custom(template)) if template.include_opc_water)
+    if matches!(
+        solvent,
+        Some(Solvent::WaterOpc | Solvent::WaterOpcCustomRegions(_))
+    ) || matches!(solvent, Some(Solvent::Custom(template)) if template.include_opc_water)
     {
         s.push_str(opc_atomtypes());
     }
@@ -134,7 +136,7 @@ pub fn make_top(
     // so grompp can resolve it after gmx solvate appends "SOL N" to [molecules].
 
     match solvent {
-        Some(Solvent::Opc) => {
+        Some(Solvent::WaterOpc | Solvent::WaterOpcCustomRegions(_)) => {
             s.push_str("#include \"amber19sb.ff/opc.itp\"\n\n");
         }
         Some(Solvent::Custom(template)) => {
@@ -397,4 +399,24 @@ fn write_molecule_block(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::make_top;
+    use crate::gromacs::solvate::Solvent;
+
+    #[test]
+    fn custom_region_opc_topology_includes_water_atomtypes_and_moleculetype() {
+        let top = make_top(
+            &[],
+            &[],
+            None,
+            Some(&Solvent::WaterOpcCustomRegions(Vec::new())),
+        )
+        .unwrap();
+
+        assert!(top.contains("OW_opc"));
+        assert!(top.contains("#include \"amber19sb.ff/opc.itp\""));
+    }
 }

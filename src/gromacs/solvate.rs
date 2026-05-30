@@ -1,11 +1,18 @@
 //! [Docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html)
 //! [More docs](https://manual.gromacs.org/current/how-to/topology.html#water-solvation)
 
-use std::fmt::Write as _;
+use std::{fmt::Write as _, io, path::Path};
 
 use lin_alg::f32::Vec3;
 
-use crate::gromacs::{CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER, MoleculeInput};
+use crate::gromacs::{
+    CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER, MoleculeInput,
+    gro::{AtomGro, Gro},
+    run_gmx,
+};
+
+pub(in crate::gromacs) const CUSTOM_REGIONS_SOLVENT_GRO: &str = "water_custom_regions.gro";
+const CUSTOM_REGIONS_FULL_BOX_GRO: &str = "water_custom_regions_full_box.gro";
 
 /// Water model to use for explicit solvation via `gmx solvate`.
 /// [solvate docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
@@ -13,13 +20,21 @@ use crate::gromacs::{CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER, MoleculeInput}
 /// Selecting a model causes the pipeline to:
 /// 1. Include the model's atom-type and molecule-type sections in the topology.
 /// 2. Run `gmx solvate` to fill the simulation box with water before `grompp`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub enum Solvent {
+    #[default]
+    /// Fill the entire sim box with rigid water molecules, at a realistic density.
+    ///
     /// OPC 4-point rigid water (recommended with Amber ff19SB).
     /// Requires GROMACS 2022+ which ships `tip4p.gro` and `opc.itp` in its data directory.
     /// We use Gromac's TIP4P water molecule, which is suitable for some
     /// 4-point rigid water models including OPC.
-    Opc,
+    WaterOpc,
+    /// Fill sub-regions of the full sim box with rigid water molecules at a realistic density.
+    ///
+    /// Bounds use the GROMACS box coordinate frame and units: nm in `[0, box_nm]`.
+    /// Each region must have positive dimensions and fit inside the full simulation box.
+    WaterOpcCustomRegions(Vec<(Vec3, Vec3)>), // (bounds low, bounds high)
     Custom(CustomSolventTemplate),
 }
 
@@ -28,10 +43,163 @@ impl Solvent {
     pub(in crate::gromacs) fn gro_filename(&self) -> &'static str {
         match self {
             // 4-site model is fine for OPC; we just use a different force field.
-            Self::Opc => GMX_BUILTIN_TIP4P_WATER,
+            Self::WaterOpc => GMX_BUILTIN_TIP4P_WATER,
+            Self::WaterOpcCustomRegions(_) => GMX_BUILTIN_TIP4P_WATER,
             Self::Custom(_) => CUSTOM_SOLVENT_GRO,
         }
     }
+
+    pub(in crate::gromacs) fn prepare_gro(
+        &self,
+        dir: &Path,
+        box_nm: Option<(f64, f64, f64)>,
+    ) -> io::Result<Option<&'static str>> {
+        match self {
+            Self::WaterOpcCustomRegions(regions) => {
+                make_water_opc_custom_regions_gro(dir, box_nm, regions)
+            }
+            _ => Ok(Some(self.gro_filename())),
+        }
+    }
+}
+
+/// Ask GROMACS to generate a full periodic OPC-compatible water box, retain only
+/// molecules wholly inside one requested region, then use that as the solvent
+/// template for the final `gmx solvate -cp ...` pass.
+///
+/// Starting from one full-cell template preserves the periodic packing phase
+/// across region boundaries. The final `gmx solvate` invocation remains
+/// responsible for removing waters that clash with the solute and updating the
+/// topology molecule count.
+fn make_water_opc_custom_regions_gro(
+    dir: &Path,
+    box_nm: Option<(f64, f64, f64)>,
+    regions: &[(Vec3, Vec3)],
+) -> io::Result<Option<&'static str>> {
+    if regions.is_empty() {
+        return Ok(None);
+    }
+
+    let box_vec = validate_regions(box_nm, regions)?;
+    let x = box_vec.x.to_string();
+    let y = box_vec.y.to_string();
+    let z = box_vec.z.to_string();
+
+    run_gmx(
+        dir,
+        &[
+            "solvate",
+            "-cs",
+            GMX_BUILTIN_TIP4P_WATER,
+            "-box",
+            &x,
+            &y,
+            &z,
+            "-o",
+            CUSTOM_REGIONS_FULL_BOX_GRO,
+        ],
+    )?;
+
+    let full_box = Gro::load(&dir.join(CUSTOM_REGIONS_FULL_BOX_GRO))?;
+    let regional_box = retain_waters_in_regions(full_box, regions);
+    regional_box.save(&dir.join(CUSTOM_REGIONS_SOLVENT_GRO))?;
+
+    Ok(Some(CUSTOM_REGIONS_SOLVENT_GRO))
+}
+
+fn validate_regions(
+    box_nm: Option<(f64, f64, f64)>,
+    regions: &[(Vec3, Vec3)],
+) -> io::Result<lin_alg::f64::Vec3> {
+    let Some((x, y, z)) = box_nm else {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "WaterOpcCustomRegions requires box_nm.",
+        ));
+    };
+
+    let box_vec = lin_alg::f64::Vec3::new(x, y, z);
+    if !is_positive_finite(box_vec) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Simulation box must have positive finite dimensions; got {box_vec:?}."),
+        ));
+    }
+
+    for (i, &(low, high)) in regions.iter().enumerate() {
+        if !is_finite(low)
+            || !is_finite(high)
+            || low.x < 0.0
+            || low.y < 0.0
+            || low.z < 0.0
+            || high.x <= low.x
+            || high.y <= low.y
+            || high.z <= low.z
+            || high.x as f64 > box_vec.x
+            || high.y as f64 > box_vec.y
+            || high.z as f64 > box_vec.z
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "Water OPC custom region {i} must have positive finite dimensions and fit \
+                     inside box {box_vec:?}; got low={low:?}, high={high:?}."
+                ),
+            ));
+        }
+    }
+
+    Ok(box_vec)
+}
+
+fn retain_waters_in_regions(full_box: Gro, regions: &[(Vec3, Vec3)]) -> Gro {
+    let mut atoms = Vec::new();
+    let mut start = 0;
+
+    while start < full_box.atoms.len() {
+        let first = &full_box.atoms[start];
+        let mut end = start + 1;
+
+        while end < full_box.atoms.len()
+            && full_box.atoms[end].mol_id == first.mol_id
+            && full_box.atoms[end].mol_name == first.mol_name
+        {
+            end += 1;
+        }
+
+        let water = &full_box.atoms[start..end];
+        if regions
+            .iter()
+            .any(|&(low, high)| water.iter().all(|atom| region_contains(low, high, atom)))
+        {
+            atoms.extend_from_slice(water);
+        }
+
+        start = end;
+    }
+
+    Gro {
+        atoms,
+        head_text: "OPC water custom regions generated by Bio Files".to_owned(),
+        box_vec: full_box.box_vec,
+    }
+}
+
+fn is_positive_finite(v: lin_alg::f64::Vec3) -> bool {
+    v.x.is_finite() && v.y.is_finite() && v.z.is_finite() && v.x > 0.0 && v.y > 0.0 && v.z > 0.0
+}
+
+fn is_finite(v: Vec3) -> bool {
+    v.x.is_finite() && v.y.is_finite() && v.z.is_finite()
+}
+
+fn region_contains(low: Vec3, high: Vec3, atom: &AtomGro) -> bool {
+    atom.posit.x >= low.x as f64
+        && atom.posit.y >= low.y as f64
+        && atom.posit.z >= low.z as f64
+        && atom.posit.x <= high.x as f64
+        && atom.posit.y <= high.y as f64
+        && atom.posit.z <= high.z as f64
 }
 
 /// C+P from `dynamics`.
@@ -50,7 +218,6 @@ pub struct WaterInitTemplate {
 }
 
 impl WaterInitTemplate {
-    // todo: This may be hard-coded for OPC, but we use Gromacs' built-in OPC template.
     /// Create `.gro` file text for use as the `gmx solvate -cs` template.
     ///
     /// Writes 4 atoms per molecule (OW, HW1, HW2, MW) in GROMACS `.gro` format.
@@ -143,5 +310,115 @@ impl CustomSolventTemplate {
             topology_molecules: Vec::new(),
             include_opc_water: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    use lin_alg::{f32::Vec3, f64::Vec3 as Vec3F64};
+    use na_seq::Element;
+
+    use super::{Solvent, retain_waters_in_regions, validate_regions};
+    use crate::gromacs::{
+        gro::{AtomGro, Gro},
+        run_gmx,
+    };
+
+    #[test]
+    fn custom_regions_must_fit_inside_full_box() {
+        let valid = [(Vec3::new(0., 1., 2.), Vec3::new(3., 4., 5.))];
+        assert!(validate_regions(Some((6., 7., 8.)), &valid).is_ok());
+
+        let negative_low = [(Vec3::new(-1., 0., 0.), Vec3::new(1., 1., 1.))];
+        assert!(validate_regions(Some((6., 7., 8.)), &negative_low).is_err());
+
+        let outside_box = [(Vec3::new(0., 0., 0.), Vec3::new(7., 1., 1.))];
+        assert!(validate_regions(Some((6., 7., 8.)), &outside_box).is_err());
+
+        assert!(validate_regions(None, &valid).is_err());
+    }
+
+    #[test]
+    fn regional_filter_retains_only_whole_water_molecules() {
+        let mut atoms = water_atoms(1, 1, [1.0, 1.1, 0.9, 1.0]);
+        atoms.extend(water_atoms(2, 5, [2.0, 2.1, 2.2, 2.0]));
+
+        let full_box = Gro {
+            atoms,
+            head_text: "full water box".to_owned(),
+            box_vec: Vec3F64::new(5., 5., 5.),
+        };
+        let regions = [
+            (Vec3::new(0.8, 0.5, 0.5), Vec3::new(1.2, 1.5, 1.5)),
+            (Vec3::new(1.9, 0.5, 0.5), Vec3::new(2.1, 1.5, 1.5)),
+            (Vec3::new(2.2, 0.5, 0.5), Vec3::new(2.3, 1.5, 1.5)),
+        ];
+
+        let filtered = retain_waters_in_regions(full_box, &regions);
+
+        assert_eq!(filtered.atoms.len(), 4);
+        assert!(filtered.atoms.iter().all(|atom| atom.mol_id == 1));
+        assert_eq!(filtered.box_vec, Vec3F64::new(5., 5., 5.));
+    }
+
+    #[test]
+    #[ignore = "requires gmx on PATH"]
+    fn gmx_final_solvate_preserves_excluded_region() -> std::io::Result<()> {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("bio_files_gmx_custom_regions_{stamp}"));
+        fs::create_dir_all(&dir)?;
+        fs::write(
+            dir.join("empty.gro"),
+            "Empty full simulation box\n    0\n   2.00000   2.00000   2.00000\n",
+        )?;
+
+        let solvent =
+            Solvent::WaterOpcCustomRegions(vec![(Vec3::new(0., 0., 0.), Vec3::new(1., 2., 2.))]);
+        let solvent_gro = solvent.prepare_gro(&dir, Some((2., 2., 2.)))?.unwrap();
+
+        run_gmx(
+            &dir,
+            &[
+                "solvate",
+                "-cp",
+                "empty.gro",
+                "-cs",
+                solvent_gro,
+                "-o",
+                "regional_out.gro",
+            ],
+        )?;
+
+        let solvated = Gro::load(&dir.join("regional_out.gro"))?;
+        assert!(!solvated.atoms.is_empty());
+        assert!(solvated.atoms.iter().all(|atom| atom.posit.x <= 1.0));
+
+        fs::remove_dir_all(dir)?;
+        Ok(())
+    }
+
+    fn water_atoms(mol_id: u32, first_serial: u32, xs: [f64; 4]) -> Vec<AtomGro> {
+        ["OW", "HW1", "HW2", "MW"]
+            .into_iter()
+            .zip(xs)
+            .enumerate()
+            .map(|(i, (atom_type, x))| AtomGro {
+                mol_id,
+                mol_name: "SOL".to_owned(),
+                element: Element::Oxygen,
+                atom_type: atom_type.to_owned(),
+                serial_number: first_serial + i as u32,
+                posit: Vec3F64::new(x, 1., 1.),
+                velocity: None,
+            })
+            .collect()
     }
 }
