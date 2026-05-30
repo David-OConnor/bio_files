@@ -242,11 +242,27 @@ impl Gro {
 /// Positions are converted from Å (internal) to nm (GROMACS). This has similar data to that stored
 /// in various molecule formats (SDF, Mol2, mmCIF etc), but also includes velocities,
 pub fn make_gro(mols: &[MoleculeInput], box_nm: &Option<(f64, f64, f64)>) -> String {
+    make_gro_with_origin(mols, box_nm, None)
+}
+
+/// Generate a GROMACS `.gro` structure file with an optional explicit lower
+/// corner for the input coordinate frame.
+///
+/// When `coordinate_origin_a` is set, positions are translated into GROMACS'
+/// positive box frame without recentering. This preserves deliberately offset
+/// structures such as boundary layers.
+pub fn make_gro_with_origin(
+    mols: &[MoleculeInput],
+    box_nm: &Option<(f64, f64, f64)>,
+    coordinate_origin_a: Option<Vec3>,
+) -> String {
     let total_atoms: usize = mols.iter().map(|m| m.atoms.len() * m.count).sum();
 
-    // Shift all atoms so their centroid lands at the box center.
-    // This ensures `gmx solvate` places water around the solute rather than in a corner.
-    let (shift_x, shift_y, shift_z) = if let Some((bx, by, bz)) = box_nm {
+    // Use an explicit coordinate frame for offset structures. Otherwise center
+    // the solute so `gmx solvate` places water around it rather than in a corner.
+    let (shift_x, shift_y, shift_z) = if let Some(origin) = coordinate_origin_a {
+        (-origin.x / 10.0, -origin.y / 10.0, -origin.z / 10.0)
+    } else if let Some((bx, by, bz)) = box_nm {
         let (mut sx, mut sy, mut sz) = (0.0, 0.0, 0.0);
         let mut n = 0usize;
 
@@ -331,4 +347,38 @@ pub fn make_gro(mols: &[MoleculeInput], box_nm: &Option<(f64, f64, f64)>) -> Str
     let _ = writeln!(s, "{:>10.5}{:>10.5}{:>10.5}", bx, by, bz);
 
     s
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::AtomGeneric;
+
+    use super::*;
+
+    #[test]
+    fn explicit_coordinate_origin_preserves_offset_structure_position() {
+        let mols = vec![MoleculeInput {
+            name: "MOL".to_owned(),
+            atoms: vec![AtomGeneric {
+                serial_number: 1,
+                posit: Vec3::new(-8.0, -7.0, -6.0),
+                element: Element::Carbon,
+                hetero: true,
+                force_field_type: Some("c3".to_owned()),
+                ..Default::default()
+            }],
+            bonds: Vec::new(),
+            ff_params: None,
+            count: 1,
+        }];
+
+        let text = make_gro_with_origin(
+            &mols,
+            &Some((4.0, 4.0, 4.0)),
+            Some(Vec3::new(-10.0, -10.0, -10.0)),
+        );
+        let gro = Gro::new(&text).unwrap();
+
+        assert_eq!(gro.atoms[0].posit, Vec3::new(0.2, 0.3, 0.4));
+    }
 }

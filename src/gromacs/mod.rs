@@ -48,9 +48,7 @@ use solvate::Solvent;
 pub use topology::MoleculeTopology;
 use trr::read_trr;
 
-use crate::{
-    AtomGeneric, BondGeneric, FrameSlice, gromacs::gro::make_gro, md_params::ForceFieldParams,
-};
+use crate::{AtomGeneric, BondGeneric, FrameSlice, md_params::ForceFieldParams};
 
 // Used for creating intermediate files
 const TEMP_DIR: &str = "gromacs_out";
@@ -106,6 +104,12 @@ pub struct GromacsInput {
     /// `None` → box line written as `0 0 0` (GROMACS will error on `grompp` —
     /// provide a box when running production MD).
     pub box_nm: Option<(f64, f64, f64)>,
+    /// Optional lower corner of the input coordinate frame in **Å**.
+    ///
+    /// When set, solute coordinates are translated from `[origin_a, ...]` into
+    /// GROMACS' `[0, box_nm]` frame instead of being recentered by centroid.
+    /// Use this for deliberately offset structures such as boundary layers.
+    pub coordinate_origin_a: Option<lin_alg::f64::Vec3>,
     /// System-wide (global) force-field parameters used as a fall-back for
     /// any per-molecule terms that are absent from `MoleculeInput::ff_params`.
     pub ff_global: Option<ForceFieldParams>,
@@ -135,6 +139,7 @@ impl Default for GromacsInput {
             mdp: MdpParams::default(),
             molecules: Vec::new(),
             box_nm: None,
+            coordinate_origin_a: None,
             ff_global: None,
             solvent: None,
             initial_gro: None,
@@ -209,7 +214,10 @@ impl GromacsInput {
         if let Some(gro_text) = &self.initial_gro {
             save_txt_to_file(dir.join(GRO_NAME), gro_text)?;
         } else {
-            save_txt_to_file(dir.join(GRO_NAME), &make_gro(&self.molecules, &self.box_nm))?;
+            save_txt_to_file(
+                dir.join(GRO_NAME),
+                &gro::make_gro_with_origin(&self.molecules, &self.box_nm, self.coordinate_origin_a),
+            )?;
         }
         save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;
 
