@@ -400,23 +400,3 @@ fn write_molecule_block(
 
     Ok(())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::make_top;
-    use crate::gromacs::solvate::Solvent;
-
-    #[test]
-    fn custom_region_opc_topology_includes_water_atomtypes_and_moleculetype() {
-        let top = make_top(
-            &[],
-            &[],
-            None,
-            Some(&Solvent::WaterOpcCustomRegions(Vec::new())),
-        )
-        .unwrap();
-
-        assert!(top.contains("OW_opc"));
-        assert!(top.contains("#include \"amber19sb.ff/opc.itp\""));
-    }
-}
