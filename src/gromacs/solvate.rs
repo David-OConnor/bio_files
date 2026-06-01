@@ -13,6 +13,7 @@ use crate::gromacs::{
 
 pub(in crate::gromacs) const CUSTOM_REGIONS_SOLVENT_GRO: &str = "water_custom_regions.gro";
 const CUSTOM_REGIONS_FULL_BOX_GRO: &str = "water_custom_regions_full_box.gro";
+const REGION_BOUNDS_TOLERANCE_NM: f64 = 1.0e-5;
 
 /// Water model to use for explicit solvation via `gmx solvate`.
 /// [solvate docs](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
@@ -129,15 +130,15 @@ fn validate_regions(
     for (i, &(low, high)) in regions.iter().enumerate() {
         if !is_finite(low)
             || !is_finite(high)
-            || low.x < 0.0
-            || low.y < 0.0
-            || low.z < 0.0
+            || (low.x as f64) < -REGION_BOUNDS_TOLERANCE_NM
+            || (low.y as f64) < -REGION_BOUNDS_TOLERANCE_NM
+            || (low.z as f64) < -REGION_BOUNDS_TOLERANCE_NM
             || high.x <= low.x
             || high.y <= low.y
             || high.z <= low.z
-            || high.x as f64 > box_vec.x
-            || high.y as f64 > box_vec.y
-            || high.z as f64 > box_vec.z
+            || (high.x as f64) > box_vec.x + REGION_BOUNDS_TOLERANCE_NM
+            || (high.y as f64) > box_vec.y + REGION_BOUNDS_TOLERANCE_NM
+            || (high.z as f64) > box_vec.z + REGION_BOUNDS_TOLERANCE_NM
         {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -310,5 +311,27 @@ impl CustomSolventTemplate {
             topology_molecules: Vec::new(),
             include_opc_water: false,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn custom_region_validation_allows_f32_drift_at_box_faces() {
+        let regions = [(
+            Vec3::new(0.0, 0.0, 4.029_781),
+            Vec3::new(4.4, 4.4, 6.429_780_5),
+        )];
+
+        assert!(validate_regions(Some((4.4, 4.4, 6.629_780_578_613_282)), &regions).is_ok());
+    }
+
+    #[test]
+    fn custom_region_validation_rejects_meaningful_out_of_box_bounds() {
+        let regions = [(Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.4, 4.4, 6.7))];
+
+        assert!(validate_regions(Some((4.4, 4.4, 6.6)), &regions).is_err());
     }
 }

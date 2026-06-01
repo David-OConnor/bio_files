@@ -241,7 +241,7 @@ impl Gro {
 ///
 /// Positions are converted from Å (internal) to nm (GROMACS). This has similar data to that stored
 /// in various molecule formats (SDF, Mol2, mmCIF etc), but also includes velocities,
-pub fn make_gro(mols: &[MoleculeInput], box_nm: &Option<(f64, f64, f64)>) -> String {
+pub fn make_gro(mols: &[MoleculeInput], box_nm: &Option<(f64, f64, f64)>) -> io::Result<String> {
     make_gro_with_origin(mols, box_nm, None)
 }
 
@@ -255,7 +255,40 @@ pub fn make_gro_with_origin(
     mols: &[MoleculeInput],
     box_nm: &Option<(f64, f64, f64)>,
     coordinate_origin_a: Option<Vec3>,
-) -> String {
+) -> io::Result<String> {
+    for mol in mols {
+        if let Some(copy_atom_posits) = &mol.copy_atom_posits {
+            if copy_atom_posits.len() != mol.count {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "Molecule {} has {} packed coordinate sets for {} copies",
+                        mol.name,
+                        copy_atom_posits.len(),
+                        mol.count,
+                    ),
+                ));
+            }
+
+            if let Some((copy_i, posits)) = copy_atom_posits
+                .iter()
+                .enumerate()
+                .find(|(_, posits)| posits.len() != mol.atoms.len())
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "Molecule {} copy {} has {} atom positions for a {}-atom topology",
+                        mol.name,
+                        copy_i + 1,
+                        posits.len(),
+                        mol.atoms.len(),
+                    ),
+                ));
+            }
+        }
+    }
+
     let total_atoms: usize = mols.iter().map(|m| m.atoms.len() * m.count).sum();
 
     // Use an explicit coordinate frame for offset structures. Otherwise center
@@ -267,11 +300,16 @@ pub fn make_gro_with_origin(
         let mut n = 0usize;
 
         for mol in mols {
-            for _ in 0..mol.count {
-                for atom in &mol.atoms {
-                    sx += atom.posit.x;
-                    sy += atom.posit.y;
-                    sz += atom.posit.z;
+            for copy_i in 0..mol.count {
+                for (atom_i, atom) in mol.atoms.iter().enumerate() {
+                    let posit = mol
+                        .copy_atom_posits
+                        .as_ref()
+                        .map(|copies| copies[copy_i][atom_i])
+                        .unwrap_or(atom.posit);
+                    sx += posit.x;
+                    sy += posit.y;
+                    sz += posit.z;
                     n += 1;
                 }
             }
@@ -297,8 +335,8 @@ pub fn make_gro_with_origin(
     let mut res_serial = 1;
 
     for mol in mols {
-        for _copy in 0..mol.count {
-            for atom in &mol.atoms {
+        for copy_i in 0..mol.count {
+            for (atom_i, atom) in mol.atoms.iter().enumerate() {
                 // atom name priority:
                 // - hetero / small molecule: FF type (GAFF, e.g. "oh", "c3") first,
                 //   then mol2 atom name, then element+index
@@ -319,9 +357,14 @@ pub fn make_gro_with_origin(
                         .unwrap_or_else(|| format!("{}{}", atom.element.to_letter(), atom_serial))
                 };
 
-                let x_nm = atom.posit.x / 10.0 + shift_x;
-                let y_nm = atom.posit.y / 10.0 + shift_y;
-                let z_nm = atom.posit.z / 10.0 + shift_z;
+                let posit = mol
+                    .copy_atom_posits
+                    .as_ref()
+                    .map(|copies| copies[copy_i][atom_i])
+                    .unwrap_or(atom.posit);
+                let x_nm = posit.x / 10.0 + shift_x;
+                let y_nm = posit.y / 10.0 + shift_y;
+                let z_nm = posit.z / 10.0 + shift_z;
 
                 // GRO fixed-width format:
                 // resid(5) resname(5) atom(5) serial(5) x(8.3) y(8.3) z(8.3)
@@ -346,7 +389,7 @@ pub fn make_gro_with_origin(
     let (bx, by, bz) = box_nm.unwrap_or((0.0, 0.0, 0.0));
     let _ = writeln!(s, "{:>10.5}{:>10.5}{:>10.5}", bx, by, bz);
 
-    s
+    Ok(s)
 }
 
 #[cfg(test)]
@@ -370,15 +413,47 @@ mod tests {
             bonds: Vec::new(),
             ff_params: None,
             count: 1,
+            copy_atom_posits: None,
         }];
 
         let text = make_gro_with_origin(
             &mols,
             &Some((4.0, 4.0, 4.0)),
             Some(Vec3::new(-10.0, -10.0, -10.0)),
-        );
+        )
+        .unwrap();
         let gro = Gro::new(&text).unwrap();
 
         assert_eq!(gro.atoms[0].posit, Vec3::new(0.2, 0.3, 0.4));
+    }
+
+    #[test]
+    fn packed_copy_positions_are_written_without_duplicating_the_topology() {
+        let mols = vec![MoleculeInput {
+            name: "MOL".to_owned(),
+            atoms: vec![AtomGeneric {
+                serial_number: 1,
+                posit: Vec3::new(0.0, 0.0, 0.0),
+                element: Element::Carbon,
+                hetero: true,
+                force_field_type: Some("c3".to_owned()),
+                ..Default::default()
+            }],
+            bonds: Vec::new(),
+            ff_params: None,
+            count: 2,
+            copy_atom_posits: Some(vec![
+                vec![Vec3::new(1.0, 2.0, 3.0)],
+                vec![Vec3::new(11.0, 12.0, 13.0)],
+            ]),
+        }];
+
+        let text =
+            make_gro_with_origin(&mols, &Some((2.0, 2.0, 2.0)), Some(Vec3::new_zero())).unwrap();
+        let gro = Gro::new(&text).unwrap();
+
+        assert_eq!(gro.atoms.len(), 2);
+        assert_eq!(gro.atoms[0].posit, Vec3::new(0.1, 0.2, 0.3));
+        assert_eq!(gro.atoms[1].posit, Vec3::new(1.1, 1.2, 1.3));
     }
 }

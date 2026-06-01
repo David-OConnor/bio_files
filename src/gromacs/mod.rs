@@ -89,6 +89,12 @@ pub struct MoleculeInput {
     pub ff_params: Option<ForceFieldParams>,
     /// Number of copies to list in `[ molecules ]`.
     pub count: usize,
+    /// Optional atom positions for each explicitly packed copy.
+    ///
+    /// When omitted, each copy uses the positions stored in `atoms`. When set,
+    /// the outer length must equal `count`, and each inner vector must contain
+    /// one position for every atom in this molecule topology.
+    pub copy_atom_posits: Option<Vec<Vec<lin_alg::f64::Vec3>>>,
 }
 
 /// GROMACS simulation input. This contains everything required to launch a simulation.
@@ -216,7 +222,11 @@ impl GromacsInput {
         } else {
             save_txt_to_file(
                 dir.join(GRO_NAME),
-                &gro::make_gro_with_origin(&self.molecules, &self.box_nm, self.coordinate_origin_a),
+                &gro::make_gro_with_origin(
+                    &self.molecules,
+                    &self.box_nm,
+                    self.coordinate_origin_a,
+                )?,
             )?;
         }
         save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;

@@ -128,6 +128,7 @@ fn run_gromacs() -> io::Result<()> {
             // ff_params: Some(ff_params_mol_specific),
             ff_params: None,
             count: 0,
+            copy_atom_posits: None,
         }]
     };
 
