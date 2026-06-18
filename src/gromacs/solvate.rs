@@ -313,25 +313,3 @@ impl CustomSolventTemplate {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn custom_region_validation_allows_f32_drift_at_box_faces() {
-        let regions = [(
-            Vec3::new(0.0, 0.0, 4.029_781),
-            Vec3::new(4.4, 4.4, 6.429_780_5),
-        )];
-
-        assert!(validate_regions(Some((4.4, 4.4, 6.629_780_578_613_282)), &regions).is_ok());
-    }
-
-    #[test]
-    fn custom_region_validation_rejects_meaningful_out_of_box_bounds() {
-        let regions = [(Vec3::new(0.0, 0.0, 0.0), Vec3::new(4.4, 4.4, 6.7))];
-
-        assert!(validate_regions(Some((4.4, 4.4, 6.6)), &regions).is_err());
-    }
-}

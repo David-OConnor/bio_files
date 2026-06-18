@@ -136,6 +136,19 @@ pub struct GromacsInput {
     /// types whose topology is supplied by `solvent`, for example `SOL` from
     /// Amber OPC water.
     pub extra_molecule_counts: Vec<(String, usize)>,
+    /// Optional complete topology text for a continued run.
+    ///
+    /// Use this with `initial_gro` when resuming from a previous `mdrun`, so
+    /// counter-ion substitutions and molecule counts remain identical.
+    pub topology_override: Option<String>,
+    /// Additional arguments appended to the production `gmx mdrun` command.
+    ///
+    /// For example, a caller driving a shrinking box can use `["-ntmpi", "1"]`
+    /// to disable domain decomposition as the cell becomes smaller.
+    pub mdrun_extra_args: Vec<String>,
+    /// Skip automatic counter-ion insertion. Continued runs should enable this
+    /// after reusing the topology emitted by the first run.
+    pub skip_counterion_insertion: bool,
     pub minimize_energy: bool,
 }
 
@@ -150,6 +163,9 @@ impl Default for GromacsInput {
             solvent: None,
             initial_gro: None,
             extra_molecule_counts: Vec::new(),
+            topology_override: None,
+            mdrun_extra_args: Vec::new(),
+            skip_counterion_insertion: false,
             minimize_energy: true,
         }
     }
@@ -229,7 +245,11 @@ impl GromacsInput {
                 )?,
             )?;
         }
-        save_txt_to_file(dir.join(TOP_NAME), &self.make_top()?)?;
+        let topology = match &self.topology_override {
+            Some(topology) => topology.clone(),
+            None => self.make_top()?,
+        };
+        save_txt_to_file(dir.join(TOP_NAME), &topology)?;
 
         if self.initial_gro.is_none()
             && let Some(Solvent::Custom(template)) = &self.solvent
@@ -314,49 +334,50 @@ impl GromacsInput {
             })
             .sum();
 
-        let structure_gro = if self.solvent.is_some() && net_q.abs() >= 0.5 {
-            // grompp needs a valid MDP to build ions.tpr; reuse the EM MDP.
-            save_txt_to_file(dir.join("ions.mdp"), em_mdp_str())?;
-            run_gmx(
-                dir,
-                &[
-                    "grompp",
-                    "-f",
-                    "ions.mdp",
-                    "-c",
-                    structure_gro,
-                    "-p",
-                    TOP_NAME,
-                    "-o",
-                    "ions.tpr",
-                    "-maxwarn",
-                    "5",
-                ],
-            )?;
+        let structure_gro =
+            if !self.skip_counterion_insertion && self.solvent.is_some() && net_q.abs() >= 0.5 {
+                // grompp needs a valid MDP to build ions.tpr; reuse the EM MDP.
+                save_txt_to_file(dir.join("ions.mdp"), em_mdp_str())?;
+                run_gmx(
+                    dir,
+                    &[
+                        "grompp",
+                        "-f",
+                        "ions.mdp",
+                        "-c",
+                        structure_gro,
+                        "-p",
+                        TOP_NAME,
+                        "-o",
+                        "ions.tpr",
+                        "-maxwarn",
+                        "5",
+                    ],
+                )?;
 
-            // genion asks interactively which group to replace; we select SOL.
-            run_gmx_stdin(
-                dir,
-                &[
-                    "genion",
-                    "-s",
-                    "ions.tpr",
-                    "-o",
-                    IONIZED_NAME,
-                    "-p",
-                    TOP_NAME,
-                    "-pname",
-                    "NA",
-                    "-nname",
-                    "CL",
-                    "-neutral",
-                ],
-                b"SOL\n",
-            )?;
-            IONIZED_NAME
-        } else {
-            structure_gro
-        };
+                // genion asks interactively which group to replace; we select SOL.
+                run_gmx_stdin(
+                    dir,
+                    &[
+                        "genion",
+                        "-s",
+                        "ions.tpr",
+                        "-o",
+                        IONIZED_NAME,
+                        "-p",
+                        TOP_NAME,
+                        "-pname",
+                        "NA",
+                        "-nname",
+                        "CL",
+                        "-neutral",
+                    ],
+                    b"SOL\n",
+                )?;
+                IONIZED_NAME
+            } else {
+                structure_gro
+            };
 
         // Energy minimization — removes bad contacts
         let md_input_gro: String = if self.minimize_energy {
@@ -421,24 +442,23 @@ impl GromacsInput {
         )?;
 
         // mdrun: Run MD.
-        run_gmx(
-            dir,
-            &[
-                "mdrun",
-                "-s",
-                "topol.tpr",
-                "-o",
-                TRR_NAME,
-                "-x",
-                XTC_NAME,
-                "-c",
-                GRO_OUT_NAME,
-                "-e",
-                ENERGY_OUT_NAME,
-                "-g",
-                LOG_NAME,
-            ],
-        )?;
+        let mut mdrun_args = vec![
+            "mdrun",
+            "-s",
+            "topol.tpr",
+            "-o",
+            TRR_NAME,
+            "-x",
+            XTC_NAME,
+            "-c",
+            GRO_OUT_NAME,
+            "-e",
+            ENERGY_OUT_NAME,
+            "-g",
+            LOG_NAME,
+        ];
+        mdrun_args.extend(self.mdrun_extra_args.iter().map(String::as_str));
+        run_gmx(dir, &mdrun_args)?;
 
         // Copy output files to numbered paths in the permanent output directory.
         let trr_src = dir.join(TRR_NAME);
@@ -488,6 +508,8 @@ impl GromacsInput {
         } else {
             None
         };
+        result.final_gro_text = read_text(dir.join(GRO_OUT_NAME)).ok();
+        result.final_topology_text = read_text(dir.join(TOP_NAME)).ok();
 
         Ok(result)
     }
@@ -527,11 +549,22 @@ fn read_text(path: impl AsRef<Path>) -> io::Result<String> {
     fs::read_to_string(path)
 }
 
+/// Build a GROMACS command for the reusable scratch directory.
+///
+/// Successful runs are copied to numbered paths in `md_out`, so GROMACS'
+/// automatic `#file.N#` backups only accumulate stale intermediate files and
+/// eventually prevent long adaptive simulations from continuing.
+fn gmx_command() -> Command {
+    let mut cmd = Command::new("gmx");
+    cmd.env("GMX_MAXBACKUP", "-1");
+    cmd
+}
+
 /// Run a `gmx` sub-command, returning an error if `gmx` is not found or the
 /// process exits non-zero. This is primarily called by `run`, but can be called directly
 /// by applications.
 pub fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
-    let mut cmd = Command::new("gmx");
+    let mut cmd = gmx_command();
     cmd.current_dir(dir).args(args);
 
     let out = match cmd.output() {
@@ -561,7 +594,7 @@ pub fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
 /// group-selection prompts such as `gmx trjconv`). This is primarily called by `run`, but can be called directly
 /// by applications.
 pub fn run_gmx_stdin(dir: &Path, args: &[&str], stdin_data: &[u8]) -> io::Result<()> {
-    let mut cmd = Command::new("gmx");
+    let mut cmd = gmx_command();
     cmd.current_dir(dir)
         .args(args)
         .stdin(Stdio::piped())

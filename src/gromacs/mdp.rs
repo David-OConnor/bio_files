@@ -786,6 +786,12 @@ pub struct MdpParams {
 
     // --- Periodic boundary ---
     pub pbc: Pbc,
+    /// Box deformation rates in **nm/ps**: xx, yy, zz, xy, xz, yz.
+    ///
+    /// Use negative diagonal values for gradual orthorhombic compression.
+    pub deform: Option<[f32; 6]>,
+    /// Initialize the velocity flow profile for a deformed box.
+    pub deform_init_flow: bool,
 
     // --- Velocity generation ---
     /// Generate initial velocities from a Maxwell–Boltzmann distribution.
@@ -818,6 +824,8 @@ impl Default for MdpParams {
             ref_t: vec![300.],
             pcoupl: Barostat::default(),
             pbc: Pbc::default(),
+            deform: None,
+            deform_init_flow: false,
             gen_vel: true,
             gen_temp: 300.,
             gen_seed: None,
@@ -891,6 +899,20 @@ impl MdpParams {
         // PBC
         s.push_str("\n; Periodic boundary conditions\n");
         append_inp(&mut s, "pbc", self.pbc.key());
+        if let Some(deform) = self.deform {
+            append_inp(
+                &mut s,
+                "deform",
+                deform
+                    .iter()
+                    .map(|v| Gf(*v).to_string())
+                    .collect::<Vec<_>>()
+                    .join(" "),
+            );
+        }
+        if self.deform_init_flow {
+            append_inp(&mut s, "deform-init-flow", "yes");
+        }
 
         // Velocity generation
         s.push_str("\n; Velocity generation\n");
@@ -1220,6 +1242,24 @@ impl MdpParams {
             }
         };
 
+        let deform = map
+            .get("deform")
+            .map(|_| f32_vec(&map, "deform", Vec::new()))
+            .transpose()?
+            .map(|values| {
+                values.try_into().map_err(|values: Vec<f32>| {
+                    Error::new(
+                        ErrorKind::InvalidData,
+                        format!("deform: expected 6 values, got {}", values.len()),
+                    )
+                })
+            })
+            .transpose()?;
+        let deform_init_flow_s = get_s(&map, "deform-init-flow")
+            .unwrap_or("no")
+            .to_ascii_lowercase();
+        let deform_init_flow = matches!(deform_init_flow_s.as_str(), "yes" | "true" | "1");
+
         let gen_vel_s = get_s(&map, "gen-vel").unwrap_or("no").to_ascii_lowercase();
         let gen_vel = matches!(gen_vel_s.as_str(), "yes" | "true" | "1");
         let gen_temp = f32_or(&map, "gen-temp", 300.0)?;
@@ -1301,6 +1341,8 @@ impl MdpParams {
             ref_t,
             pcoupl,
             pbc,
+            deform,
+            deform_init_flow,
             gen_vel,
             gen_temp,
             gen_seed,

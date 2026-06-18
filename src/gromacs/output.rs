@@ -12,7 +12,7 @@ use std::{
     collections::HashMap,
     io::{self, ErrorKind, Write as _},
     path::Path,
-    process::{Command, Stdio},
+    process::Stdio,
 };
 
 use lin_alg::f64::Vec3;
@@ -51,9 +51,8 @@ impl OutputEnergy {
     /// this function calls `gmx energy` to convert it to a text XVG file,
     /// then parses that file.
     ///
-    /// A broad set of term indices (1–30) is piped to `gmx energy` so that
-    /// whatever terms the simulation recorded are captured. GROMACS warns
-    /// about out-of-range indices but does not abort.
+    /// Stable thermodynamic term names are piped to `gmx energy`, avoiding
+    /// topology-dependent menu indices.
     ///
     /// Returns `Ok(Vec::new())` when `gmx` is unavailable or the file yields
     /// no usable data, so callers can treat energy as optional.
@@ -66,13 +65,12 @@ impl OutputEnergy {
 
         const XVG_OUT: &str = "energy_out.xvg";
 
-        // Feed term indices 1–30 to gmx energy, then "0" to end the
-        // selection. Indices beyond the available range produce a warning
-        // but are otherwise ignored by GROMACS.
-        let selection = b"1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 \
-                          21 22 23 24 25 26 27 28 29 30 0\n";
+        // Select by stable term names rather than menu indices, which vary with
+        // the topology and enabled algorithms.
+        let selection =
+            b"Temperature\nPressure\nPotential\nKinetic-En.\nTotal-Energy\nVolume\nDensity\n0\n";
 
-        let mut child = match Command::new("gmx")
+        let mut child = match super::gmx_command()
             .current_dir(dir)
             .args(["energy", "-f", edr_name, "-o", XVG_OUT])
             .stdin(Stdio::piped())
@@ -144,6 +142,10 @@ pub struct GromacsOutput {
     pub trr_path: Option<std::path::PathBuf>,
     /// Path to the saved XTC trajectory (traj_N.xtc), if written.
     pub xtc_path: Option<std::path::PathBuf>,
+    /// Final coordinates written by `mdrun`, suitable for continuing in another run.
+    pub final_gro_text: Option<String>,
+    /// Final topology text, including any counter-ion substitutions made during setup.
+    pub final_topology_text: Option<String>,
 }
 
 impl GromacsOutput {
@@ -169,6 +171,8 @@ impl GromacsOutput {
             gro_path: None,
             trr_path: None,
             xtc_path: None,
+            final_gro_text: None,
+            final_topology_text: None,
         })
     }
 }
