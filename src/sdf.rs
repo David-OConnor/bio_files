@@ -619,7 +619,12 @@ impl Sdf {
 
     pub fn save(&self, path: &Path, format: SdfFormat) -> io::Result<()> {
         let mut file = File::create(path)?;
+        self.write(&mut file, format)
+    }
 
+    /// Write one molecule record, including its trailing `$$$$`. Factored out of [`Sdf::save`]
+    /// so that multiple molecules can share a file.
+    fn write(&self, file: &mut File, format: SdfFormat) -> io::Result<()> {
         // 1) Title line (often the first line in SDF).
         writeln!(file, "{}", self.ident)?;
 
@@ -726,7 +731,7 @@ impl Sdf {
 
         // Metadata data fields are format-agnostic — they follow M  END in both V2000 and V3000.
         for m in &self.metadata {
-            write_metadata(m.0, m.1, &mut file)?;
+            write_metadata(m.0, m.1, file)?;
         }
 
         // If partial charges are available, write them to metadata. This is an OpenFF convention.
@@ -746,12 +751,12 @@ impl Sdf {
             let charges_formated: Vec<_> =
                 partial_charges.iter().map(|q| format!("{q:.8}")).collect();
             let charge_str = charges_formated.join(" ");
-            write_metadata("atom.dprop.PartialCharge", &charge_str, &mut file)?;
+            write_metadata("atom.dprop.PartialCharge", &charge_str, file)?;
         }
 
         if !self.pharmacophore_features.is_empty() {
             let v = format_pharmacophore_features(&self.pharmacophore_features);
-            write_metadata("PUBCHEM_PHARMACOPHORE_FEATURES", &v, &mut file)?;
+            write_metadata("PUBCHEM_PHARMACOPHORE_FEATURES", &v, file)?;
         }
 
         // End of this molecule record in SDF
@@ -760,10 +765,57 @@ impl Sdf {
         Ok(())
     }
 
+    /// From a string that may hold any number of molecules, each terminated by a `$$$$` line.
+    /// A single-molecule SDF parses as a one-element `Vec`, with or without the terminator.
+    ///
+    /// Records that fail to parse are skipped with a warning, so that one malformed entry in a
+    /// large catalog file doesn't discard the rest.
+    pub fn new_multi(text: &str) -> io::Result<Vec<Self>> {
+        let mut result = Vec::new();
+        let mut record: Vec<&str> = Vec::new();
+
+        for line in text.lines() {
+            if line.trim_end() == "$$$$" {
+                push_record(&mut result, &record);
+                record.clear();
+            } else {
+                record.push(line);
+            }
+        }
+
+        // A trailing record without the `$$$$` terminator.
+        push_record(&mut result, &record);
+
+        if result.is_empty() {
+            return Err(io::Error::new(
+                ErrorKind::InvalidData,
+                "No molecules parsed from the SDF",
+            ));
+        }
+
+        Ok(result)
+    }
+
     // todo: Generic fn for this and save, among all text-based types.
     pub fn load(path: &Path) -> io::Result<Self> {
         let data_str = fs::read_to_string(path)?;
         Self::new(&data_str)
+    }
+
+    /// Load an SDF file that may hold more than one molecule. See [`Sdf::new_multi`].
+    pub fn load_multi(path: &Path) -> io::Result<Vec<Self>> {
+        let data_str = fs::read_to_string(path)?;
+        Self::new_multi(&data_str)
+    }
+
+    /// Save any number of molecules to a single file, each terminated by `$$$$`.
+    pub fn save_multi(mols: &[Self], path: &Path, format: SdfFormat) -> io::Result<()> {
+        let mut file = File::create(path)?;
+        for mol in mols {
+            mol.write(&mut file, format)?;
+        }
+
+        Ok(())
     }
 
     /// Download from DrugBank from a Drugbank ID.
@@ -799,6 +851,23 @@ impl From<Mol2> for Sdf {
             residues: Vec::new(),
             pharmacophore_features: Vec::new(),
         }
+    }
+}
+
+/// Parse one `$$$$`-delimited record and append it. Blank trailing sections (the text after the
+/// final `$$$$`) are ignored; a record that fails to parse is reported and skipped.
+fn push_record(out: &mut Vec<Sdf>, record: &[&str]) {
+    if record.iter().all(|l| l.trim().is_empty()) {
+        return;
+    }
+
+    match Sdf::new(&record.join("\n")) {
+        Ok(mol) => out.push(mol),
+        Err(e) => eprintln!(
+            "Warning: Skipping SDF record {} ({:?}): {e}",
+            out.len() + 1,
+            record.first().unwrap_or(&"").trim(),
+        ),
     }
 }
 
