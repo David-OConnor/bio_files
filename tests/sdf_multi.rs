@@ -1,4 +1,6 @@
-use bio_files::Sdf;
+use std::fmt::Write as _;
+
+use bio_files::{BondType, Sdf};
 
 const TWO_MOLS: &str = "\
 water
@@ -82,4 +84,64 @@ fn round_trips_through_save_multi() {
     assert_eq!(reloaded[1].bonds.len(), 1);
 
     let _ = std::fs::remove_file(&path);
+}
+
+#[test]
+fn parses_short_header_touching_coordinates_query_bonds_and_valid_elements() {
+    let text = "Mrv1652309142106383D
+
+  3  2  0  0  0  0            999 V2000
+ 1234.5678-1234.5678    0.0000 Gd  0  0  0  0  0  0  0  0  0  0  0  0
+    1.0000    0.0000    0.0000 Nb  0  0  0  0  0  0  0  0  0  0  0  0
+    2.0000    0.0000    0.0000 Sm  0  0  0  0  0  0  0  0  0  0  0  0
+  1  2  6  0  0  0  0
+  2  3  1  0  0  0  0
+M  END
+";
+
+    let mol = Sdf::new(text).unwrap();
+    assert_eq!(mol.atoms.len(), 3);
+    assert_eq!(mol.atoms[0].posit.x, 1234.5678);
+    assert_eq!(mol.atoms[0].posit.y, -1234.5678);
+    assert!(mol.atoms.iter().all(|atom| atom.element.to_letter() == "X"));
+    assert_eq!(mol.bonds[0].bond_type, BondType::Unknown);
+}
+
+#[test]
+fn parses_touching_fixed_width_count_fields() {
+    let mut text = String::from("joined counts\n\n\n 96101  0  0  0  0            999 V2000\n");
+    for _ in 0..96 {
+        writeln!(
+            text,
+            "    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0"
+        )
+        .unwrap();
+    }
+    for _ in 0..101 {
+        writeln!(text, "  1  2  1  0  0  0  0").unwrap();
+    }
+    writeln!(text, "M  END").unwrap();
+
+    let mol = Sdf::new(&text).unwrap();
+    assert_eq!(mol.atoms.len(), 96);
+    assert_eq!(mol.bonds.len(), 101);
+}
+
+#[test]
+fn parses_touching_fixed_width_bond_indices() {
+    let mut text =
+        String::from("joined bond indices\n\n\n114  1  0  0  0  0            999 V2000\n");
+    for _ in 0..114 {
+        writeln!(
+            text,
+            "    0.0000    0.0000    0.0000 C   0  0  0  0  0  0  0  0  0  0  0  0"
+        )
+        .unwrap();
+    }
+    writeln!(text, " 96114  1  0  0  0  0").unwrap();
+    writeln!(text, "M  END").unwrap();
+
+    let mol = Sdf::new(&text).unwrap();
+    assert_eq!(mol.bonds[0].atom_0_sn, 96);
+    assert_eq!(mol.bonds[0].atom_1_sn, 114);
 }

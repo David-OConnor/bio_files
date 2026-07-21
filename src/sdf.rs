@@ -44,29 +44,117 @@ pub enum SdfFormat {
     V3000,
 }
 
-/// Workaround for some SDFs we've seen on PubChem. Applies to both counts, and bond
-/// rows. This variant is safer for the atom count where atom and bond counts are likely
-/// to have the same number of digits; things are trickier with bonds.
-///
-/// This still causes trouble when, for example, atom count is 3-digit and bond count is 2-digit,
-/// for example.
-fn split_atom_bond_count_col(col: &str, split: usize) -> io::Result<(usize, usize)> {
-    if col.len() < split {
-        return Err(io::Error::new(
-            ErrorKind::InvalidData,
-            format!("Atom/bond count column too short to split: {col}"),
-        ));
+const PERIODIC_TABLE_SYMBOLS: &[&str] = &[
+    "H", "He", "Li", "Be", "B", "C", "N", "O", "F", "Ne", "Na", "Mg", "Al", "Si", "P", "S", "Cl",
+    "Ar", "K", "Ca", "Sc", "Ti", "V", "Cr", "Mn", "Fe", "Co", "Ni", "Cu", "Zn", "Ga", "Ge", "As",
+    "Se", "Br", "Kr", "Rb", "Sr", "Y", "Zr", "Nb", "Mo", "Tc", "Ru", "Rh", "Pd", "Ag", "Cd", "In",
+    "Sn", "Sb", "Te", "I", "Xe", "Cs", "Ba", "La", "Ce", "Pr", "Nd", "Pm", "Sm", "Eu", "Gd", "Tb",
+    "Dy", "Ho", "Er", "Tm", "Yb", "Lu", "Hf", "Ta", "W", "Re", "Os", "Ir", "Pt", "Au", "Hg", "Tl",
+    "Pb", "Bi", "Po", "At", "Rn", "Fr", "Ra", "Ac", "Th", "Pa", "U", "Np", "Pu", "Am", "Cm", "Bk",
+    "Cf", "Es", "Fm", "Md", "No", "Lr", "Rf", "Db", "Sg", "Bh", "Hs", "Mt", "Ds", "Rg", "Cn", "Nh",
+    "Fl", "Mc", "Lv", "Ts", "Og",
+];
+
+/// Preserve records containing a real element that `na_seq::Element` does not model yet. The
+/// generic atom representation cannot retain the original symbol in that case, so it uses
+/// `Element::Other`; malformed and SDF query-atom symbols still produce an error.
+fn parse_sdf_element(symbol: &str) -> io::Result<Element> {
+    match Element::from_letter(symbol) {
+        Ok(element) => Ok(element),
+        Err(_)
+            if PERIODIC_TABLE_SYMBOLS
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(symbol)) =>
+        {
+            Ok(Element::Other)
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// MDL V2000 also defines query bond types 5-8. `BondType` cannot retain those distinctions, so
+/// keep the molecule and represent the ambiguous bond as unknown instead of rejecting the record.
+fn parse_sdf_bond_type(value: &str) -> io::Result<BondType> {
+    match value.trim() {
+        "5" | "6" | "7" | "8" => Ok(BondType::Unknown),
+        _ => BondType::from_str(value),
+    }
+}
+
+fn parse_v2000_counts(line: &str) -> io::Result<(usize, usize)> {
+    let cols: Vec<&str> = line.split_whitespace().collect();
+
+    // Accommodate relaxed writers (including our historical writer) that put explicit whitespace
+    // between the count fields. A joined token larger than V2000's three-column maximum indicates
+    // that the two standard fixed-width fields touch, so parse by columns below.
+    if cols.len() >= 2
+        && let (Ok(n_atoms), Ok(n_bonds)) = (cols[0].parse::<usize>(), cols[1].parse::<usize>())
+        && n_atoms <= 999
+        && n_bonds <= 999
+    {
+        return Ok((n_atoms, n_bonds));
     }
 
-    let n_atoms = col[..split]
+    let n_atoms = line
+        .get(0..3)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Counts line is too short"))?
+        .trim()
         .parse::<usize>()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms"))?;
-
-    let n_bonds = col[split..]
+    let n_bonds = line
+        .get(3..6)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Counts line is too short"))?
+        .trim()
         .parse::<usize>()
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds"))?;
 
     Ok((n_atoms, n_bonds))
+}
+
+fn parse_v2000_atom_fields(line: &str) -> io::Result<(f64, f64, f64, &str)> {
+    let cols: Vec<&str> = line.split_whitespace().collect();
+    if cols.len() >= 4
+        && let (Ok(x), Ok(y), Ok(z)) = (
+            cols[0].parse::<f64>(),
+            cols[1].parse::<f64>(),
+            cols[2].parse::<f64>(),
+        )
+    {
+        return Ok((x, y, z, cols[3]));
+    }
+
+    // Coordinates occupy three adjacent ten-character fields in V2000. Large negative values can
+    // fill a field completely, leaving no whitespace for `split_whitespace` to find.
+    let x = line
+        .get(0..10)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Atom line is too short"))?
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate"))?;
+    let y = line
+        .get(10..20)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Atom line is too short"))?
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse Y coordinate"))?;
+    let z = line
+        .get(20..30)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Atom line is too short"))?
+        .trim()
+        .parse::<f64>()
+        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate"))?;
+    let element = line
+        .get(31..34)
+        .ok_or_else(|| io::Error::new(ErrorKind::InvalidData, "Atom line is too short"))?
+        .trim();
+    if element.is_empty() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "Atom line has no element",
+        ));
+    }
+
+    Ok((x, y, z, element))
 }
 
 /// Similar to our atom_bond_count split function, but takes into account the nearby
@@ -133,96 +221,102 @@ fn split_bond_indices_line(
     }
 }
 
+fn parse_v2000_bond_fields(
+    line: &str,
+    prev: Option<&str>,
+    next: Option<&str>,
+    max_atom_index: usize,
+) -> io::Result<(u32, u32, BondType)> {
+    let cols: Vec<&str> = line.split_whitespace().collect();
+
+    // Prefer ordinary whitespace-delimited rows so relaxed writers remain compatible.
+    if cols.len() >= 3
+        && let (Ok(atom_0_sn), Ok(atom_1_sn), Ok(bond_type)) = (
+            cols[0].parse::<u32>(),
+            cols[1].parse::<u32>(),
+            parse_sdf_bond_type(cols[2]),
+        )
+        && atom_0_sn > 0
+        && atom_1_sn > 0
+        && atom_0_sn as usize <= max_atom_index
+        && atom_1_sn as usize <= max_atom_index
+    {
+        return Ok((atom_0_sn, atom_1_sn, bond_type));
+    }
+
+    // The two atom indices and bond type are adjacent three-character fields in V2000. When an
+    // index reaches three digits there may be no separating whitespace.
+    if let (Some(atom_0), Some(atom_1), Some(bond_type)) =
+        (line.get(0..3), line.get(3..6), line.get(6..9))
+        && let (Ok(atom_0_sn), Ok(atom_1_sn), Ok(bond_type)) = (
+            atom_0.trim().parse::<u32>(),
+            atom_1.trim().parse::<u32>(),
+            parse_sdf_bond_type(bond_type),
+        )
+        && atom_0_sn > 0
+        && atom_1_sn > 0
+        && atom_0_sn as usize <= max_atom_index
+        && atom_1_sn as usize <= max_atom_index
+    {
+        return Ok((atom_0_sn, atom_1_sn, bond_type));
+    }
+
+    // Retain compatibility with observed non-fixed-width PubChem rows whose two indices are joined.
+    if cols.len() >= 2 {
+        let prev_col = prev.and_then(|row| row.split_whitespace().next());
+        let next_col = next.and_then(|row| row.split_whitespace().next());
+        let (atom_0_sn, atom_1_sn) =
+            split_bond_indices_line(cols[0], prev_col, next_col, max_atom_index)?;
+        let bond_type = parse_sdf_bond_type(cols[1])?;
+        return Ok((atom_0_sn as u32, atom_1_sn as u32, bond_type));
+    }
+
+    Err(io::Error::new(
+        ErrorKind::InvalidData,
+        "Bond line does not have enough fields",
+    ))
+}
+
 /// Parse V2000 atom and bond blocks. Returns `(atoms, bonds, last_bond_line)`.
 /// `last_bond_line` is used as a fallback start index for metadata if `M  END` is absent.
-fn parse_v2000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGeneric>, usize)> {
-    let counts_line = lines[3];
-    let counts_cols: Vec<&str> = counts_line.split_whitespace().collect();
+fn parse_v2000_ctab(
+    lines: &[&str],
+    counts_line_index: usize,
+) -> io::Result<(Vec<AtomGeneric>, Vec<BondGeneric>, usize)> {
+    let counts_line = lines[counts_line_index];
+    let (n_atoms, n_bonds) = parse_v2000_counts(counts_line)?;
 
-    if counts_cols.len() < 2 {
+    let first_atom_line = counts_line_index + 1;
+    let last_atom_line = first_atom_line + n_atoms;
+    let first_bond_line = last_atom_line;
+    let last_bond_line = first_bond_line + n_bonds;
+
+    if lines.len() < last_atom_line {
         return Err(io::Error::new(
             ErrorKind::InvalidData,
-            "Counts line doesn't have enough fields",
+            format!(
+                "Not enough lines for the declared atom block: found {}, expected {n_atoms} atoms",
+                lines.len().saturating_sub(first_atom_line),
+            ),
+        ));
+    }
+    if lines.len() < last_bond_line {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            format!(
+                "Not enough lines for the declared bond block: found {}, expected {n_bonds} bonds",
+                lines.len().saturating_sub(first_bond_line),
+            ),
         ));
     }
 
-    let mut n_atoms = counts_cols[0]
-        .parse::<usize>()
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of atoms"))?;
-
-    let mut n_bonds = counts_cols[1]
-        .parse::<usize>()
-        .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse number of bonds"))?;
-
-    let first_atom_line = 4;
-    let mut last_atom_line = first_atom_line + n_atoms;
-    let mut first_bond_line = last_atom_line;
-    let mut last_bond_line = first_bond_line + n_bonds;
-
-    if lines.len() < last_atom_line {
-        // We have observed that sometimes the space between atom and bond counts is omitted,
-        // from PubChem molecules that have triple-digit counts, so we will assume that here.
-        let atom_bond_count = counts_cols[0];
-
-        // If atom 0 is 3 digits, there is no space in these cases. So could be 4-6 total len.
-        if atom_bond_count.len() >= 4 {
-            (n_atoms, n_bonds) = split_atom_bond_count_col(atom_bond_count, 3)?;
-            // Note: We have observed cases where we need to split at atom 2, i.e. if
-            // the count is 5 digits long. So it will still fail if the space is ommitted.
-
-            last_atom_line = first_atom_line + n_atoms;
-            first_bond_line = last_atom_line;
-            last_bond_line = first_bond_line + n_bonds;
-
-            if lines.len() < last_atom_line {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
-                        "Not enough lines for the declared atom block (after 3/3 split.) \
-                        Lines: {}, expected: {} atoms",
-                        lines.len(),
-                        last_atom_line - 4
-                    ),
-                ));
-            }
-        } else {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                "Not enough lines for the declared atom block",
-            ));
-        }
-    }
-
     let mut atoms = Vec::with_capacity(n_atoms);
-
-    #[allow(clippy::needless_range_loop)]
-    for i in first_atom_line..last_atom_line {
-        let line = lines[i];
-        let cols: Vec<&str> = line.split_whitespace().collect();
-
-        if cols.len() < 4 {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("Atom line {i} does not have enough columns"),
-            ));
-        }
-
-        let x = cols[0]
-            .parse::<f64>()
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse X coordinate"))?;
-        let y = cols[1]
-            .parse::<f64>()
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse Y coordinate"))?;
-        let z = cols[2]
-            .parse::<f64>()
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse Z coordinate"))?;
-        let element = cols[3];
-
+    for (atom_index, line) in lines[first_atom_line..last_atom_line].iter().enumerate() {
+        let (x, y, z, element) = parse_v2000_atom_fields(line)?;
         atoms.push(AtomGeneric {
-            // SDF doesn't explicitly include incices.
-            serial_number: (i - first_atom_line) as u32 + 1,
-            posit: Vec3 { x, y, z }, // or however you store coordinates
-            element: Element::from_letter(element)?,
+            serial_number: atom_index as u32 + 1,
+            posit: Vec3 { x, y, z },
+            element: parse_sdf_element(element)?,
             hetero: true,
             ..Default::default()
         });
@@ -230,71 +324,20 @@ fn parse_v2000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGen
 
     let mut bonds = Vec::with_capacity(n_bonds);
     for i in first_bond_line..last_bond_line {
-        let line = lines[i];
-        let cols: Vec<&str> = line.split_whitespace().collect();
-
-        if cols.len() < 3 {
-            return Err(io::Error::new(
-                ErrorKind::InvalidData,
-                format!("Bond line {i} does not have enough columns"),
-            ));
-        }
-
-        let mut atom_0_sn = cols[0]
-            .parse::<u32>()
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 0"))?;
-        let mut atom_1_sn = cols[1]
-            .parse::<u32>()
-            .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Could not parse bond atom 1"))?;
-
-        // See note above on atom/bond counts. We observe the same thing from PubChem in some
-        // cases for the atom SNs listed in bond lines; space omitted if len of atom0 is 3.
-        let bond_type = if cols[2] == "0" {
-            let prev = if i != first_bond_line {
-                let line_p = lines[i - 1];
-                let cols_p: Vec<&str> = line_p.split_whitespace().collect();
-                Some(cols_p[0])
-            } else {
-                None
-            };
-            let next = if i != last_bond_line - 1 {
-                let line_p = lines[i + 1];
-                let cols_p: Vec<&str> = line_p.split_whitespace().collect();
-                Some(cols_p[0])
-            } else {
-                None
-            };
-
-            let (atom_0, atom_1) = split_bond_indices_line(cols[0], prev, next, atoms.len())?;
-            atom_0_sn = atom_0 as u32;
-            atom_1_sn = atom_1 as u32;
-
-            if atom_0_sn as usize > atoms.len() || atom_1_sn as usize > atoms.len() {
-                return Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!(
-                        "Bond indices out of bounds, during split: {}. Atom len: {}. A0: {atom_0_sn} A1: {atom_1_sn}",
-                        cols[0],
-                        atoms.len(),
-                    ),
-                ));
-            }
-
-            BondType::from_str(cols[1])?
-        } else {
-            BondType::from_str(cols[2])?
-        };
+        let prev = (i != first_bond_line).then(|| lines[i - 1]);
+        let next = (i + 1 != last_bond_line).then(|| lines[i + 1]);
+        let (atom_0_sn, atom_1_sn, bond_type) =
+            parse_v2000_bond_fields(lines[i], prev, next, atoms.len())?;
 
         bonds.push(BondGeneric {
             atom_0_sn,
             atom_1_sn,
             bond_type,
-        })
+        });
     }
 
     Ok((atoms, bonds, last_bond_line))
 }
-
 /// Parse V3000 atom and bond blocks from the CTAB section.
 fn parse_v3000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGeneric>)> {
     // Find BEGIN CTAB
@@ -375,7 +418,7 @@ fn parse_v3000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGen
         atoms.push(AtomGeneric {
             serial_number,
             posit: Vec3 { x, y, z },
-            element: Element::from_letter(element_str)?,
+            element: parse_sdf_element(element_str)?,
             hetero: true,
             ..Default::default()
         });
@@ -409,7 +452,7 @@ fn parse_v3000_ctab(lines: &[&str]) -> io::Result<(Vec<AtomGeneric>, Vec<BondGen
             ));
         }
 
-        let bond_type = BondType::from_str(cols[3])?;
+        let bond_type = parse_sdf_bond_type(cols[3])?;
         let atom_0_sn = cols[4]
             .parse::<u32>()
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "V3000: bad bond atom 0"))?;
@@ -554,13 +597,7 @@ impl Sdf {
     pub fn new(text: &str) -> io::Result<Self> {
         let lines: Vec<&str> = text.lines().collect();
 
-        // SDF files typically have at least 4 lines before the atom block:
-        //   1) A title or identifier
-        //   2) Usually blank or comments
-        //   3) Often blank or comments
-        //   4) "counts" line: e.g. " 50  50  0  ..." for V2000,
-        //      or "  0  0  0     0  0              0 V3000" for V3000
-        if lines.len() < 4 {
+        if lines.len() < 3 {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
                 "Not enough lines to parse an SDF header",
@@ -569,15 +606,29 @@ impl Sdf {
 
         let ident = lines[0].trim().to_string();
 
-        // Detect format from the counts line (line index 3).
-        let format = if lines[3].contains("V3000") {
-            SdfFormat::V3000
-        } else {
-            SdfFormat::V2000
-        };
+        // A conforming molfile uses three header lines, but some catalog producers omit the title
+        // or comment line. Find the stamped counts line in the small header region while retaining
+        // the historical line-four fallback for unstamped V2000 input.
+        let (counts_line_index, format) = lines
+            .iter()
+            .take(8)
+            .enumerate()
+            .find_map(|(index, line)| {
+                if line.contains("V3000") {
+                    Some((index, SdfFormat::V3000))
+                } else if line.contains("V2000") {
+                    Some((index, SdfFormat::V2000))
+                } else {
+                    None
+                }
+            })
+            .or_else(|| (lines.len() > 3).then_some((3, SdfFormat::V2000)))
+            .ok_or_else(|| {
+                io::Error::new(ErrorKind::InvalidData, "Could not find an SDF counts line")
+            })?;
 
         let (mut atoms, bonds, fallback_start) = match format {
-            SdfFormat::V2000 => parse_v2000_ctab(&lines)?,
+            SdfFormat::V2000 => parse_v2000_ctab(&lines, counts_line_index)?,
             SdfFormat::V3000 => {
                 let (a, b) = parse_v3000_ctab(&lines)?;
                 // For V3000, M  END is always present; pass lines.len() as an unreachable fallback.
@@ -773,18 +824,20 @@ impl Sdf {
     pub fn new_multi(text: &str) -> io::Result<Vec<Self>> {
         let mut result = Vec::new();
         let mut record: Vec<&str> = Vec::new();
+        let mut record_number = 1;
 
         for line in text.lines() {
             if line.trim_end() == "$$$$" {
-                push_record(&mut result, &record);
+                push_record(&mut result, &record, record_number);
                 record.clear();
+                record_number += 1;
             } else {
                 record.push(line);
             }
         }
 
         // A trailing record without the `$$$$` terminator.
-        push_record(&mut result, &record);
+        push_record(&mut result, &record, record_number);
 
         if result.is_empty() {
             return Err(io::Error::new(
@@ -856,7 +909,7 @@ impl From<Mol2> for Sdf {
 
 /// Parse one `$$$$`-delimited record and append it. Blank trailing sections (the text after the
 /// final `$$$$`) are ignored; a record that fails to parse is reported and skipped.
-fn push_record(out: &mut Vec<Sdf>, record: &[&str]) {
+fn push_record(out: &mut Vec<Sdf>, record: &[&str], record_number: usize) {
     if record.iter().all(|l| l.trim().is_empty()) {
         return;
     }
@@ -865,7 +918,7 @@ fn push_record(out: &mut Vec<Sdf>, record: &[&str]) {
         Ok(mol) => out.push(mol),
         Err(e) => eprintln!(
             "Warning: Skipping SDF record {} ({:?}): {e}",
-            out.len() + 1,
+            record_number,
             record.first().unwrap_or(&"").trim(),
         ),
     }
