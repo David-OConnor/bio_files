@@ -1,5 +1,5 @@
 //! For opening Structure Data Format (SDF) files. These are common molecular descriptions for ligands. It's a simpler format
-//! than PDB.
+//! than PDB. This also supports the `.mol` files found on ChEBI, which appear to be the same.
 
 use std::{
     collections::HashMap,
@@ -485,7 +485,8 @@ fn parse_metadata_section(
 
     // Look for molecule identifiers in the data fields.
     for (i, line) in lines.iter().enumerate() {
-        if line.contains("> <PUBCHEM_COMPOUND_CID>")
+        if (line.contains("> <PUBCHEM_COMPOUND_CID>") // E.g. SDFs from PubChem
+            || line.contains("> <PubChem Compound Database Links>")) // E.g. SDFs from ChEBI
             && let Some(value_line) = lines.get(i + 1)
         {
             let value = value_line.trim();
