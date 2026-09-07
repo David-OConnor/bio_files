@@ -6,7 +6,7 @@
 //! include an example mmCIF that has them.).
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     fs::File,
     io,
@@ -60,6 +60,7 @@ impl MmCif {
         let mut chains = Vec::<ChainGeneric>::new();
         let mut res_idx = HashMap::<(String, u32), usize>::new();
         let mut chain_idx = HashMap::<String, usize>::new();
+        let mut used_atom_sns = HashSet::<u32>::new();
 
         let lines: Vec<&str> = text.lines().collect();
         let mut i = 0;
@@ -128,6 +129,24 @@ impl MmCif {
                 let c_res_sn = col("_atom_site.label_seq_id")?;
                 let c_occ = col("_atom_site.occupancy")?;
 
+                let atom_loop_end = (i..n)
+                    .find(|&row_i| {
+                        let row = lines[row_i].trim();
+                        row.is_empty() || row == "#" || row == "loop_" || row.starts_with('_')
+                    })
+                    .unwrap_or(n);
+                let source_atom_sns: HashSet<u32> = lines[i..atom_loop_end]
+                    .iter()
+                    .filter_map(|row| row.split_whitespace().nth(c_id)?.parse().ok())
+                    .collect();
+                let mut next_synthetic_atom_sn = source_atom_sns
+                    .iter()
+                    .chain(used_atom_sns.iter())
+                    .copied()
+                    .max()
+                    .and_then(|sn| sn.checked_add(1))
+                    .unwrap_or(1);
+
                 while i < n {
                     line = lines[i].trim();
                     if line.is_empty() || line == "#" || line == "loop_" || line.starts_with('_') {
@@ -142,7 +161,34 @@ impl MmCif {
                     // Atom lines.
                     let hetero = fields[het].trim() == "HETATM";
 
-                    let serial_number = fields[c_id].parse::<u32>().unwrap_or(0);
+                    let source_serial_number = fields[c_id].parse::<u32>().ok();
+                    let serial_number = match source_serial_number {
+                        Some(sn) if !used_atom_sns.contains(&sn) => sn,
+                        _ => {
+                            // Work around RFD3 output, which as of 2026-09-07 can contain
+                            // duplicate `_atom_site.id` values. Internal serial numbers must be
+                            // unique for atom, residue, chain, and bond mappings to remain intact.
+                            let first_candidate = next_synthetic_atom_sn;
+                            loop {
+                                if !source_atom_sns.contains(&next_synthetic_atom_sn)
+                                    && !used_atom_sns.contains(&next_synthetic_atom_sn)
+                                {
+                                    let sn = next_synthetic_atom_sn;
+                                    next_synthetic_atom_sn = next_synthetic_atom_sn.wrapping_add(1);
+                                    break sn;
+                                }
+
+                                next_synthetic_atom_sn = next_synthetic_atom_sn.wrapping_add(1);
+                                if next_synthetic_atom_sn == first_candidate {
+                                    return Err(io::Error::new(
+                                        ErrorKind::InvalidData,
+                                        "mmCIF contains more atoms than can be assigned unique serial numbers",
+                                    ));
+                                }
+                            }
+                        }
+                    };
+                    used_atom_sns.insert(serial_number);
                     let x = fields[c_x].parse::<f64>().unwrap_or(0.0);
                     let y = fields[c_y].parse::<f64>().unwrap_or(0.0);
                     let z = fields[c_z].parse::<f64>().unwrap_or(0.0);
