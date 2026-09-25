@@ -540,3 +540,506 @@ pub fn load_prmtop(path: &Path) -> io::Result<(Vec<AtomGeneric>, ForceFieldParam
 //     let mut buffer = Vec::new();
 //     file.read_to_end(&mut buffer)?;
 // }
+
+// ---------------------------------------------------------------------------------------------
+// Full topology reader. `load_prmtop` above extracts types, charges, masses, and LJ parameters
+// only; `AmberPrmtop` reads every term, per atom and per interaction.
+// ---------------------------------------------------------------------------------------------
+
+/// Charges in prmtop files are stored as q * 18.2223 (the square root of Amber's electrostatic
+/// constant, 332.0522 kcal·Å/(mol·e²)); we store them in elementary charge.
+/// [Format reference](https://ambermd.org/prmtop.pdf)
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AmberPrmtop {
+    pub title: String,
+    pub atom_names: Vec<String>,
+    /// E.g. "CT", "HC". Called `AMBER_ATOM_TYPE` in the file.
+    pub atom_types: Vec<String>,
+    /// Elementary charge.
+    pub charges: Vec<f32>,
+    /// amu
+    pub masses: Vec<f32>,
+    /// Absent in older files.
+    pub atomic_numbers: Option<Vec<i32>>,
+    /// Per atom: A 0-based index into the LJ type tables.
+    pub lj_type_index: Vec<usize>,
+    pub n_lj_types: usize,
+    /// Per LJ type pair (row-major, `n_lj_types`²): A 1-based index into `lj_acoef` and
+    /// `lj_bcoef`. Negative values index 10-12 H-bond terms instead.
+    pub nonbonded_parm_index: Vec<i32>,
+    /// E = A/r¹² − B/r⁶, in kcal/mol and Å.
+    pub lj_acoef: Vec<f64>,
+    pub lj_bcoef: Vec<f64>,
+    pub residue_labels: Vec<String>,
+    /// The 0-based index of each residue's first atom.
+    pub residue_starts: Vec<usize>,
+    pub bonds: Vec<PrmtopBond>,
+    pub angles: Vec<PrmtopAngle>,
+    /// Includes impropers; see `PrmtopDihedral::improper`.
+    pub dihedrals: Vec<PrmtopDihedral>,
+    /// Pairs excluded from normal non-bonded interactions: 1-2, 1-3, and 1-4 pairs. 1-4 pairs
+    /// interact through the scaled terms of their dihedrals instead. (i < j)
+    pub excluded_pairs: Vec<(usize, usize)>,
+    /// Box lengths (Å) and angle β (degrees), if periodic.
+    pub box_dims: Option<PrmtopBox>,
+    /// Number of extra points (e.g. TIP4P's massless charge sites).
+    pub num_extra_points: usize,
+    /// Terms present in the file whose energy contributions aren't represented by the fields
+    /// above. E.g. CHARMM Urey-Bradley and improper terms, CMAP, 1-4 LJ tables, and polarizability.
+    pub unsupported_terms: Vec<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PrmtopBox {
+    /// Degrees
+    pub beta: f32,
+    /// Å
+    pub lengths: [f32; 3],
+}
+
+/// E = k (r − r0)²
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PrmtopBond {
+    pub atoms: (usize, usize),
+    /// kcal/mol/Å²
+    pub k: f32,
+    /// Å
+    pub r0: f32,
+}
+
+/// E = k (θ − θ0)²
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PrmtopAngle {
+    pub atoms: (usize, usize, usize),
+    /// kcal/mol/rad²
+    pub k: f32,
+    /// Radians
+    pub theta0: f32,
+}
+
+/// E = k (1 + cos(n φ − phase)). Several terms can share the same atoms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PrmtopDihedral {
+    pub atoms: [usize; 4],
+    /// kcal/mol
+    pub k: f32,
+    pub periodicity: f32,
+    /// Radians
+    pub phase: f32,
+    /// The 1-4 electrostatic interaction is divided by this. Defaults to 1.2 in files that
+    /// predate the per-dihedral scale factors.
+    pub scee: f32,
+    /// The 1-4 LJ interaction is divided by this. Defaults to 2.0.
+    pub scnb: f32,
+    /// Impropers conventionally list the central atom third.
+    pub improper: bool,
+    /// If true, this term doesn't contribute a 1-4 interaction for its end atoms, e.g. because
+    /// another term with the same end atoms does, or because they're also 1-2 or 1-3 in a ring.
+    pub skip_14: bool,
+}
+
+impl AmberPrmtop {
+    pub fn load(path: &Path) -> io::Result<Self> {
+        let mut text = String::new();
+        File::open(path)?.read_to_string(&mut text)?;
+        Self::new(&text)
+    }
+
+    pub fn new(text: &str) -> io::Result<Self> {
+        let sections = PrmtopSections::parse(text)?;
+
+        let pointers = sections.ints("POINTERS")?;
+        if pointers.len() < 30 {
+            return Err(invalid("POINTERS section is too short"));
+        }
+        let ptr = |i: usize| pointers[i].max(0) as usize;
+        let n_atoms = ptr(0);
+        let n_lj_types = ptr(1);
+        let (n_bonds_h, n_bonds) = (ptr(2), ptr(12));
+        let (n_angles_h, n_angles) = (ptr(4), ptr(13));
+        let (n_dihedrals_h, n_dihedrals) = (ptr(6), ptr(14));
+        let n_residues = ptr(11);
+        let has_box = ptr(27) > 0;
+        let num_extra_points = pointers.get(30).map(|v| (*v).max(0) as usize).unwrap_or(0);
+
+        let atom_names = sections.strings_n("ATOM_NAME", n_atoms)?;
+        let atom_types = sections.strings_n("AMBER_ATOM_TYPE", n_atoms)?;
+        let charges = sections
+            .floats_n("CHARGE", n_atoms)?
+            .into_iter()
+            .map(|q| (q / AMBER_CHARGE_SCALE as f64) as f32)
+            .collect();
+        let masses = sections
+            .floats_n("MASS", n_atoms)?
+            .into_iter()
+            .map(|m| m as f32)
+            .collect();
+        let atomic_numbers = if sections.has("ATOMIC_NUMBER") {
+            Some(sections.ints_n("ATOMIC_NUMBER", n_atoms)?)
+        } else {
+            None
+        };
+
+        let lj_type_index = sections
+            .ints_n("ATOM_TYPE_INDEX", n_atoms)?
+            .into_iter()
+            .map(|i| (i.max(1) - 1) as usize)
+            .collect();
+        let nonbonded_parm_index =
+            sections.ints_n("NONBONDED_PARM_INDEX", n_lj_types * n_lj_types)?;
+        let n_lj_pairs = n_lj_types * (n_lj_types + 1) / 2;
+        let lj_acoef = sections.floats_n("LENNARD_JONES_ACOEF", n_lj_pairs)?;
+        let lj_bcoef = sections.floats_n("LENNARD_JONES_BCOEF", n_lj_pairs)?;
+
+        let residue_labels = sections.strings_n("RESIDUE_LABEL", n_residues)?;
+        let residue_starts = sections
+            .ints_n("RESIDUE_POINTER", n_residues)?
+            .into_iter()
+            .map(|i| (i.max(1) - 1) as usize)
+            .collect();
+
+        // Bonded parameter tables, indexed by the terms below (1-based).
+        let bond_k = sections.floats("BOND_FORCE_CONSTANT")?;
+        let bond_r0 = sections.floats("BOND_EQUIL_VALUE")?;
+        let angle_k = sections.floats("ANGLE_FORCE_CONSTANT")?;
+        let angle_theta0 = sections.floats("ANGLE_EQUIL_VALUE")?;
+        let dihe_k = sections.floats("DIHEDRAL_FORCE_CONSTANT")?;
+        let dihe_n = sections.floats("DIHEDRAL_PERIODICITY")?;
+        let dihe_phase = sections.floats("DIHEDRAL_PHASE")?;
+        let scee = if sections.has("SCEE_SCALE_FACTOR") {
+            sections.floats("SCEE_SCALE_FACTOR")?
+        } else {
+            vec![1.2; dihe_k.len()]
+        };
+        let scnb = if sections.has("SCNB_SCALE_FACTOR") {
+            sections.floats("SCNB_SCALE_FACTOR")?
+        } else {
+            vec![2.0; dihe_k.len()]
+        };
+
+        // Atom indices in term lists are stored as 3 × (0-based index), i.e. coordinate-array
+        // offsets. Signs carry flags for dihedrals.
+        let atom_i = |v: i32| (v.unsigned_abs() / 3) as usize;
+        let param = |table: &[f64], i: i32, label: &str| -> io::Result<f32> {
+            table
+                .get((i.max(1) - 1) as usize)
+                .map(|v| *v as f32)
+                .ok_or_else(|| invalid(&format!("{label} parameter index {i} is out of range")))
+        };
+
+        let mut bonds = Vec::with_capacity(n_bonds_h + n_bonds);
+        for (flag, n) in [
+            ("BONDS_INC_HYDROGEN", n_bonds_h),
+            ("BONDS_WITHOUT_HYDROGEN", n_bonds),
+        ] {
+            for t in sections.ints_n(flag, 3 * n)?.chunks_exact(3) {
+                bonds.push(PrmtopBond {
+                    atoms: (atom_i(t[0]), atom_i(t[1])),
+                    k: param(&bond_k, t[2], "Bond")?,
+                    r0: param(&bond_r0, t[2], "Bond")?,
+                });
+            }
+        }
+
+        let mut angles = Vec::with_capacity(n_angles_h + n_angles);
+        for (flag, n) in [
+            ("ANGLES_INC_HYDROGEN", n_angles_h),
+            ("ANGLES_WITHOUT_HYDROGEN", n_angles),
+        ] {
+            for t in sections.ints_n(flag, 4 * n)?.chunks_exact(4) {
+                angles.push(PrmtopAngle {
+                    atoms: (atom_i(t[0]), atom_i(t[1]), atom_i(t[2])),
+                    k: param(&angle_k, t[3], "Angle")?,
+                    theta0: param(&angle_theta0, t[3], "Angle")?,
+                });
+            }
+        }
+
+        let mut dihedrals = Vec::with_capacity(n_dihedrals_h + n_dihedrals);
+        for (flag, n) in [
+            ("DIHEDRALS_INC_HYDROGEN", n_dihedrals_h),
+            ("DIHEDRALS_WITHOUT_HYDROGEN", n_dihedrals),
+        ] {
+            for t in sections.ints_n(flag, 5 * n)?.chunks_exact(5) {
+                dihedrals.push(PrmtopDihedral {
+                    atoms: [atom_i(t[0]), atom_i(t[1]), atom_i(t[2]), atom_i(t[3])],
+                    k: param(&dihe_k, t[4], "Dihedral")?,
+                    periodicity: param(&dihe_n, t[4], "Dihedral")?,
+                    phase: param(&dihe_phase, t[4], "Dihedral")?,
+                    scee: param(&scee, t[4], "SCEE")?,
+                    scnb: param(&scnb, t[4], "SCNB")?,
+                    improper: t[3] < 0,
+                    skip_14: t[2] < 0,
+                });
+            }
+        }
+
+        // Per-atom exclusion counts, then a flat list of 1-based partner indices. Atoms without
+        // exclusions have a single placeholder 0 entry.
+        let n_excluded = sections.ints_n("NUMBER_EXCLUDED_ATOMS", n_atoms)?;
+        let excluded_list = sections.ints("EXCLUDED_ATOMS_LIST")?;
+        let mut excluded_pairs = Vec::new();
+        let mut offset = 0;
+        for (i, count) in n_excluded.iter().enumerate() {
+            let count = (*count).max(0) as usize;
+            let partners = excluded_list
+                .get(offset..offset + count)
+                .ok_or_else(|| invalid("EXCLUDED_ATOMS_LIST is too short"))?;
+            for &j in partners {
+                if j > 0 {
+                    let j = (j - 1) as usize;
+                    excluded_pairs.push((i.min(j), i.max(j)));
+                }
+            }
+            offset += count;
+        }
+
+        let box_dims = if has_box && sections.has("BOX_DIMENSIONS") {
+            let b = sections.floats_n("BOX_DIMENSIONS", 4)?;
+            Some(PrmtopBox {
+                beta: b[0] as f32,
+                lengths: [b[1] as f32, b[2] as f32, b[3] as f32],
+            })
+        } else {
+            None
+        };
+
+        // Terms that change the energy function beyond what the fields above describe.
+        let mut unsupported_terms = Vec::new();
+        for (flag, label) in [
+            ("CHARMM_UREY_BRADLEY_COUNT", "CHARMM Urey-Bradley terms"),
+            ("CHARMM_NUM_IMPROPERS", "CHARMM harmonic impropers"),
+            ("CMAP_COUNT", "CMAP backbone corrections"),
+            ("CHARMM_CMAP_COUNT", "CMAP backbone corrections"),
+        ] {
+            if sections.has(flag) && sections.ints(flag)?.first().is_some_and(|n| *n > 0) {
+                unsupported_terms.push(label.to_owned());
+            }
+        }
+        if sections.has("LENNARD_JONES_14_ACOEF") {
+            unsupported_terms.push("Separate 1-4 LJ parameters (CHARMM)".to_owned());
+        }
+        if sections.has("IPOL") && sections.ints("IPOL")?.first().is_some_and(|n| *n > 0) {
+            unsupported_terms.push("Polarizability".to_owned());
+        }
+        let hbond_pairs = nonbonded_parm_index.iter().any(|i| *i < 0);
+        if hbond_pairs {
+            let a = sections.floats("HBOND_ACOEF").unwrap_or_default();
+            let b = sections.floats("HBOND_BCOEF").unwrap_or_default();
+            if a.iter().chain(&b).any(|v| *v != 0.) {
+                unsupported_terms.push("10-12 H-bond terms".to_owned());
+            }
+        }
+        unsupported_terms.dedup();
+
+        Ok(Self {
+            title: sections.strings("TITLE").unwrap_or_default().join(""),
+            atom_names,
+            atom_types,
+            charges,
+            masses,
+            atomic_numbers,
+            lj_type_index,
+            n_lj_types,
+            nonbonded_parm_index,
+            lj_acoef,
+            lj_bcoef,
+            residue_labels,
+            residue_starts,
+            bonds,
+            angles,
+            dihedrals,
+            excluded_pairs,
+            box_dims,
+            num_extra_points,
+            unsupported_terms,
+        })
+    }
+
+    pub fn n_atoms(&self) -> usize {
+        self.atom_names.len()
+    }
+
+    /// The LJ A and B coefficients between two atoms. (A/r¹² − B/r⁶). None for 10-12 H-bond
+    /// pairs.
+    pub fn lj_ab(&self, atom_0: usize, atom_1: usize) -> Option<(f64, f64)> {
+        let t0 = self.lj_type_index[atom_0];
+        let t1 = self.lj_type_index[atom_1];
+        let i = self.nonbonded_parm_index[t0 * self.n_lj_types + t1];
+        if i <= 0 {
+            return None;
+        }
+        let i = (i - 1) as usize;
+        Some((self.lj_acoef[i], self.lj_bcoef[i]))
+    }
+
+    /// The residue index of each atom.
+    pub fn atom_residues(&self) -> Vec<usize> {
+        let mut result = vec![0; self.n_atoms()];
+        for (res_i, start) in self.residue_starts.iter().enumerate() {
+            let end = self
+                .residue_starts
+                .get(res_i + 1)
+                .copied()
+                .unwrap_or(self.n_atoms());
+            for r in result.iter_mut().take(end).skip(*start) {
+                *r = res_i;
+            }
+        }
+        result
+    }
+}
+
+fn invalid(msg: &str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, format!("prmtop: {msg}"))
+}
+
+/// Raw `%FLAG` sections, split into fields using each section's Fortran `%FORMAT`.
+struct PrmtopSections {
+    sections: HashMap<String, Vec<String>>,
+}
+
+impl PrmtopSections {
+    fn parse(text: &str) -> io::Result<Self> {
+        let mut sections: HashMap<String, Vec<String>> = HashMap::new();
+        let mut current: Option<(String, usize, usize)> = None; // (flag, per line, width)
+
+        for line in text.lines() {
+            if let Some(rest) = line.strip_prefix("%FLAG") {
+                let flag = rest.trim().to_owned();
+                sections.entry(flag.clone()).or_default();
+                current = Some((flag, 0, 0));
+            } else if let Some(rest) = line.strip_prefix("%FORMAT") {
+                let Some((flag, _, _)) = current.take() else {
+                    continue;
+                };
+                let (per_line, width) = parse_fortran_format(rest)?;
+                current = Some((flag, per_line, width));
+            } else if line.starts_with('%') {
+                // E.g. %VERSION, or %COMMENT
+                continue;
+            } else if let Some((flag, per_line, width)) = &current {
+                if *width == 0 {
+                    return Err(invalid(&format!("Section {flag} has no %FORMAT")));
+                }
+                let fields = sections.get_mut(flag).unwrap();
+                let chars: Vec<char> = line.chars().collect();
+                for chunk in chars.chunks(*width).take(*per_line) {
+                    let field: String = chunk.iter().collect();
+                    // Fixed-width numeric fields may be blank-padded; skip all-blank ones.
+                    if !field.trim().is_empty() || !flag_is_numeric(flag) {
+                        fields.push(field);
+                    }
+                }
+            }
+        }
+
+        Ok(Self { sections })
+    }
+
+    fn has(&self, flag: &str) -> bool {
+        self.sections.contains_key(flag)
+    }
+
+    fn get(&self, flag: &str) -> io::Result<&Vec<String>> {
+        self.sections
+            .get(flag)
+            .ok_or_else(|| invalid(&format!("Missing section {flag}")))
+    }
+
+    fn strings(&self, flag: &str) -> io::Result<Vec<String>> {
+        Ok(self
+            .get(flag)?
+            .iter()
+            .map(|s| s.trim().to_owned())
+            .collect())
+    }
+
+    fn strings_n(&self, flag: &str, n: usize) -> io::Result<Vec<String>> {
+        let v = self.strings(flag)?;
+        check_len(flag, v, n)
+    }
+
+    fn ints(&self, flag: &str) -> io::Result<Vec<i32>> {
+        self.get(flag)?
+            .iter()
+            .map(|s| {
+                s.trim()
+                    .parse::<i32>()
+                    .map_err(|_| invalid(&format!("Invalid integer {s:?} in {flag}")))
+            })
+            .collect()
+    }
+
+    fn ints_n(&self, flag: &str, n: usize) -> io::Result<Vec<i32>> {
+        let v = self.ints(flag)?;
+        check_len(flag, v, n)
+    }
+
+    fn floats(&self, flag: &str) -> io::Result<Vec<f64>> {
+        self.get(flag)?
+            .iter()
+            .map(|s| {
+                s.trim()
+                    .replace(['D', 'd'], "E")
+                    .parse::<f64>()
+                    .map_err(|_| invalid(&format!("Invalid number {s:?} in {flag}")))
+            })
+            .collect()
+    }
+
+    fn floats_n(&self, flag: &str, n: usize) -> io::Result<Vec<f64>> {
+        let v = self.floats(flag)?;
+        check_len(flag, v, n)
+    }
+}
+
+/// Numeric sections are parsed as numbers; others (names, labels, the title) are text. We use
+/// this to decide whether blank fixed-width fields are meaningful.
+fn flag_is_numeric(flag: &str) -> bool {
+    !matches!(
+        flag,
+        "TITLE"
+            | "CTITLE"
+            | "ATOM_NAME"
+            | "AMBER_ATOM_TYPE"
+            | "RESIDUE_LABEL"
+            | "TREE_CHAIN_CLASSIFICATION"
+            | "RADIUS_SET"
+            | "FORCE_FIELD_TYPE"
+    )
+}
+
+fn check_len<T>(flag: &str, mut v: Vec<T>, n: usize) -> io::Result<Vec<T>> {
+    if v.len() < n {
+        return Err(invalid(&format!(
+            "Section {flag} has {} entries; expected {n}",
+            v.len()
+        )));
+    }
+    v.truncate(n);
+    Ok(v)
+}
+
+/// Parses e.g. "(10I8)", "(5E16.8)", or "(20a4)" into (fields per line, field width).
+fn parse_fortran_format(spec: &str) -> io::Result<(usize, usize)> {
+    let spec = spec.trim().trim_start_matches('(').trim_end_matches(')');
+    let letter_i = spec
+        .find(|c: char| c.is_ascii_alphabetic())
+        .ok_or_else(|| invalid(&format!("Invalid %FORMAT {spec:?}")))?;
+    let per_line = if letter_i == 0 {
+        1
+    } else {
+        spec[..letter_i]
+            .parse()
+            .map_err(|_| invalid(&format!("Invalid %FORMAT {spec:?}")))?
+    };
+    let width_str: String = spec[letter_i + 1..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit())
+        .collect();
+    let width = width_str
+        .parse()
+        .map_err(|_| invalid(&format!("Invalid %FORMAT {spec:?}")))?;
+    Ok((per_line, width))
+}

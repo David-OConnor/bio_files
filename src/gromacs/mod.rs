@@ -31,6 +31,7 @@ pub mod gro;
 pub mod mdp;
 pub mod output;
 pub mod solvate;
+pub mod top_parse;
 pub mod topology;
 pub mod trr;
 
@@ -45,6 +46,7 @@ use std::{
 pub use mdp::{MdpParams, OutputControl};
 pub use output::{GromacsFrame, GromacsOutput, OutputEnergy};
 use solvate::Solvent;
+pub use top_parse::GromacsTopology;
 pub use topology::MoleculeTopology;
 use trr::read_trr;
 

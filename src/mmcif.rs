@@ -22,8 +22,85 @@ use regex::Regex;
 
 use crate::{
     AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueEnd, ResidueGeneric,
-    ResidueType, mmcif_aux::load_ss,
+    ResidueType,
+    mmcif_aux::{CifRow, load_categories, load_ss},
 };
+
+/// This entry's identifier in a database, from `_database_2`. E.g. its PDB ID, or for a cryo-EM
+/// or NMR entry, its EMDB or BMRB one.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DatabaseId {
+    /// E.g. `PDB`, `EMDB`, `BMRB`, `WWPDB`, or `AlphaFoldDB`.
+    pub database: String,
+    /// E.g. `1CRN`. For the PDB, this is the legacy, 4-character ID.
+    pub code: String,
+    /// E.g. `pdb_00001crn`: the extended PDB ID. Absent from older files, and for other databases.
+    pub accession: Option<String>,
+    pub doi: Option<String>,
+}
+
+impl DatabaseId {
+    fn from_row(mut row: CifRow) -> Option<Self> {
+        Some(Self {
+            database: row.remove("database_id")?,
+            code: row.remove("database_code")?,
+            accession: row.remove("pdbx_database_accession"),
+            doi: row.remove("pdbx_doi"),
+        })
+    }
+}
+
+/// A reference from one of this entry's entities (e.g. a protein chain) to a sequence database,
+/// from `_struct_ref`. Usually UniProt.
+#[derive(Clone, Debug, PartialEq)]
+pub struct StructRef {
+    /// E.g. `UNP` (UniProt), `GB` (GenBank), or `PDB`, for sequences with no other reference.
+    pub db_name: String,
+    /// The database's name for the sequence, e.g. `HBA_HUMAN`.
+    pub db_code: Option<String>,
+    /// E.g. `P69905`.
+    pub accession: Option<String>,
+    /// For UniProt, the isoform, if the sequence isn't the canonical one. E.g. `P09838-2`.
+    pub isoform: Option<String>,
+    /// Matches `_entity.id`.
+    pub entity_id: Option<String>,
+}
+
+impl StructRef {
+    fn from_row(mut row: CifRow) -> Option<Self> {
+        Some(Self {
+            db_name: row.remove("db_name")?,
+            db_code: row.remove("db_code"),
+            accession: row.remove("pdbx_db_accession"),
+            isoform: row.remove("pdbx_db_isoform"),
+            entity_id: row.remove("entity_id"),
+        })
+    }
+}
+
+/// An entry in another database related to this one, from `_pdbx_database_related`. E.g. the EMDB
+/// map a cryo-EM model was built into, NMR data in BMRB, or another PDB entry.
+#[derive(Clone, Debug, PartialEq)]
+pub struct RelatedEntry {
+    /// E.g. `EMDB`, `BMRB`, or `PDB`.
+    pub db_name: String,
+    /// E.g. `EMD-21375`.
+    pub db_id: String,
+    /// E.g. `associated EM volume`, `other EM volume`, or `unspecified`.
+    pub content_type: Option<String>,
+    pub details: Option<String>,
+}
+
+impl RelatedEntry {
+    fn from_row(mut row: CifRow) -> Option<Self> {
+        Some(Self {
+            db_name: row.remove("db_name")?,
+            db_id: row.remove("db_id")?,
+            content_type: row.remove("content_type"),
+            details: row.remove("details"),
+        })
+    }
+}
 
 /// Represents the most commonly-used data from the mmCIF format, used by the RCSB PDB to represent
 /// protein structures. May also be used in other cases, such as molecular dynamics snapshots.
@@ -32,9 +109,10 @@ use crate::{
 ///
 /// This struct will likely
 /// be used as an intermediate format, and converted to something application-specific.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct MmCif {
     pub ident: String,
+    /// Key-value items, e.g. `_exptl.method`, keyed by their full tag. This excludes loops.
     pub metadata: HashMap<String, String>,
     pub atoms: Vec<AtomGeneric>,
     // This is sometimes included in mmCIF files, although seems to be absent
@@ -44,6 +122,11 @@ pub struct MmCif {
     pub residues: Vec<ResidueGeneric>,
     pub secondary_structure: Vec<BackboneSS>,
     pub experimental_method: Option<ExperimentalMethod>,
+    /// This entry's identifiers, e.g. its PDB ID.
+    pub database_ids: Vec<DatabaseId>,
+    /// Sequence database references for the entry's entities, e.g. UniProt accessions.
+    pub struct_refs: Vec<StructRef>,
+    pub related_entries: Vec<RelatedEntry>,
 }
 
 impl MmCif {
@@ -323,6 +406,22 @@ impl MmCif {
         // let ss_load_time = ss_load.elapsed().as_millis();
         // println!("Loaded SS from mmCIF in {ss_load_time} ms (TEMP)");
 
+        let mut categories = load_categories(
+            text,
+            &["_database_2", "_struct_ref", "_pdbx_database_related"],
+        );
+        let mut rows = |cat: &str| categories.remove(cat).unwrap_or_default().into_iter();
+
+        let database_ids = rows("_database_2")
+            .filter_map(DatabaseId::from_row)
+            .collect();
+        let struct_refs = rows("_struct_ref")
+            .filter_map(StructRef::from_row)
+            .collect();
+        let related_entries = rows("_pdbx_database_related")
+            .filter_map(RelatedEntry::from_row)
+            .collect();
+
         Ok(Self {
             ident,
             metadata,
@@ -331,6 +430,9 @@ impl MmCif {
             residues,
             secondary_structure,
             experimental_method,
+            database_ids,
+            struct_refs,
+            related_entries,
         })
     }
 

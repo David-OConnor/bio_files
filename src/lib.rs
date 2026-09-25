@@ -20,8 +20,10 @@ pub mod orca;
 
 pub mod amber_typedef;
 pub mod bond_inference;
+pub mod charmm;
 pub mod cif_sf;
 pub mod dcd;
+pub mod inpcrd;
 mod mmcif_aux;
 pub mod mol_templates;
 pub mod prmtop;
