@@ -1,245 +1,157 @@
 //! For reading and writing GenBank (and GenPept) flat files: one or more records, each with a
-//! header, a feature table, and the sequence, and ending with `//`.
+//! header, a feature table, and the sequence, ending with `//`.
 //!
-//! We read the sequence and the main header fields into the sequence's name and metadata. The
-//! feature table and references are skipped for now. Writing produces a minimal record from the
-//! same fields, with an empty feature table.
+//! Parsing and writing is done by the [gb_io](https://docs.rs/gb-io) crate; we convert between
+//! its records and [`Sequence`]. Header fields become metadata, the feature table becomes
+//! features, and references and comments are kept alongside, in [`GenBankRecord`].
+//!
+//! `gb_io` only handles nucleotide records; we adapt protein (GenPept) records' `LOCUS` lines, which
+//! use "aa" in place of "bp", on the way in and out.
 //!
 //! [Format reference](https://www.ncbi.nlm.nih.gov/genbank/samplerecord/)
-//!
-//! todo: See also `plascad`'s genbank implementaiton
 
 use std::{
-    collections::HashMap,
+    borrow::Cow,
     fs,
-    fs::File,
-    io::{self, BufWriter, ErrorKind, Write},
+    io::{self, ErrorKind},
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
 
-use na_seq::{SEQ_DESCRIPTION_KEY, SeqType, Sequence, SequenceData};
+use gb_io::{
+    reader::SeqReader,
+    seq::{After, Before, Date, Feature, Location, Reference, Source, Topology},
+    writer::SeqWriter,
+};
+use na_seq::{SEQ_DESCRIPTION_KEY, SeqFeature, SeqRange, SeqTopology, SeqType, Sequence, Strand};
 
 // Metadata keys for the header fields we read and write. The `DEFINITION` line is stored under
-// `na_seq::SEQ_DESCRIPTION_KEY`.
+// `na_seq::SEQ_DESCRIPTION_KEY`. Multi-line values keep their line breaks.
 pub const KEY_ACCESSION: &str = "Accession";
 pub const KEY_VERSION: &str = "Version";
 pub const KEY_KEYWORDS: &str = "Keywords";
 pub const KEY_SOURCE: &str = "Source";
+/// The organism's name, followed by its lineage on the lines after.
 pub const KEY_ORGANISM: &str = "Organism";
-/// The lineage lines following `ORGANISM`.
-pub const KEY_TAXONOMY: &str = "Taxonomy";
 pub const KEY_DBLINK: &str = "DB link";
-pub const KEY_COMMENT: &str = "Comment";
 // These are from the `LOCUS` line.
 /// E.g. "mRNA", or "ss-DNA".
 pub const KEY_MOL_TYPE: &str = "Molecule type";
-/// "linear" or "circular".
-pub const KEY_TOPOLOGY: &str = "Topology";
 /// A three-letter code, e.g. "PLN".
 pub const KEY_DIVISION: &str = "Division";
-/// E.g. "21-JUN-1999"
+/// E.g. "21-JUN-1999".
 pub const KEY_DATE: &str = "Date";
 
-/// Header values start at this column.
-const INDENT: usize = 12;
-/// Header lines are wrapped to this width when writing.
-const LINE_WIDTH: usize = 79;
-const RESIDUES_PER_LINE: usize = 60;
-const RESIDUES_PER_GROUP: usize = 10;
+/// The division code we write when none is set: "unannotated".
+const DIVISION_DEFAULT: &str = "UNA";
+/// `gb_io`'s placeholder for a missing division. Not stored as metadata.
+const DIVISION_GB_IO_DEFAULT: &str = "UNK";
+
+/// Put in place of a protein record's molecule type, so `gb_io` can parse its `LOCUS` line.
+const PROTEIN_MOL_TYPE: &str = "PROTEIN";
+
+/// These qualifiers aren't standard GenBank, but are written by e.g. SnapGene and ApE. We read
+/// them into the feature's label and strand, and write them back.
+const QUAL_LABEL: &str = "label";
+const QUAL_DIRECTION: &str = "direction";
 
 const MONTHS: [&str; 12] = [
     "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
 ];
 
+/// A publication cited by a record.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct GenBankReference {
+    /// E.g. "1  (bases 1 to 5028)".
+    pub description: String,
+    pub authors: Option<String>,
+    pub consortium: Option<String>,
+    pub title: String,
+    pub journal: Option<String>,
+    pub pubmed: Option<String>,
+    pub remark: Option<String>,
+}
+
+impl From<&Reference> for GenBankReference {
+    fn from(r: &Reference) -> Self {
+        Self {
+            description: r.description.clone(),
+            authors: r.authors.clone(),
+            consortium: r.consortium.clone(),
+            title: r.title.clone(),
+            journal: r.journal.clone(),
+            pubmed: r.pubmed.clone(),
+            remark: r.remark.clone(),
+        }
+    }
+}
+
+impl From<&GenBankReference> for Reference {
+    fn from(r: &GenBankReference) -> Self {
+        Self {
+            description: r.description.clone(),
+            authors: r.authors.clone(),
+            consortium: r.consortium.clone(),
+            title: r.title.clone(),
+            journal: r.journal.clone(),
+            pubmed: r.pubmed.clone(),
+            remark: r.remark.clone(),
+        }
+    }
+}
+
+/// One record: the sequence with its header fields and features, and the parts of the header
+/// that don't fit in its metadata.
+#[derive(Clone, Debug, PartialEq)]
+pub struct GenBankRecord {
+    pub seq: Sequence,
+    pub references: Vec<GenBankReference>,
+    /// Each `COMMENT` field. Line breaks are kept.
+    pub comments: Vec<String>,
+}
+
+impl From<Sequence> for GenBankRecord {
+    fn from(seq: Sequence) -> Self {
+        Self {
+            seq,
+            references: Vec::new(),
+            comments: Vec::new(),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct GenBank {
-    pub records: Vec<Sequence>,
+    pub records: Vec<GenBankRecord>,
     /// When loading: the number of residue letters left out across all records, as they can't
-    /// be represented. E.g. ambiguity codes like N or X.
+    /// be represented. E.g. ambiguity codes like N or X. Feature ranges are adjusted to match.
     pub skipped_residues: usize,
-}
-
-/// The header field currently being read; continuation lines are appended to it.
-#[derive(Clone, Copy, PartialEq)]
-enum Field {
-    /// A header value stored under a metadata key. `true` to join its lines with newlines instead
-    /// of spaces.
-    Meta(&'static str, bool),
-    Taxonomy,
-    /// Anything we don't store, e.g. references and the feature table.
-    Skip,
-    Origin,
-}
-
-/// One record as it's being read.
-#[derive(Default)]
-struct RecordRaw {
-    name: String,
-    /// From the `LOCUS` line.
-    seq_type: Option<SeqType>,
-    metadata: HashMap<String, String>,
-    residues: String,
-}
-
-impl RecordRaw {
-    fn append(&mut self, key: &str, text: &str, newline: bool) {
-        let text = text.trim();
-        if text.is_empty() {
-            return;
-        }
-
-        let entry = self.metadata.entry(key.to_owned()).or_default();
-        if !entry.is_empty() {
-            entry.push(if newline { '\n' } else { ' ' });
-        }
-        entry.push_str(text);
-    }
-
-    fn parse_locus(&mut self, value: &str) {
-        let mut tokens = value.split_whitespace();
-        self.name = tokens.next().unwrap_or_default().to_owned();
-
-        let mut is_protein = false;
-        for token in tokens {
-            let lower = token.to_ascii_lowercase();
-
-            if lower == "aa" {
-                is_protein = true;
-            } else if lower == "linear" || lower == "circular" {
-                self.metadata.insert(KEY_TOPOLOGY.to_owned(), lower);
-            } else if lower.contains("dna") || lower.contains("rna") {
-                self.metadata
-                    .insert(KEY_MOL_TYPE.to_owned(), token.to_owned());
-            } else if token.len() == 11 && token.matches('-').count() == 2 {
-                self.metadata.insert(KEY_DATE.to_owned(), token.to_owned());
-            } else if token.len() == 3 && token.chars().all(|c| c.is_ascii_uppercase()) {
-                self.metadata
-                    .insert(KEY_DIVISION.to_owned(), token.to_owned());
-            }
-            // Otherwise, e.g. the length, which we get from the sequence itself.
-        }
-
-        self.seq_type = if is_protein {
-            Some(SeqType::AminoAcid)
-        } else {
-            match self.metadata.get(KEY_MOL_TYPE) {
-                Some(t) if t.to_ascii_lowercase().contains("rna") => Some(SeqType::Rna),
-                Some(_) => Some(SeqType::Dna),
-                None => None,
-            }
-        };
-    }
-
-    fn finish(mut self, skipped_residues: &mut usize) -> Sequence {
-        // A value of "." means there is none, e.g. for keywords.
-        self.metadata.retain(|_, v| v != ".");
-
-        let seq_type = self
-            .seq_type
-            .unwrap_or_else(|| SeqType::infer(&self.residues));
-        let (data, skipped) = SequenceData::from_letters(&self.residues, seq_type);
-        *skipped_residues += skipped;
-
-        let mut result = Sequence::new(data, self.name);
-        result.metadata = self.metadata;
-        result
-    }
 }
 
 impl GenBank {
     pub fn new(text: &str) -> io::Result<Self> {
-        let mut records = Vec::new();
-        let mut skipped_residues = 0;
+        let (text, is_protein) = adapt_protein_locus_lines(text);
 
-        let mut current: Option<RecordRaw> = None;
-        let mut field = Field::Skip;
+        let gb_records = SeqReader::new(text.as_bytes())
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| io::Error::new(ErrorKind::InvalidData, format!("GenBank: {e}")))?;
 
-        for line in text.lines() {
-            let line = line.trim_end();
-
-            if line.starts_with("//") {
-                if let Some(record) = current.take() {
-                    records.push(record.finish(&mut skipped_residues));
-                }
-                field = Field::Skip;
-                continue;
-            }
-
-            if line.trim().is_empty() {
-                continue;
-            }
-
-            if field == Field::Origin && line.starts_with(' ') {
-                if let Some(record) = &mut current {
-                    // Includes the position numbers and spaces; these are filtered when parsing.
-                    record.residues.push_str(line);
-                }
-                continue;
-            }
-
-            let (keyword, value) = split_keyword(line);
-
-            if keyword == "LOCUS" {
-                // A new record, even if the previous one was missing its terminator.
-                if let Some(record) = current.take() {
-                    records.push(record.finish(&mut skipped_residues));
-                }
-
-                let mut record = RecordRaw::default();
-                record.parse_locus(value);
-                current = Some(record);
-                field = Field::Skip;
-                continue;
-            }
-
-            let Some(record) = &mut current else {
-                continue;
-            };
-
-            if keyword.is_empty() {
-                // A continuation of the current field.
-                match field {
-                    Field::Meta(key, newline) => record.append(key, value, newline),
-                    Field::Taxonomy => record.append(KEY_TAXONOMY, value, false),
-                    Field::Skip | Field::Origin => (),
-                }
-                continue;
-            }
-
-            if keyword == "ORGANISM" {
-                record.append(KEY_ORGANISM, value, false);
-                // The lines that follow are the lineage.
-                field = Field::Taxonomy;
-                continue;
-            }
-
-            field = match keyword {
-                "DEFINITION" => Field::Meta(SEQ_DESCRIPTION_KEY, false),
-                "ACCESSION" => Field::Meta(KEY_ACCESSION, false),
-                "VERSION" => Field::Meta(KEY_VERSION, false),
-                "KEYWORDS" => Field::Meta(KEY_KEYWORDS, false),
-                "SOURCE" => Field::Meta(KEY_SOURCE, false),
-                "DBLINK" => Field::Meta(KEY_DBLINK, true),
-                "COMMENT" => Field::Meta(KEY_COMMENT, true),
-                "ORIGIN" => Field::Origin,
-                _ => Field::Skip,
-            };
-
-            if let Field::Meta(key, newline) = field {
-                record.append(key, value, newline);
-            }
-        }
-
-        if let Some(record) = current.take() {
-            records.push(record.finish(&mut skipped_residues));
-        }
-
-        if records.is_empty() {
+        if gb_records.is_empty() {
             return Err(io::Error::new(
                 ErrorKind::InvalidData,
-                "No LOCUS records found in the GenBank data",
+                "No records found in the GenBank data",
             ));
+        }
+
+        let mut records = Vec::with_capacity(gb_records.len());
+        let mut skipped_residues = 0;
+
+        for (i, gb) in gb_records.iter().enumerate() {
+            let is_protein = is_protein.get(i).copied().unwrap_or_default();
+            let (record, skipped) = record_from_gb(gb, is_protein);
+
+            records.push(record);
+            skipped_residues += skipped;
         }
 
         Ok(Self {
@@ -253,168 +165,393 @@ impl GenBank {
 
         let mut result = Self::new(&text)?;
         for record in &mut result.records {
-            record.path = Some(path.to_owned());
+            record.seq.path = Some(path.to_owned());
         }
 
         Ok(result)
     }
 
-    pub fn to_text(&self) -> String {
+    pub fn to_text(&self) -> io::Result<String> {
         let mut result = String::new();
 
         for record in &self.records {
-            write_record(record, &mut result);
+            let gb = record_to_gb(record);
+
+            let mut buf = Vec::new();
+            SeqWriter::new(&mut buf).write(&gb)?;
+
+            let mut text = String::from_utf8(buf)
+                .map_err(|e| io::Error::new(ErrorKind::InvalidData, e.to_string()))?;
+
+            if record.seq.seq_type() == SeqType::AminoAcid {
+                text = protein_locus_line(&text);
+            }
+
+            result.push_str(&text);
         }
 
-        result
+        Ok(result)
     }
 
     pub fn save(&self, path: &Path) -> io::Result<()> {
-        let mut file = BufWriter::new(File::create(path)?);
-        file.write_all(self.to_text().as_bytes())?;
-        file.flush()
+        fs::write(path, self.to_text()?)
     }
 }
 
-/// Split a header line into its keyword and value. The keyword is empty for continuation lines.
-/// Sub-keywords, e.g. `  ORGANISM`, are returned without their indent.
-fn split_keyword(line: &str) -> (&str, &str) {
-    let (head, value) = if line.len() > INDENT && line.is_char_boundary(INDENT) {
-        line.split_at(INDENT)
+/// `gb_io` only parses `LOCUS` lines with "bp" units. For each record's `LOCUS` line with "aa"
+/// units, i.e. a protein, substitute one it can parse. Returns the adapted text, and whether each
+/// record, in order, is a protein.
+fn adapt_protein_locus_lines(text: &str) -> (Cow<'_, str>, Vec<bool>) {
+    let mut is_protein = Vec::new();
+    let mut adapted = String::new();
+    let mut any_protein = false;
+
+    for line in text.split_inclusive('\n') {
+        let Some(value) = line.strip_prefix("LOCUS") else {
+            adapted.push_str(line);
+            continue;
+        };
+
+        let tokens: Vec<&str> = value.split_whitespace().collect();
+        let protein = tokens.get(2).is_some_and(|t| t.eq_ignore_ascii_case("aa"));
+        is_protein.push(protein);
+
+        if !protein {
+            adapted.push_str(line);
+            continue;
+        }
+        any_protein = true;
+
+        // Name, length, "aa", then e.g. "linear PLN 12-APR-1996". NCBI's protein records all
+        // state their topology, but we don't depend on it.
+        let rest = &tokens[3..];
+        let topology = match rest.first() {
+            Some(&"linear") | Some(&"circular") => "",
+            _ => "linear ",
+        };
+
+        adapted.push_str(&format!(
+            "LOCUS       {} {} bp {PROTEIN_MOL_TYPE} {topology}{}\n",
+            tokens[0],
+            tokens[1],
+            rest.join(" ")
+        ));
+    }
+
+    if any_protein {
+        (Cow::Owned(adapted), is_protein)
     } else {
-        (line, "")
+        (Cow::Borrowed(text), is_protein)
+    }
+}
+
+/// `gb_io` writes "bp" units on the `LOCUS` line. Use "aa", for a protein record.
+fn protein_locus_line(record_text: &str) -> String {
+    let (locus, rest) = record_text.split_once('\n').unwrap_or((record_text, ""));
+
+    // The name can't contain spaces, so this is the units.
+    let locus = locus.replacen(" bp ", " aa ", 1);
+
+    format!("{locus}\n{rest}")
+}
+
+fn record_from_gb(gb: &gb_io::seq::Seq, is_protein: bool) -> (GenBankRecord, usize) {
+    let letters = String::from_utf8_lossy(&gb.seq);
+
+    let mol_type = gb.molecule_type.as_deref().filter(|_| !is_protein);
+
+    let seq_type = if is_protein {
+        SeqType::AminoAcid
+    } else {
+        match mol_type {
+            Some(t) if t.to_ascii_uppercase().contains("RNA") => SeqType::Rna,
+            Some(_) => SeqType::Dna,
+            None => SeqType::infer(&letters),
+        }
     };
 
-    let keyword = head.trim();
-    // A keyword longer than the indent, e.g. in a malformed file, or a line with no value.
-    if keyword.contains(char::is_whitespace) {
-        let trimmed = line.trim_start();
-        return match trimmed.split_once(char::is_whitespace) {
-            Some((k, v)) => (k, v.trim_start()),
-            None => (trimmed, ""),
-        };
+    let circular = gb.topology == Topology::Circular && !is_protein;
+
+    let features = gb
+        .features
+        .iter()
+        .map(|f| feature_from_gb(f, circular, gb.seq.len()))
+        .collect();
+    let name = gb.name.clone().unwrap_or_default();
+
+    let (mut seq, skipped) =
+        Sequence::from_letters_with_features(&letters, seq_type, name, features);
+
+    if !is_protein {
+        seq.topology = Some(match gb.topology {
+            Topology::Linear => SeqTopology::Linear,
+            Topology::Circular => SeqTopology::Circular,
+        });
     }
 
-    (keyword, value)
-}
-
-/// Write a header field, wrapping its value, with continuation lines indented.
-fn write_field(keyword: &str, value: &str, out: &mut String) {
-    let mut first = true;
-
-    // Kept verbatim if it fits, e.g. to preserve the spacing in `VERSION` values.
-    if !value.trim().is_empty() && !value.contains('\n') && INDENT + value.len() <= LINE_WIDTH {
-        push_header_line(keyword, value.trim(), &mut first, out);
-        return;
-    }
-
-    for paragraph in value.lines() {
-        let mut line = String::new();
-
-        for word in paragraph.split_whitespace() {
-            if !line.is_empty() && INDENT + line.len() + 1 + word.len() > LINE_WIDTH {
-                push_header_line(keyword, &line, &mut first, out);
-                line.clear();
-            }
-
-            if !line.is_empty() {
-                line.push(' ');
-            }
-            line.push_str(word);
+    let mut meta = |key: &str, val: Option<&str>| {
+        if let Some(v) = val.map(str::trim).filter(|v| !v.is_empty() && *v != ".") {
+            seq.metadata.insert(key.to_owned(), v.to_owned());
         }
+    };
 
-        push_header_line(keyword, &line, &mut first, out);
+    meta(SEQ_DESCRIPTION_KEY, gb.definition.as_deref());
+    meta(KEY_ACCESSION, gb.accession.as_deref());
+    meta(KEY_VERSION, gb.version.as_deref());
+    meta(KEY_DBLINK, gb.dblink.as_deref());
+    meta(KEY_KEYWORDS, gb.keywords.as_deref());
+    meta(KEY_MOL_TYPE, mol_type);
+
+    if let Some(source) = &gb.source {
+        meta(KEY_SOURCE, Some(&source.source));
+        meta(KEY_ORGANISM, source.organism.as_deref());
     }
 
-    if first {
-        // No value.
-        push_header_line(keyword, ".", &mut first, out);
+    if gb.division != DIVISION_GB_IO_DEFAULT {
+        meta(KEY_DIVISION, Some(&gb.division));
+    }
+
+    let date = gb.date.as_ref().map(ToString::to_string);
+    meta(KEY_DATE, date.as_deref());
+
+    let record = GenBankRecord {
+        seq,
+        references: gb.references.iter().map(Into::into).collect(),
+        comments: gb.comments.clone(),
+    };
+
+    (record, skipped)
+}
+
+fn feature_from_gb(feature: &Feature, circular: bool, seq_len: usize) -> SeqFeature {
+    let mut ranges = Vec::new();
+    let mut complement = false;
+    add_location_ranges(&feature.location, &mut ranges, &mut complement);
+
+    // A feature spanning the origin of a circular sequence is written as e.g.
+    // `join(120..130,1..10)`; represent it as one range that wraps.
+    if circular {
+        let mut merged: Vec<SeqRange> = Vec::with_capacity(ranges.len());
+        for r in ranges {
+            match merged.last_mut() {
+                Some(prev) if prev.end == seq_len && r.start == 1 && prev.start > r.end => {
+                    prev.end = r.end;
+                }
+                _ => merged.push(r),
+            }
+        }
+        ranges = merged;
+    }
+
+    let mut strand = if complement {
+        Strand::Reverse
+    } else {
+        Strand::None
+    };
+
+    let mut label = String::new();
+    let mut qualifiers = Vec::new();
+
+    for (key, val) in &feature.qualifiers {
+        let val = val.clone().unwrap_or_default();
+
+        match key.as_ref() {
+            QUAL_LABEL if label.is_empty() => label = val,
+            QUAL_DIRECTION => match val.to_ascii_lowercase().as_str() {
+                "right" => strand = Strand::Forward,
+                "left" => strand = Strand::Reverse,
+                _ => qualifiers.push((key.to_string(), val)),
+            },
+            _ => qualifiers.push((key.to_string(), val)),
+        }
+    }
+
+    SeqFeature {
+        kind: feature.kind.to_string(),
+        label,
+        ranges,
+        strand,
+        color: None,
+        qualifiers,
     }
 }
 
-fn push_header_line(keyword: &str, text: &str, first: &mut bool, out: &mut String) {
-    let lead = if *first { keyword } else { "" };
-    *first = false;
-
-    out.push_str(&format!("{lead:<width$}{text}\n", width = INDENT));
+/// Flatten a location into ranges. `gb_io` positions are 0-based, with exclusive ends; ours are
+/// 1-based and inclusive.
+fn add_location_ranges(loc: &Location, ranges: &mut Vec<SeqRange>, complement: &mut bool) {
+    match loc {
+        // `end` before `start` wraps past the origin of a circular sequence. Not standard GenBank,
+        // but some programs write it.
+        Location::Range((start, _), (end, _)) => {
+            if *start >= 0 && *end >= 0 && end != start {
+                ranges.push(SeqRange::new(*start as usize + 1, *end as usize));
+            }
+        }
+        // A site between two adjacent positions, e.g. a cut site. `gb_io` stores the two
+        // positions, 0-based.
+        Location::Between(a, b) => {
+            if *a >= 0 && *b >= 0 {
+                ranges.push(SeqRange::new(*a as usize + 1, *b as usize + 1));
+            }
+        }
+        Location::Complement(inner) => {
+            *complement = true;
+            add_location_ranges(inner, ranges, complement);
+        }
+        Location::Join(locs)
+        | Location::Order(locs)
+        | Location::Bond(locs)
+        | Location::OneOf(locs) => {
+            for l in locs {
+                add_location_ranges(l, ranges, complement);
+            }
+        }
+        // In other records, or of unknown length.
+        Location::External(..) | Location::Gap(_) => (),
+    }
 }
 
-fn write_record(record: &Sequence, out: &mut String) {
+fn record_to_gb(record: &GenBankRecord) -> gb_io::seq::Seq {
+    let seq = &record.seq;
+
     let meta = |key: &str| {
-        record
-            .metadata
+        seq.metadata
             .get(key)
             .map(String::as_str)
             .filter(|v| !v.trim().is_empty())
+            .map(str::to_owned)
     };
 
-    let seq_type = record.seq_type();
-    let name = if record.name.trim().is_empty() {
+    let mut gb = gb_io::seq::Seq::empty();
+
+    gb.name = Some(if seq.name.trim().is_empty() {
         "unnamed".to_owned()
     } else {
-        record.name.trim().replace(char::is_whitespace, "_")
+        seq.name.trim().to_owned()
+    });
+
+    gb.topology = match seq.topology {
+        Some(SeqTopology::Circular) => Topology::Circular,
+        _ => Topology::Linear,
     };
 
-    let (unit, mol_type) = match seq_type {
-        SeqType::AminoAcid => ("aa", ""),
-        SeqType::Dna => ("bp", meta(KEY_MOL_TYPE).unwrap_or("DNA")),
-        SeqType::Rna => ("bp", meta(KEY_MOL_TYPE).unwrap_or("RNA")),
+    gb.molecule_type = match seq.seq_type() {
+        SeqType::AminoAcid => None,
+        SeqType::Dna => Some(meta(KEY_MOL_TYPE).unwrap_or_else(|| "DNA".to_owned())),
+        SeqType::Rna => Some(meta(KEY_MOL_TYPE).unwrap_or_else(|| "RNA".to_owned())),
     };
 
-    // E.g. "ss-DNA": The strandedness prefix has its own columns.
-    let (strand, mol_type) = mol_type.split_at(mol_type.find('-').map_or(0, |i| i + 1));
+    gb.division = meta(KEY_DIVISION).unwrap_or_else(|| DIVISION_DEFAULT.to_owned());
+    gb.date = meta(KEY_DATE)
+        .and_then(|d| parse_date(&d))
+        .and_then(|(y, m, d)| Date::from_ymd(y, m as u32, d as u32).ok())
+        .or_else(|| Some(date_today()));
 
-    let topology = meta(KEY_TOPOLOGY).unwrap_or("linear");
-    let division = meta(KEY_DIVISION).unwrap_or("UNA");
-    let date = meta(KEY_DATE).map(str::to_owned).unwrap_or_else(date_today);
+    gb.definition = Some(meta(SEQ_DESCRIPTION_KEY).unwrap_or_else(|| ".".to_owned()));
+    gb.accession = meta(KEY_ACCESSION);
+    gb.version = meta(KEY_VERSION);
+    gb.dblink = meta(KEY_DBLINK);
+    gb.keywords = Some(meta(KEY_KEYWORDS).unwrap_or_else(|| ".".to_owned()));
 
-    // Column positions follow the GenBank release notes, section 3.4.4.
-    out.push_str(&format!(
-        "LOCUS       {name:<16} {:>11} {unit} {strand:>3}{mol_type:<6}  {topology:<8} {division} {date}\n",
-        record.data.len(),
-    ));
+    gb.source = Some(Source {
+        source: meta(KEY_SOURCE).unwrap_or_else(|| ".".to_owned()),
+        organism: Some(meta(KEY_ORGANISM).unwrap_or_else(|| ".".to_owned())),
+    });
 
-    write_field("DEFINITION", record.description().unwrap_or("."), out);
-    write_field("ACCESSION", meta(KEY_ACCESSION).unwrap_or(&name), out);
+    gb.references = record.references.iter().map(Into::into).collect();
+    gb.comments = record.comments.clone();
 
-    if let Some(v) = meta(KEY_VERSION) {
-        write_field("VERSION", v, out);
-    }
-    if let Some(v) = meta(KEY_DBLINK) {
-        write_field("DBLINK", v, out);
-    }
+    gb.seq = seq.data.to_letters().to_ascii_lowercase().into_bytes();
+    gb.len = Some(gb.seq.len());
 
-    write_field("KEYWORDS", meta(KEY_KEYWORDS).unwrap_or("."), out);
-    write_field("SOURCE", meta(KEY_SOURCE).unwrap_or("."), out);
-    write_field("  ORGANISM", meta(KEY_ORGANISM).unwrap_or("."), out);
+    gb.features = seq
+        .features
+        .iter()
+        .filter_map(|f| feature_to_gb(f, gb.seq.len()))
+        .collect();
 
-    if let Some(v) = meta(KEY_TAXONOMY) {
-        write_field("", v, out);
-    }
-    if let Some(v) = meta(KEY_COMMENT) {
-        write_field("COMMENT", v, out);
-    }
-
-    out.push_str("FEATURES             Location/Qualifiers\n");
-    out.push_str("ORIGIN\n");
-
-    let letters = record.data.to_letters().to_ascii_lowercase();
-    for (line_i, line) in letters.as_bytes().chunks(RESIDUES_PER_LINE).enumerate() {
-        out.push_str(&format!("{:>9}", line_i * RESIDUES_PER_LINE + 1));
-
-        for group in line.chunks(RESIDUES_PER_GROUP) {
-            out.push(' ');
-            // Residue letters are ASCII.
-            out.push_str(std::str::from_utf8(group).unwrap_or_default());
-        }
-        out.push('\n');
-    }
-
-    out.push_str("//\n");
+    gb
 }
 
-/// Today's date (UTC) in GenBank's format, e.g. "26-SEP-2026".
-fn date_today() -> String {
+fn feature_to_gb(feature: &SeqFeature, seq_len: usize) -> Option<Feature> {
+    let range_loc = |start: usize, end: usize| {
+        Location::Range(
+            (start.saturating_sub(1) as i64, Before(false)),
+            (end as i64, After(false)),
+        )
+    };
+
+    let mut locs = Vec::new();
+    for r in &feature.ranges {
+        if r.end >= r.start {
+            locs.push(range_loc(r.start, r.end));
+        } else {
+            // Wraps past the origin of a circular sequence.
+            locs.push(range_loc(r.start, seq_len));
+            locs.push(range_loc(1, r.end));
+        }
+    }
+
+    let mut location = match locs.len() {
+        0 => return None,
+        1 => locs.remove(0),
+        _ => Location::Join(locs),
+    };
+
+    if feature.strand == Strand::Reverse {
+        location = Location::Complement(Box::new(location));
+    }
+
+    let mut qualifiers = Vec::new();
+
+    if !feature.label.is_empty() {
+        qualifiers.push((Cow::Borrowed(QUAL_LABEL), Some(feature.label.clone())));
+    }
+
+    for (key, val) in &feature.qualifiers {
+        // A qualifier with no value, e.g. `/pseudo`, is stored with an empty one.
+        let val = (!val.is_empty()).then(|| val.clone());
+        qualifiers.push((Cow::Owned(key.clone()), val));
+    }
+
+    // A location that isn't `complement(...)` doesn't say whether it's on the forward strand, or
+    // not stranded, so this does. For the reverse strand, the location says so already.
+    if feature.strand == Strand::Forward {
+        qualifiers.push((Cow::Borrowed(QUAL_DIRECTION), Some("RIGHT".to_owned())));
+    }
+
+    Some(Feature {
+        kind: Cow::Owned(feature.kind.clone()),
+        location,
+        qualifiers,
+    })
+}
+
+/// Parse a date in GenBank's format, e.g. "21-JUN-1999", as stored under [`KEY_DATE`]. Returns
+/// (year, month, day).
+pub fn parse_date(text: &str) -> Option<(i32, u8, u8)> {
+    let mut parts = text.trim().split('-');
+
+    let day: u8 = parts.next()?.parse().ok()?;
+    let month = parts.next()?.to_ascii_uppercase();
+    let month = MONTHS.iter().position(|m| *m == month)? as u8 + 1;
+    let year = parts.next()?.parse().ok()?;
+
+    (1..=31).contains(&day).then_some((year, month, day))
+}
+
+/// Format a date in GenBank's format, e.g. "21-JUN-1999", as stored under [`KEY_DATE`].
+pub fn format_date(year: i32, month: u8, day: u8) -> String {
+    let month = MONTHS
+        .get((month as usize).saturating_sub(1))
+        .copied()
+        .unwrap_or("JAN");
+
+    format!("{day:02}-{month}-{year:04}")
+}
+
+/// Today's date (UTC).
+fn date_today() -> Date {
     let days = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_secs() / 86_400)
@@ -431,5 +568,6 @@ fn date_today() -> String {
     let month = if mp < 10 { mp + 3 } else { mp - 9 };
     let year = yoe + era * 400 + if month <= 2 { 1 } else { 0 };
 
-    format!("{day:02}-{}-{year}", MONTHS[(month - 1) as usize])
+    Date::from_ymd(year as i32, month as u32, day as u32)
+        .unwrap_or_else(|_| Date::from_ymd(1970, 1, 1).unwrap())
 }

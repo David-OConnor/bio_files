@@ -13,6 +13,7 @@ pub mod ab1;
 pub mod fasta;
 pub mod genbank;
 pub mod map;
+pub mod snapgene;
 
 pub mod dat;
 pub mod frcmod;
