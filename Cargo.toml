@@ -34,7 +34,7 @@ bincode = { version = "2.0.1", optional = true }
 rayon = "1.11.0"  # Optional [de]serializing
 
 [patch.crates-io]
-#na_seq = { path = "../na_seq" }
+na_seq = { path = "../na_seq" }
 #lin_alg = { path = "../../lin_alg" }
 
 

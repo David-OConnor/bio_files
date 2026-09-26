@@ -16,7 +16,7 @@ use std::{
 
 #[cfg(feature = "encode")]
 use bincode::{Decode, Encode};
-use na_seq::{Seq, seq_from_str};
+use na_seq::{SEQ_DESCRIPTION_KEY, Seq, Sequence, SequenceData, seq_from_str};
 
 const HEADER_SIZE: usize = 26;
 const DIR_SIZE: usize = 28;
@@ -47,6 +47,34 @@ pub struct SeqRecordAb1 {
     pub peak_locations: Vec<u16>,
     /// Peak locations edited by user.
     pub peak_locations_user: Option<Vec<u16>>,
+}
+
+impl SeqRecordAb1 {
+    /// The base calls as a general sequence record, without the trace data. Uses the user-edited
+    /// base calls if present.
+    pub fn to_sequence(&self) -> Sequence {
+        let seq = self.sequence_user.as_ref().unwrap_or(&self.sequence);
+
+        let name = if self.name.is_empty() {
+            self.id.clone()
+        } else {
+            self.name.clone()
+        };
+
+        let mut result = Sequence::new(SequenceData::Dna(seq.clone()), name);
+        result.metadata = self.annotations.clone();
+
+        if !self.id.is_empty() && self.id != result.name {
+            result.metadata.insert("ID".to_owned(), self.id.clone());
+        }
+        if !self.description.is_empty() {
+            result
+                .metadata
+                .insert(SEQ_DESCRIPTION_KEY.to_owned(), self.description.clone());
+        }
+
+        result
+    }
 }
 
 #[derive(Debug)]

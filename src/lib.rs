@@ -10,6 +10,8 @@ pub mod pdbqt;
 pub mod sdf;
 
 pub mod ab1;
+pub mod fasta;
+pub mod genbank;
 pub mod map;
 
 pub mod dat;
