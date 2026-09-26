@@ -6,6 +6,8 @@
 //! same fields, with an empty feature table.
 //!
 //! [Format reference](https://www.ncbi.nlm.nih.gov/genbank/samplerecord/)
+//!
+//! todo: See also `plascad`'s genbank implementaiton
 
 use std::{
     collections::HashMap,
