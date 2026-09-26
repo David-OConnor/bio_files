@@ -23,6 +23,7 @@ use regex::Regex;
 use crate::{
     AtomGeneric, BackboneSS, ChainGeneric, ExperimentalMethod, ResidueEnd, ResidueGeneric,
     ResidueType,
+    dssp::infer_secondary_structure,
     mmcif_aux::{CifRow, load_categories, load_ss},
 };
 
@@ -401,7 +402,13 @@ impl MmCif {
             .to_owned();
 
         // let ss_load = Instant::now();
-        let secondary_structure = load_ss(text)?;
+        let mut secondary_structure = load_ss(text)?;
+
+        // Files from structure prediction tools (e.g. Boltz, Chai, AlphaFold 3) generally don't
+        // include secondary structure. Infer it from the backbone, as Mol* and other viewers do.
+        if secondary_structure.is_empty() {
+            secondary_structure = infer_secondary_structure(&atoms, &residues, &chains);
+        }
 
         // let ss_load_time = ss_load.elapsed().as_millis();
         // println!("Loaded SS from mmCIF in {ss_load_time} ms (TEMP)");

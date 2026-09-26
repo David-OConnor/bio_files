@@ -129,7 +129,11 @@ pub fn load_ss(text: &str) -> io::Result<Vec<BackboneSS>> {
 
     let mut ss = Vec::new();
 
-    // Helices from _struct_conf -----
+    // Some files (e.g. from the AlphaFold DB) list β-strands in _struct_conf, instead of
+    // _struct_sheet_range. Use these only if there's no _struct_sheet_range, to avoid duplicates.
+    let strands_in_conf = sheet_rows.is_empty();
+
+    // Helices (and possibly strands) from _struct_conf -----
     for (h, c) in helix_rows {
         // resolve indices once per header set
         fn find(h: &[String], tag: &str) -> Option<usize> {
@@ -145,9 +149,13 @@ pub fn load_ss(text: &str) -> io::Result<Vec<BackboneSS>> {
             _ => continue,
         };
 
-        if !c[i_type].starts_with("HELX") {
+        let sec_struct = if c[i_type].starts_with("HELX") {
+            SecondaryStructure::Helix
+        } else if strands_in_conf && c[i_type] == "STRN" {
+            SecondaryStructure::Sheet
+        } else {
             continue;
-        }
+        };
 
         let beg_seq = c[i_bs].parse().ok();
         let end_seq = c[i_es].parse().ok();
@@ -167,7 +175,7 @@ pub fn load_ss(text: &str) -> io::Result<Vec<BackboneSS>> {
         ss.push(BackboneSS {
             start_sn,
             end_sn,
-            sec_struct: SecondaryStructure::Helix,
+            sec_struct,
         });
     }
 
@@ -420,6 +428,44 @@ mod tests {
             tokenize_line("EMDB 'A spike, one RBD up' EMD-21375 'N-(2'-OH)' # comment"),
             vec!["EMDB", "A spike, one RBD up", "EMD-21375", "N-(2'-OH)"]
         );
+    }
+
+    /// Strands in _struct_conf, as in AlphaFold DB files, which have no _struct_sheet_range.
+    #[test]
+    fn reads_strands_from_struct_conf() {
+        let mut text = "data_TEST
+loop_
+_struct_conf.conf_type_id
+_struct_conf.id
+_struct_conf.beg_label_asym_id
+_struct_conf.beg_label_seq_id
+_struct_conf.end_label_asym_id
+_struct_conf.end_label_seq_id
+HELX_RH_AL_P HELX_RH_AL_P1 A 1 A 3
+STRN STRN1 A 4 A 5
+TURN_TY1_P TURN_TY1_P1 A 6 A 6
+#
+loop_
+_atom_site.id
+_atom_site.label_atom_id
+_atom_site.label_asym_id
+_atom_site.label_seq_id
+_atom_site.Cartn_x
+_atom_site.Cartn_y
+_atom_site.Cartn_z
+"
+        .to_owned();
+        for i in 1..=6 {
+            text.push_str(&format!("{i} CA A {i} 0 0 0\n"));
+        }
+        text.push_str("#\n");
+
+        let ss = load_ss(&text).unwrap();
+        assert_eq!(ss.len(), 2);
+        assert_eq!((ss[0].start_sn, ss[0].end_sn), (1, 3));
+        assert_eq!(ss[0].sec_struct, SecondaryStructure::Helix);
+        assert_eq!((ss[1].start_sn, ss[1].end_sn), (4, 5));
+        assert_eq!(ss[1].sec_struct, SecondaryStructure::Sheet);
     }
 
     /// A loop with text fields and rows on one line, as in 6GO7, and key-value items with a value

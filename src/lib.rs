@@ -23,6 +23,7 @@ pub mod bond_inference;
 pub mod charmm;
 pub mod cif_sf;
 pub mod dcd;
+pub mod dssp;
 pub mod inpcrd;
 mod mmcif_aux;
 pub mod mol_templates;

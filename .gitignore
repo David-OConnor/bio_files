@@ -16,3 +16,5 @@ Cargo.lock
 *.pdbqt
 *.mtz
 *.map
+# ...except test fixtures.
+!tests/data/*.cif
