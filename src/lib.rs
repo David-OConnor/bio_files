@@ -7,6 +7,7 @@
 pub mod mmcif;
 pub mod mol2;
 pub mod pdbqt;
+pub mod pubchem;
 pub mod sdf;
 
 pub mod ab1;
