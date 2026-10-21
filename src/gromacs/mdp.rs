@@ -776,6 +776,8 @@ pub struct MdpParams {
     pub vdw_modifier: VdwModifier,
     /// VdW cutoff in **nm**.
     pub rvdw: f32,
+    /// Start of the LJ switching interval, in nm.
+    pub rvdw_switch: Option<f32>,
     // --- Temperature coupling ---
     pub thermostat: Thermostat,
     /// Time constant (ps) for each coupling group. Must match length of `ref_t`.
@@ -819,6 +821,7 @@ impl Default for MdpParams {
             vdwtype: VdwType::default(),
             vdw_modifier: VdwModifier::default(),
             rvdw: 1.0,
+            rvdw_switch: None,
             thermostat: Thermostat::default(),
             tau_t: vec![1.0], // todo: 0.1?
             ref_t: vec![300.],
@@ -860,6 +863,9 @@ impl MdpParams {
         append_inp(&mut s, "vdw-type", self.vdwtype.key());
         append_inp(&mut s, "vdw-modifier", self.vdw_modifier.key());
         append_inp(&mut s, "rvdw", Gf(self.rvdw));
+        if let Some(r_switch) = self.rvdw_switch {
+            append_inp(&mut s, "rvdw-switch", Gf(r_switch));
+        }
 
         // Temperature coupling
         s.push_str("\n; Temperature coupling\n");
@@ -1336,6 +1342,11 @@ impl MdpParams {
             vdwtype,
             vdw_modifier,
             rvdw,
+            rvdw_switch: map
+                .get("rvdw-switch")
+                .map(|v| v.parse::<f32>())
+                .transpose()
+                .map_err(|_| Error::new(ErrorKind::InvalidData, "Invalid rvdw-switch"))?,
             thermostat,
             tau_t,
             ref_t,

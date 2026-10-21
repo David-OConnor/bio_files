@@ -27,6 +27,7 @@
 //! Units throughout follow the rest of the codebase (Å for positions).
 //! Conversions to GROMACS units (nm) happen inside this module.
 
+pub mod forcefield;
 pub mod gro;
 pub mod mdp;
 pub mod output;
@@ -121,6 +122,9 @@ pub struct GromacsInput {
     /// System-wide (global) force-field parameters used as a fall-back for
     /// any per-molecule terms that are absent from `MoleculeInput::ff_params`.
     pub ff_global: Option<ForceFieldParams>,
+    /// Non-bonded conventions, water and ions. Supplied molecule parameters
+    /// must belong to this family (selection does not re-type molecules).
+    pub topology_config: forcefield::TopologyConfig,
     /// When set, `run()` will call `gmx solvate` to fill the box with water
     /// before preprocessing, and include the model's topology in the `.top`.
     pub solvent: Option<Solvent>,
@@ -162,6 +166,7 @@ impl Default for GromacsInput {
             box_nm: None,
             coordinate_origin_a: None,
             ff_global: None,
+            topology_config: Default::default(),
             solvent: None,
             initial_gro: None,
             extra_molecule_counts: Vec::new(),
@@ -181,6 +186,9 @@ impl GromacsInput {
 
     /// Generate the GROMACS `.top` topology file.
     pub fn make_top(&self) -> io::Result<String> {
+        if let Some(top) = &self.topology_override {
+            return Ok(top.clone());
+        }
         let mol_tops: Vec<MoleculeTopology<'_>> = self
             .molecules
             .iter()
@@ -208,11 +216,12 @@ impl GromacsInput {
             _ => Vec::new(),
         };
 
-        let mut top = topology::make_top(
+        let mut top = topology::make_top_with_config(
             &mol_tops,
             &solvent_mol_tops,
             self.ff_global.as_ref(),
             self.solvent.as_ref(),
+            &self.topology_config,
         )?;
 
         for (name, count) in &self.extra_molecule_counts {
@@ -297,7 +306,15 @@ impl GromacsInput {
         // [Docs for GMX solvate](https://manual.gromacs.org/current/onlinehelp/gmx-solvate.html#gmx-solvate)
         let structure_gro = if self.initial_gro.is_none() {
             if let Some(ref wm) = self.solvent
-                && let Some(solvent_gro) = wm.prepare_gro(dir, self.box_nm)?
+                && let Some(solvent_gro) = wm.prepare_gro(
+                    dir,
+                    self.box_nm,
+                    if self.topology_config.water().om == 0. {
+                        "spc216.gro"
+                    } else {
+                        GMX_BUILTIN_TIP4P_WATER
+                    },
+                )?
             {
                 run_gmx(
                     dir,

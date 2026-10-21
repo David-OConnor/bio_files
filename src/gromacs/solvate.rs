@@ -26,10 +26,10 @@ pub enum Solvent {
     #[default]
     /// Fill the entire sim box with rigid water molecules, at a realistic density.
     ///
-    /// OPC 4-point rigid water (recommended with Amber ff19SB).
-    /// Requires GROMACS 2022+ which ships `tip4p.gro` and `opc.itp` in its data directory.
-    /// We use Gromac's TIP4P water molecule, which is suitable for some
-    /// 4-point rigid water models including OPC.
+    /// Water using `GromacsInput::topology_config`: OPC for Amber, modified
+    /// TIP3P for CHARMM36, or TIP4P for OPLS. The legacy variant name is retained
+    /// for compatibility. Uses GROMACS' three- or four-site packing template;
+    /// model parameters are written into the topology.
     WaterOpc,
     /// Fill sub-regions of the full sim box with rigid water molecules at a realistic density.
     ///
@@ -54,12 +54,14 @@ impl Solvent {
         &self,
         dir: &Path,
         box_nm: Option<(f64, f64, f64)>,
+        water_gro: &'static str,
     ) -> io::Result<Option<&'static str>> {
         match self {
             Self::WaterOpcCustomRegions(regions) => {
-                make_water_opc_custom_regions_gro(dir, box_nm, regions)
+                make_water_opc_custom_regions_gro(dir, box_nm, regions, water_gro)
             }
-            _ => Ok(Some(self.gro_filename())),
+            Self::Custom(_) => Ok(Some(self.gro_filename())),
+            Self::WaterOpc => Ok(Some(water_gro)),
         }
     }
 }
@@ -76,6 +78,7 @@ fn make_water_opc_custom_regions_gro(
     dir: &Path,
     box_nm: Option<(f64, f64, f64)>,
     regions: &[(Vec3, Vec3)],
+    water_gro: &str,
 ) -> io::Result<Option<&'static str>> {
     if regions.is_empty() {
         return Ok(None);
@@ -91,7 +94,7 @@ fn make_water_opc_custom_regions_gro(
         &[
             "solvate",
             "-cs",
-            GMX_BUILTIN_TIP4P_WATER,
+            water_gro,
             "-box",
             &x,
             &y,
