@@ -354,7 +354,7 @@ pub struct ForceFieldParamsVec {
 /// Implemented for [`crate::AtomGeneric`] in this crate.  Downstream crates (e.g. `dynamics`)
 /// implement it for their own atom types without creating a circular dependency.
 pub trait AtomFfSource {
-    /// The Amber/GAFF force-field type string (e.g. `"CT"`, `"ca"`).
+    /// The force-field type string (e.g. `"CT"`, `"ca"`).
     /// Returns `None` when the atom has no assigned FF type.
     fn ff_type(&self) -> Option<&str>;
     fn element(&self) -> Element;
@@ -937,6 +937,33 @@ impl ForceFieldParamsIndexed {
         adjacency_list: &[Vec<usize>],
         h_constrained: bool,
     ) -> io::Result<Self> {
+        Self::resolve(params, atoms, adjacency_list, h_constrained, true)
+    }
+
+    /// Resolve classical type-keyed tables without force-field-specific aliases or
+    /// zero-force fallbacks. Unknown types and missing required parameters are errors.
+    /// Periodic impropers use the central-third-atom convention of `DihedralParams`.
+    pub fn from_types<A: AtomFfSource>(
+        params: &ForceFieldParams,
+        atoms: &[A],
+        adjacency_list: &[Vec<usize>],
+        h_constrained: bool,
+    ) -> io::Result<Self> {
+        Self::resolve(params, atoms, adjacency_list, h_constrained, false)
+    }
+
+    fn resolve<A: AtomFfSource>(
+        params: &ForceFieldParams,
+        atoms: &[A],
+        adjacency_list: &[Vec<usize>],
+        h_constrained: bool,
+        amber_compat: bool,
+    ) -> io::Result<Self> {
+        if adjacency_list.len() != atoms.len()
+            || adjacency_list.iter().flatten().any(|i| *i >= atoms.len())
+        {
+            return Err(io::Error::other("Invalid molecule-local adjacency list"));
+        }
         let mut result = Self::default();
 
         for (i, atom) in atoms.iter().enumerate() {
@@ -950,7 +977,7 @@ impl ForceFieldParamsIndexed {
             // Mass
             if let Some(mass) = params.mass.get(ff_type) {
                 result.mass.insert(i, mass.clone());
-            } else if ff_type.starts_with("C") {
+            } else if amber_compat && ff_type.starts_with("C") {
                 match params.mass.get("C") {
                     Some(m) => {
                         result.mass.insert(i, m.clone());
@@ -962,7 +989,7 @@ impl ForceFieldParamsIndexed {
                         )));
                     }
                 }
-            } else if ff_type.starts_with("N") {
+            } else if amber_compat && ff_type.starts_with("N") {
                 match params.mass.get("N") {
                     Some(m) => {
                         result.mass.insert(i, m.clone());
@@ -974,7 +1001,7 @@ impl ForceFieldParamsIndexed {
                         )));
                     }
                 }
-            } else if ff_type.starts_with("O") {
+            } else if amber_compat && ff_type.starts_with("O") {
                 match params.mass.get("O") {
                     Some(m) => {
                         result.mass.insert(i, m.clone());
@@ -987,6 +1014,9 @@ impl ForceFieldParamsIndexed {
                     }
                 }
             } else {
+                if !amber_compat {
+                    return Err(io::Error::other(format!("Missing mass for type {ff_type}")));
+                }
                 result.mass.insert(
                     i,
                     MassParams {
@@ -1006,6 +1036,11 @@ impl ForceFieldParamsIndexed {
             if let Some(vdw) = params.lennard_jones.get(ff_type) {
                 result.lennard_jones.insert(i, vdw.clone());
             } else {
+                if !amber_compat {
+                    return Err(io::Error::other(format!(
+                        "Missing LJ parameters for type {ff_type}"
+                    )));
+                }
                 // Known ff19SB alias mappings: these types share LJ params with a base type.
                 if ff_type == "2C" || ff_type == "3C" || ff_type == "C8" {
                     result
@@ -1019,7 +1054,7 @@ impl ForceFieldParamsIndexed {
                     result
                         .lennard_jones
                         .insert(i, params.lennard_jones.get("O2").unwrap().clone());
-                } else if ff_type.starts_with("N") {
+                } else if amber_compat && ff_type.starts_with("N") {
                     result
                         .lennard_jones
                         .insert(i, params.lennard_jones.get("N").unwrap().clone());
@@ -1027,7 +1062,7 @@ impl ForceFieldParamsIndexed {
                         "Using N fallback VdW for atom #{} ({ff_type})",
                         atom.serial_number()
                     );
-                } else if ff_type.starts_with("O") {
+                } else if amber_compat && ff_type.starts_with("O") {
                     result
                         .lennard_jones
                         .insert(i, params.lennard_jones.get("O").unwrap().clone());
@@ -1156,7 +1191,8 @@ impl ForceFieldParamsIndexed {
                         // I'm not sure exactly why I can't find this CR-NB-H angle, but
                         // try subbing the NA variant:
                         // "CR-NA-H     50.0      120.00    AA his,    changed based on NMA nmodes"
-                        if (type_n0 == "H" || type_n1 == "H")
+                        if amber_compat
+                            && (type_n0 == "H" || type_n1 == "H")
                             && type_ctr == "NB"
                             && (type_n0 == "CR"
                                 || type_n1 == "CR"

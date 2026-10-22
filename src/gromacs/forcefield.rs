@@ -33,6 +33,8 @@ pub struct WaterModel {
 #[derive(Clone, Debug)]
 pub struct TopologyConfig {
     pub force_field: ForceField,
+    /// Explicit (combination rule, LJ 1-4 scale, Coulomb 1-4 scale), including custom sets.
+    pub defaults_override: Option<(u8, f64, f64)>,
     /// Override the family's default water and ions.
     pub water_model: Option<WaterModel>,
 }
@@ -41,6 +43,7 @@ impl Default for TopologyConfig {
     fn default() -> Self {
         Self {
             force_field: ForceField::Amber,
+            defaults_override: None,
             water_model: None,
         }
     }
@@ -50,6 +53,7 @@ impl TopologyConfig {
     pub fn for_family(force_field: ForceField) -> Self {
         Self {
             force_field,
+            defaults_override: None,
             water_model: None,
         }
     }
@@ -57,6 +61,9 @@ impl TopologyConfig {
     /// GROMACS combination rule, fudgeLJ, fudgeQQ. The exact Amber ratio
     /// matters for agreement with native calculations.
     pub fn defaults(&self) -> (u8, f64, f64) {
+        if let Some(defaults) = self.defaults_override {
+            return defaults;
+        }
         match self.force_field {
             ForceField::Amber => (2, 0.5, 1. / 1.2),
             ForceField::Charmm36 => (2, 1., 1.),
