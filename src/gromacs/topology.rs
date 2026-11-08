@@ -32,12 +32,12 @@ use crate::{
     md_params::{ForceFieldParams, ForceFieldParamsIndexed},
 };
 
-const KCAL_TO_KJ: f32 = 4.184;
-const ANG_TO_NM: f32 = 0.1;
+pub(crate) const KCAL_TO_KJ: f32 = 4.184;
+pub(crate) const ANG_TO_NM: f32 = 0.1;
 
 /// Convert kcal/mol/Å² (e.g. as used in force fields from `dynamics`, and Amber) to kJ/mol/nm²
 /// (used by GROmACS).
-const BOND_K_FACTOR: f32 = KCAL_TO_KJ * 100.0;
+pub(crate) const BOND_K_FACTOR: f32 = KCAL_TO_KJ * 100.0;
 
 /// A single molecule, as represented in GROMACS topologies.
 pub struct MoleculeTopology<'a> {
@@ -194,26 +194,28 @@ fn build_indexed(
     ForceFieldParamsIndexed::new(ff, mol.atoms, &adj_list, false)
 }
 
-fn atomic_number_from_mass(mass: f32) -> u8 {
-    match mass as u32 {
-        1 => 1,        // H
-        4 => 2,        // He
-        7 => 3,        // Li
-        12 => 6,       // C
-        14 => 7,       // N
-        16 => 8,       // O
-        19 => 9,       // F
-        23 => 11,      // Na
-        24 => 12,      // Mg
-        31 => 15,      // P
-        32 => 16,      // S
-        35 | 36 => 17, // Cl
-        39 => 19,      // K
-        40 => 20,      // Ca
-        56 => 26,      // Fe
-        63 | 64 => 29, // Cu
-        65 => 30,      // Zn
-        _ => 6,        // default to C
+pub(crate) fn atomic_number_from_mass(mass: f32) -> u8 {
+    match mass.round() as u32 {
+        1 => 1,          // H
+        4 => 2,          // He
+        7 => 3,          // Li
+        12 => 6,         // C
+        14 => 7,         // N
+        16 => 8,         // O
+        19 => 9,         // F
+        23 => 11,        // Na
+        24 => 12,        // Mg
+        31 => 15,        // P
+        32 => 16,        // S
+        35 | 36 => 17,   // Cl
+        39 => 19,        // K
+        40 => 20,        // Ca
+        55 | 56 => 26,   // Fe
+        63 | 64 => 29,   // Cu
+        65 => 30,        // Zn
+        79 | 80 => 35,   // Br
+        126 | 127 => 53, // I
+        _ => 6,          // default to C
     }
 }
 

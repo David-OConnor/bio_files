@@ -15,8 +15,8 @@ use std::{
 };
 
 use crate::md_params::{
-    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParamsVec, LjParams,
-    MassParams, get_atom_types,
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams,
+    ForceFieldParamsVec, LjParams, MassParams, get_atom_types,
 };
 
 impl ForceFieldParamsVec {
@@ -158,5 +158,49 @@ impl ForceFieldParamsVec {
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
         Self::from_dat(&data_str)
+    }
+}
+
+impl ForceFieldParams {
+    /// Write as an Amber `.dat` file, like `parm19.dat`, or `gaff2.dat`. Lennard-Jones parameters
+    /// are listed for every type, without equivalencing. The hydrophilic, and hydrogen-bond
+    /// sections are empty.
+    pub fn to_dat(&self, title: &str) -> String {
+        let lines = self.amber_lines();
+
+        let mut s = String::new();
+        s.push_str(title.lines().next().unwrap_or_default());
+        s.push('\n');
+
+        // Each section ends with a blank line. The hydrophilic atom types line follows MASS;
+        // we leave it empty.
+        for line in &lines.mass {
+            s.push_str(line);
+            s.push('\n');
+        }
+        s.push_str("\n\n");
+
+        for section in [&lines.bond, &lines.angle, &lines.dihedral, &lines.improper] {
+            for line in section {
+                s.push_str(line);
+                s.push('\n');
+            }
+            s.push('\n');
+        }
+
+        // Empty 10-12 H-bond, and equivalencing sections.
+        s.push_str("\n\nMOD4      RE\n");
+        for line in &lines.lj {
+            s.push_str(line);
+            s.push('\n');
+        }
+
+        s.push_str("\nEND\n");
+        s
+    }
+
+    /// See `to_dat`.
+    pub fn save_dat(&self, path: &Path, title: &str) -> io::Result<()> {
+        std::fs::write(path, self.to_dat(title))
     }
 }

@@ -389,7 +389,7 @@ fn in_molecule<'a>(
 }
 
 /// `name [bond_type] [at.num] mass charge ptype V W`. `ptype` is always third from last.
-fn parse_atom_type(cols: &[&str]) -> io::Result<TopAtomType> {
+pub(crate) fn parse_atom_type(cols: &[&str]) -> io::Result<TopAtomType> {
     let n = cols.len();
     if n < 6 {
         return Err(err(&format!(

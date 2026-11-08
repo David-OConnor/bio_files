@@ -6,7 +6,8 @@ use std::{
 };
 
 use crate::md_params::{
-    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParamsVec, MassParams,
+    AngleBendingParams, BondStretchingParams, DihedralParams, ForceFieldParams,
+    ForceFieldParamsVec, LjParams, MassParams,
 };
 
 #[derive(Debug, PartialEq)]
@@ -18,6 +19,8 @@ enum Section {
     Dihedral,
     Improper,
     Nonbond,
+    /// Sections we don't read, e.g. `CMAP` (as in ff19SB), `HBON`, `IPOL`, and `LJEDIT`.
+    Other,
 }
 
 impl ForceFieldParamsVec {
@@ -60,6 +63,10 @@ impl ForceFieldParamsVec {
                     section = Section::Nonbond;
                     continue;
                 }
+                "CMAP" | "HBON" | "HBOND" | "IPOL" | "LJEDIT" => {
+                    section = Section::Other;
+                    continue;
+                }
                 _ => {}
             }
 
@@ -82,7 +89,13 @@ impl ForceFieldParamsVec {
                 Section::Improper => {
                     result.improper.push(DihedralParams::from_line(line)?.0);
                 }
-                Section::Nonbond => { /* skip or extend */ }
+                // Lines in the same format as a `.dat`'s MOD4 RE section: Type, R_min / 2, ε.
+                Section::Nonbond => {
+                    if !line.starts_with("MOD4") {
+                        result.lennard_jones.push(LjParams::from_line(line)?);
+                    }
+                }
+                Section::Other => {}
             }
         }
 
@@ -228,5 +241,43 @@ impl ForceFieldParamsVec {
             .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
         Self::from_frcmod(&data_str)
+    }
+}
+
+impl ForceFieldParams {
+    /// Write as an Amber `.frcmod` file, including Lennard-Jones parameters in its NONBON section.
+    pub fn to_frcmod(&self, remark: &str) -> String {
+        let lines = self.amber_lines();
+
+        let mut s = String::new();
+        for r in remark.lines() {
+            s.push_str(r);
+            s.push('\n');
+        }
+
+        for (name, section) in [
+            ("MASS", &lines.mass),
+            ("BOND", &lines.bond),
+            ("ANGLE", &lines.angle),
+            ("DIHE", &lines.dihedral),
+            ("IMPROPER", &lines.improper),
+            ("NONBON", &lines.lj),
+        ] {
+            s.push_str(name);
+            s.push('\n');
+
+            for line in section {
+                s.push_str(line);
+                s.push('\n');
+            }
+            s.push('\n');
+        }
+
+        s
+    }
+
+    /// See `to_frcmod`.
+    pub fn save_frcmod(&self, path: &Path, remark: &str) -> io::Result<()> {
+        std::fs::write(path, self.to_frcmod(remark))
     }
 }

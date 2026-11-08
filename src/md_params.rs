@@ -253,6 +253,13 @@ impl DihedralParams {
     }
 }
 
+// todo: QC this factor of 2!
+// 1.122 is 2^(1/6)
+// todo: We're getting conflicting information on if we should
+// todo use a factor of 2, or 4 as the prefix here.
+/// Converts Amber's R_min / 2 (R star) to σ.
+pub(crate) const LJ_SIGMA_FACTOR: f32 = 2. / 1.122_462_048_309_373;
+
 #[derive(Debug, Clone)]
 /// Represents Lennard Jones parameters. This approximate Pauli Exclusion (i.e. exchange interactions)
 /// with Van Der Waals ones. Note: Amber stores Rmin / 2 in Å. (This is called R star). We convert to σ, which can
@@ -273,12 +280,6 @@ impl LjParams {
     /// Parse a single van-der-Waals (Lennard-Jones) parameter line in a dat file, e.g. `parm19.dat`
     /// from Amber.
     pub fn from_line(line: &str) -> io::Result<Self> {
-        // todo: QC this factor of 2!
-        // 1.122 is 2^(1/6)
-        // todo: We're getting conflicting information on if we should
-        // todo use a factor of 2, or 4 as the prefix here.
-        const SIGMA_FACTOR: f32 = 2. / 1.122_462_048_309_373;
-
         let cols: Vec<_> = line.split_whitespace().collect();
 
         if cols.len() < 3 {
@@ -292,7 +293,7 @@ impl LjParams {
         let r_star = parse_float(cols[1])?;
         let eps = parse_float(cols[2])?;
 
-        let sigma = r_star * SIGMA_FACTOR;
+        let sigma = r_star * LJ_SIGMA_FACTOR;
 
         Ok(Self {
             atom_type,
@@ -900,6 +901,226 @@ pub fn load_amino_charges(
         .map_err(|_| io::Error::new(ErrorKind::InvalidData, "Invalid UTF8"))?;
 
     parse_lib_peptide(&data_str)
+}
+
+/// Element number, from the first letter of an atom name. We use this when writing libs, where
+/// we don't have the element. -1 (as Amber uses for extra points) if unknown.
+fn element_from_atom_name(name: &str) -> i8 {
+    match name.chars().find(|c| c.is_ascii_alphabetic()) {
+        Some('H' | 'h') => 1,
+        Some('C' | 'c') => 6,
+        Some('N' | 'n') => 7,
+        Some('O' | 'o') => 8,
+        Some('P' | 'p') => 15,
+        Some('S' | 's') => 16,
+        _ => -1,
+    }
+}
+
+/// Write partial charges, and FF types by atom name, in the Amber OFF library (`.lib`) format.
+/// This writes the atoms table of each residue only: The part `parse_lib` reads. It doesn't
+/// include connectivity or coordinates, so tleap can't build residues from it. Elements are
+/// inferred from atom names.
+pub fn write_lib(residues: &[(String, Vec<ChargeParams>)]) -> String {
+    let mut s = String::from("!!index array str\n");
+    for (name, _) in residues {
+        s.push_str(&format!(" \"{name}\"\n"));
+    }
+
+    for (name, atoms) in residues {
+        s.push_str(&format!(
+            "!entry.{name}.unit.atoms table  str name  str type  int typex  int resx  \
+            int flags  int seq  int elmnt  dbl chg\n"
+        ));
+
+        for (i, a) in atoms.iter().enumerate() {
+            s.push_str(&format!(
+                " \"{}\" \"{}\" 0 1 131072 {} {} {:.6}\n",
+                a.type_in_res,
+                a.ff_type,
+                i + 1,
+                element_from_atom_name(&a.type_in_res),
+                a.charge
+            ));
+        }
+    }
+
+    s
+}
+
+/// See `write_lib`.
+pub fn save_lib(residues: &[(String, Vec<ChargeParams>)], path: &Path) -> io::Result<()> {
+    std::fs::write(path, write_lib(residues))
+}
+
+/// Format a number for Amber parameter files: fixed-point, with at least one decimal place. (Our
+/// parsers rely on the decimal point to tell some fields apart.) This uses the shortest
+/// representation that parses to the same value. Values converted from other units can be
+/// rounded to `decimals` first, so conversion error doesn't show up as extra digits.
+pub(crate) fn fmt_amber_num(v: f32, decimals: Option<i32>) -> String {
+    let v = match decimals {
+        Some(d) => {
+            let f = 10_f32.powi(d);
+            (v * f).round() / f
+        }
+        None => v,
+    };
+
+    // Unlike `{:e}`, this never uses exponents.
+    let mut s = v.to_string();
+    if !s.contains('.') {
+        s.push_str(".0");
+    }
+
+    if s == "-0.0" {
+        s = "0.0".to_owned();
+    }
+    s
+}
+
+/// Atom types joined by '-', each padded to 2 characters, as in Amber files. E.g. "C -CT".
+fn fmt_amber_types(types: &[&str]) -> String {
+    let padded: Vec<_> = types.iter().map(|t| format!("{t:<2}")).collect();
+    padded.join("-")
+}
+
+fn fmt_comment(comment: &Option<String>) -> String {
+    match comment {
+        Some(c) if !c.trim().is_empty() => format!("  {}", c.trim()),
+        _ => String::new(),
+    }
+}
+
+/// Lines for each section of an Amber parameter file, sorted by atom types. Shared by our `.dat`,
+/// and `.frcmod` writers.
+pub(crate) struct AmberLines {
+    pub mass: Vec<String>,
+    pub bond: Vec<String>,
+    pub angle: Vec<String>,
+    /// With the integer divider; `.dat` and `.frcmod` dihedral sections share this format.
+    pub dihedral: Vec<String>,
+    pub improper: Vec<String>,
+    /// Type, R_min / 2 (Å), ε (kcal/mol)
+    pub lj: Vec<String>,
+}
+
+impl ForceFieldParams {
+    pub(crate) fn amber_lines(&self) -> AmberLines {
+        let mut mass: Vec<_> = self.mass.values().collect();
+        mass.sort_unstable_by(|a, b| a.atom_type.cmp(&b.atom_type));
+        let mass = mass
+            .iter()
+            .map(|m| {
+                // These may have been parsed with the comment marker.
+                let comment = m
+                    .comment
+                    .as_ref()
+                    .map(|c| c.trim().trim_start_matches('!').trim())
+                    .filter(|c| !c.is_empty())
+                    .map(|c| format!("  ! {c}"))
+                    .unwrap_or_default();
+
+                format!(
+                    "{:<2} {:>10}{comment}",
+                    m.atom_type,
+                    fmt_amber_num(m.mass, None)
+                )
+            })
+            .collect();
+
+        let mut bond: Vec<_> = self.bond.values().collect();
+        bond.sort_unstable_by(|a, b| a.atom_types.cmp(&b.atom_types));
+        let bond = bond
+            .iter()
+            .map(|b| {
+                let (t0, t1) = &b.atom_types;
+                format!(
+                    "{} {:>10} {:>10}{}",
+                    fmt_amber_types(&[t0, t1]),
+                    fmt_amber_num(b.k_b, None),
+                    fmt_amber_num(b.r_0, None),
+                    fmt_comment(&b.comment)
+                )
+            })
+            .collect();
+
+        let mut angle: Vec<_> = self.angle.values().collect();
+        angle.sort_unstable_by(|a, b| a.atom_types.cmp(&b.atom_types));
+        let angle = angle
+            .iter()
+            .map(|a| {
+                let (t0, t1, t2) = &a.atom_types;
+                format!(
+                    "{} {:>10} {:>10}{}",
+                    fmt_amber_types(&[t0, t1, t2]),
+                    fmt_amber_num(a.k, None),
+                    fmt_amber_num(a.theta_0.to_degrees(), Some(4)),
+                    fmt_comment(&a.comment)
+                )
+            })
+            .collect();
+
+        let mut dihedral = Vec::new();
+        let mut improper = Vec::new();
+
+        for (map, lines, is_improper) in [
+            (&self.dihedral, &mut dihedral, false),
+            (&self.improper, &mut improper, true),
+        ] {
+            let mut entries: Vec<_> = map.iter().collect();
+            entries.sort_unstable_by(|a, b| a.0.cmp(b.0));
+
+            for ((t0, t1, t2, t3), terms) in entries {
+                let types = fmt_amber_types(&[t0, t1, t2, t3]);
+
+                for (i, d) in terms.iter().enumerate() {
+                    // A negative periodicity indicates more terms for these types follow.
+                    let periodicity = if i + 1 < terms.len() {
+                        -(d.periodicity as f32)
+                    } else {
+                        d.periodicity as f32
+                    };
+
+                    let divider = if is_improper {
+                        String::new()
+                    } else {
+                        format!(" {:>3}", d.divider)
+                    };
+
+                    lines.push(format!(
+                        "{types}{divider} {:>10} {:>10} {:>6}{}",
+                        fmt_amber_num(d.barrier_height, None),
+                        fmt_amber_num(d.phase.to_degrees(), Some(4)),
+                        fmt_amber_num(periodicity, None),
+                        fmt_comment(&d.comment)
+                    ));
+                }
+            }
+        }
+
+        let mut lj: Vec<_> = self.lennard_jones.values().collect();
+        lj.sort_unstable_by(|a, b| a.atom_type.cmp(&b.atom_type));
+        let lj = lj
+            .iter()
+            .map(|l| {
+                format!(
+                    "  {:<2} {:>10} {:>10}",
+                    l.atom_type,
+                    fmt_amber_num(l.sigma / LJ_SIGMA_FACTOR, Some(6)),
+                    fmt_amber_num(l.eps, None)
+                )
+            })
+            .collect();
+
+        AmberLines {
+            mass,
+            bond,
+            angle,
+            dihedral,
+            improper,
+            lj,
+        }
+    }
 }
 
 // // todo: C+P from dynamics, for use in GROMACS functionlity. Currently doesn't

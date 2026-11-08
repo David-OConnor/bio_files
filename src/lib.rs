@@ -32,6 +32,7 @@ pub mod inpcrd;
 mod mmcif_aux;
 pub mod mol_templates;
 pub mod prmtop;
+pub mod xtb;
 pub mod xtc;
 pub mod xyz;
 

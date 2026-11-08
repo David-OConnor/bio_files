@@ -27,10 +27,12 @@
 //! Units throughout follow the rest of the codebase (Å for positions).
 //! Conversions to GROMACS units (nm) happen inside this module.
 
+pub mod ff_params;
 pub mod forcefield;
 pub mod gro;
 pub mod mdp;
 pub mod output;
+pub mod rtp;
 pub mod solvate;
 pub mod top_parse;
 pub mod topology;
@@ -44,8 +46,10 @@ use std::{
     process::{Command, Stdio},
 };
 
+pub use ff_params::GromacsFfParams;
 pub use mdp::{MdpParams, OutputControl};
 pub use output::{GromacsFrame, GromacsOutput, OutputEnergy};
+pub use rtp::Rtp;
 use solvate::Solvent;
 pub use top_parse::GromacsTopology;
 pub use topology::MoleculeTopology;
