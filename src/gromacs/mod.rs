@@ -13,16 +13,12 @@
 //!
 //! 1. Build a [`GromacsInput`] from molecule atoms/bonds, force-field params,
 //!    and an [`MdpParams`] config.
-//! 2. Call [`GromacsInput::save_input_files`] to write inputs to a directory, or
+//! 2. Call [`GromacsInput::save`] to write inputs to a directory, or
 //!    [`GromacsInput::run`] to execute the full pipeline and collect output.
 //!
 //! The `run` workflow:
-//! - Creates a temporary directory `gromacs_out/`
-//! - Writes `conf.gro`, `topol.top`, `md.mdp`
-//! - Runs `gmx grompp` to produce `topol.tpr`
-//! - Runs `gmx mdrun` to produce `traj.trr`, `confout.gro`, `energy.edr`, `md.log`
-//! - Converts `traj.trr` to a multi-frame `traj.gro` via `gmx trjconv`
-//! - Parses the trajectory and log, then removes the temporary directory
+//! - Writes inputs and runs GROMACS in a new `md_out/gromacs_N/` directory.
+//! - Keeps the native files and console logs, and parses the trajectory.
 //!
 //! Units throughout follow the rest of the codebase (Å for positions).
 //! Conversions to GROMACS units (nm) happen inside this module.
@@ -39,11 +35,11 @@ pub mod topology;
 pub mod trr;
 
 use std::{
-    fs,
-    fs::File,
+    fs::{self, File, OpenOptions},
     io::{self, ErrorKind, Write},
-    path::Path,
-    process::{Command, Stdio},
+    path::{Path, PathBuf},
+    process::{Command, Output, Stdio},
+    sync::OnceLock,
 };
 
 pub use ff_params::GromacsFfParams;
@@ -57,9 +53,6 @@ use trr::read_trr;
 
 use crate::{AtomGeneric, BondGeneric, FrameSlice, md_params::ForceFieldParams};
 
-// Used for creating intermediate files
-const TEMP_DIR: &str = "gromacs_out";
-// Permanent output directory — numbered files are written here.
 const MD_OUT_DIR: &str = "md_out";
 
 pub(in crate::gromacs) const GRO_NAME: &str = "conf.gro";
@@ -275,34 +268,20 @@ impl GromacsInput {
         Ok(())
     }
 
-    /// Run the full GROMACS pipeline and return parsed output.
-    /// Requires `gmx` (GROMACS) to be available on the system `PATH`, and
-    /// `.gro`, `.top`, and `.mdp` files already created.
-    /// [Docs: grompp (preprocessor)](https://manual.gromacs.org/current/onlinehelp/gmx-grompp.html)
-    /// [Docs: mdrun](https://manual.gromacs.org/current/onlinehelp/gmx-mdrun.html)
-    ///
-    /// Steps:
-    /// 1. Write inputs to a temporary directory.
-    /// 2. `gmx grompp` → `topol.tpr`
-    /// 3. `gmx mdrun` → trajectory + log
-    /// 4. `gmx trjconv` → multi-frame `.gro`
-    /// 5. Parse and return [`GromacsOutput`].
-    /// 6. Remove the temporary directory.
+    /// Run GROMACS and keep its files in a new `md_out/gromacs_N/` directory.
     pub fn run(&self) -> io::Result<GromacsOutput> {
-        let dir = Path::new(TEMP_DIR);
+        let out_dir = Path::new(MD_OUT_DIR);
+        let (run_n, dir) = reserve_run_dir(out_dir)?;
+
+        self.run_in(&dir, out_dir, run_n)
+            .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))
+    }
+
+    fn run_in(&self, dir: &Path, out_dir: &Path, run_n: usize) -> io::Result<GromacsOutput> {
         self.save(dir)?;
 
         let solute_atom_count = self.solute_atom_count();
-
-        // Find the lowest run index N for which no output files exist yet.
-        let out_dir = Path::new(MD_OUT_DIR);
-        fs::create_dir_all(out_dir)?;
-        let run_n = (1_usize..)
-            .find(|&n| {
-                !out_dir.join(format!("traj_{n}.trr")).exists()
-                    && !out_dir.join(format!("traj_{n}.xtc")).exists()
-            })
-            .unwrap_or(1);
+        let run_command = |args: &[&str]| run_gmx_logged(dir, args, None);
 
         // Solvation: fill the box with water before preprocessing.
         // We don't specify `box` (aka cell/sim box); it's present in the solute coordinate file (`-cp`).
@@ -320,20 +299,17 @@ impl GromacsInput {
                     },
                 )?
             {
-                run_gmx(
-                    dir,
-                    &[
-                        "solvate",
-                        "-cp",
-                        GRO_NAME,
-                        "-cs",
-                        solvent_gro,
-                        "-o",
-                        SOLVATED_NAME,
-                        "-p",
-                        TOP_NAME,
-                    ],
-                )?;
+                run_command(&[
+                    "solvate",
+                    "-cp",
+                    GRO_NAME,
+                    "-cs",
+                    solvent_gro,
+                    "-o",
+                    SOLVATED_NAME,
+                    "-p",
+                    TOP_NAME,
+                ])?;
                 SOLVATED_NAME
             } else {
                 GRO_NAME
@@ -361,25 +337,24 @@ impl GromacsInput {
             if !self.skip_counterion_insertion && self.solvent.is_some() && net_q.abs() >= 0.5 {
                 // grompp needs a valid MDP to build ions.tpr; reuse the EM MDP.
                 save_txt_to_file(dir.join("ions.mdp"), em_mdp_str())?;
-                run_gmx(
-                    dir,
-                    &[
-                        "grompp",
-                        "-f",
-                        "ions.mdp",
-                        "-c",
-                        structure_gro,
-                        "-p",
-                        TOP_NAME,
-                        "-o",
-                        "ions.tpr",
-                        "-maxwarn",
-                        "5",
-                    ],
-                )?;
+                run_command(&[
+                    "grompp",
+                    "-f",
+                    "ions.mdp",
+                    "-c",
+                    structure_gro,
+                    "-p",
+                    TOP_NAME,
+                    "-o",
+                    "ions.tpr",
+                    "-po",
+                    "ions_out.mdp",
+                    "-maxwarn",
+                    "5",
+                ])?;
 
                 // genion asks interactively which group to replace; we select SOL.
-                run_gmx_stdin(
+                run_gmx_logged(
                     dir,
                     &[
                         "genion",
@@ -395,7 +370,7 @@ impl GromacsInput {
                         "CL",
                         "-neutral",
                     ],
-                    b"SOL\n",
+                    Some(b"SOL\n"),
                 )?;
                 IONIZED_NAME
             } else {
@@ -407,37 +382,23 @@ impl GromacsInput {
             // A preset configuration file.
             save_txt_to_file(dir.join("em.mdp"), em_mdp_str())?;
 
-            run_gmx(
-                dir,
-                &[
-                    "grompp",
-                    "-f",
-                    "em.mdp",
-                    "-c",
-                    structure_gro,
-                    "-p",
-                    TOP_NAME,
-                    "-o",
-                    "em.tpr",
-                    "-maxwarn",
-                    "5",
-                ],
-            )?;
+            run_command(&[
+                "grompp",
+                "-f",
+                "em.mdp",
+                "-c",
+                structure_gro,
+                "-p",
+                TOP_NAME,
+                "-o",
+                "em.tpr",
+                "-po",
+                "em_out.mdp",
+                "-maxwarn",
+                "5",
+            ])?;
 
-            run_gmx(
-                dir,
-                &[
-                    "mdrun",
-                    "-s",
-                    "em.tpr",
-                    "-c",
-                    "em.gro",
-                    "-e",
-                    ENERGY_OUT_NAME,
-                    "-g",
-                    "em.log",
-                ],
-            )?;
+            run_command(&["mdrun", "-deffnm", "em"])?;
 
             "em.gro".to_string()
         } else {
@@ -447,22 +408,19 @@ impl GromacsInput {
         // grompp: Preprocessor. Creates a [binary] TPR file from the generated input files.
         // [Data on TPR](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#tpr)
         // This format contains everything GROMACS needs to run MD.
-        run_gmx(
-            dir,
-            &[
-                "grompp",
-                "-f",
-                MDP_NAME,
-                "-c",
-                &md_input_gro,
-                "-p",
-                TOP_NAME,
-                "-o",
-                "topol.tpr",
-                "-maxwarn",
-                "5",
-            ],
-        )?;
+        run_command(&[
+            "grompp",
+            "-f",
+            MDP_NAME,
+            "-c",
+            &md_input_gro,
+            "-p",
+            TOP_NAME,
+            "-o",
+            "topol.tpr",
+            "-maxwarn",
+            "5",
+        ])?;
 
         // mdrun: Run MD.
         let mut mdrun_args = vec![
@@ -481,7 +439,7 @@ impl GromacsInput {
             LOG_NAME,
         ];
         mdrun_args.extend(self.mdrun_extra_args.iter().map(String::as_str));
-        run_gmx(dir, &mdrun_args)?;
+        run_command(&mdrun_args)?;
 
         // Copy output files to numbered paths in the permanent output directory.
         let trr_src = dir.join(TRR_NAME);
@@ -505,18 +463,23 @@ impl GromacsInput {
             fs::copy(&gro_src, &gro_dest)?;
         }
 
-        let log_text = read_text(dir.join("md.log")).unwrap_or_default();
-        let trr_frames = read_trr(
-            &trr_src,
-            FrameSlice::Time {
-                start: None,
-                end: None,
-            },
-        )?;
+        let log_text = read_text(dir.join(LOG_NAME)).unwrap_or_default();
+        let trr_frames = if trr_dest.exists() {
+            read_trr(
+                &trr_src,
+                FrameSlice::Time {
+                    start: None,
+                    end: None,
+                },
+            )?
+        } else {
+            Vec::new()
+        };
 
         // Energy data is optional: if gmx energy fails or is unavailable, run()
         // still returns a valid trajectory - frames just have `energy: None`.
-        let energies = OutputEnergy::from_edr(&dir.join(ENERGY_OUT_NAME)).unwrap_or_default();
+        let energies =
+            OutputEnergy::from_edr_impl(&dir.join(ENERGY_OUT_NAME), true).unwrap_or_default();
 
         let mut result = GromacsOutput::new(log_text, trr_frames, energies, solute_atom_count)?;
         result.trr_path = if trr_dest.exists() {
@@ -536,6 +499,28 @@ impl GromacsInput {
 
         Ok(result)
     }
+}
+
+fn reserve_run_dir(out_dir: &Path) -> io::Result<(usize, PathBuf)> {
+    fs::create_dir_all(out_dir)?;
+
+    for run_n in 1..=usize::MAX {
+        if out_dir.join(format!("traj_{run_n}.trr")).try_exists()?
+            || out_dir.join(format!("traj_{run_n}.xtc")).try_exists()?
+            || out_dir.join(format!("mols_in_{run_n}.gro")).try_exists()?
+        {
+            continue;
+        }
+
+        let dir = out_dir.join(format!("gromacs_{run_n}"));
+        match fs::create_dir(&dir) {
+            Ok(()) => return Ok((run_n, dir)),
+            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e),
+        }
+    }
+
+    Err(io::Error::other("No GROMACS run index available"))
 }
 
 /// Minimal MDP for a steep-descent energy minimization pass.
@@ -572,75 +557,89 @@ fn read_text(path: impl AsRef<Path>) -> io::Result<String> {
     fs::read_to_string(path)
 }
 
-/// Build a GROMACS command for the reusable scratch directory.
-///
-/// Successful runs are copied to numbered paths in `md_out`, so GROMACS'
-/// automatic `#file.N#` backups only accumulate stale intermediate files and
-/// eventually prevent long adaptive simulations from continuing.
+static GMX_RESOLVER: OnceLock<fn() -> Option<PathBuf>> = OnceLock::new();
+
+/// Sets how to locate `gmx`, for applications that install it off `PATH`. Called before each
+/// run; `None` falls back to `PATH`. Only the first call has an effect.
+pub fn set_gmx_resolver(resolver: fn() -> Option<PathBuf>) {
+    let _ = GMX_RESOLVER.set(resolver);
+}
+
 fn gmx_command() -> Command {
-    let mut cmd = Command::new("gmx");
+    let executable = GMX_RESOLVER
+        .get()
+        .and_then(|resolve| resolve())
+        .unwrap_or_else(|| PathBuf::from("gmx"));
+
+    let mut cmd = Command::new(executable);
     cmd.env("GMX_MAXBACKUP", "-1");
+
     cmd
 }
 
-/// Run a `gmx` sub-command, returning an error if `gmx` is not found or the
-/// process exits non-zero. This is primarily called by `run`, but can be called directly
-/// by applications.
+/// Run a `gmx` subcommand, returning an error on failure.
 pub fn run_gmx(dir: &Path, args: &[&str]) -> io::Result<()> {
+    check_gmx_status(args, &gmx_output(dir, args, None)?)
+}
+
+/// Like [`run_gmx`] but supplies `stdin_data` to the process.
+pub fn run_gmx_stdin(dir: &Path, args: &[&str], stdin_data: &[u8]) -> io::Result<()> {
+    check_gmx_status(args, &gmx_output(dir, args, Some(stdin_data))?)
+}
+
+fn run_gmx_logged(dir: &Path, args: &[&str], stdin_data: Option<&[u8]>) -> io::Result<()> {
+    let out = gmx_output(dir, args, stdin_data)?;
+    save_gmx_logs(dir, &out)?;
+
+    check_gmx_status(args, &out)
+}
+
+fn gmx_output(dir: &Path, args: &[&str], stdin_data: Option<&[u8]>) -> io::Result<Output> {
     let mut cmd = gmx_command();
     cmd.current_dir(dir).args(args);
 
-    let out = match cmd.output() {
-        Ok(o) => o,
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            return Err(io::Error::new(
-                ErrorKind::NotFound,
-                "`gmx` executable not found on the system PATH",
-            ));
-        }
-        Err(e) => return Err(e),
+    let out = if let Some(stdin_data) = stdin_data {
+        cmd.stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        cmd.spawn().and_then(|mut child| {
+            let stdin_result = child.stdin.take().unwrap().write_all(stdin_data);
+            let out = child.wait_with_output();
+
+            if let Err(e) = stdin_result
+                && e.kind() != ErrorKind::BrokenPipe
+            {
+                return Err(e);
+            }
+
+            out
+        })
+    } else {
+        cmd.output()
     };
 
-    if !out.status.success() {
-        let stderr = String::from_utf8_lossy(&out.stderr);
-        return Err(io::Error::other(format!(
-            "gmx {} failed: {}",
-            args.first().unwrap_or(&"?"),
-            stderr,
-        )));
+    match out {
+        Err(e) if e.kind() == ErrorKind::NotFound => Err(io::Error::new(
+            ErrorKind::NotFound,
+            "`gmx` executable not found on the system PATH",
+        )),
+        result => result,
+    }
+}
+
+fn save_gmx_logs(dir: &Path, out: &Output) -> io::Result<()> {
+    for (name, bytes) in [("stdout.log", &out.stdout), ("stderr.log", &out.stderr)] {
+        OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(dir.join(name))?
+            .write_all(bytes)?;
     }
 
     Ok(())
 }
 
-/// Like [`run_gmx`] but supplies `stdin_data` to the process (for interactive
-/// group-selection prompts such as `gmx trjconv`). This is primarily called by `run`, but can be called directly
-/// by applications.
-pub fn run_gmx_stdin(dir: &Path, args: &[&str], stdin_data: &[u8]) -> io::Result<()> {
-    let mut cmd = gmx_command();
-    cmd.current_dir(dir)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
-
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            return Err(io::Error::new(
-                ErrorKind::NotFound,
-                "`gmx` executable not found on the system PATH",
-            ));
-        }
-        Err(e) => return Err(e),
-    };
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin.write_all(stdin_data)?;
-    }
-
-    let out = child.wait_with_output()?;
-
+fn check_gmx_status(args: &[&str], out: &Output) -> io::Result<()> {
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
         return Err(io::Error::other(format!(

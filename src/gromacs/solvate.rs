@@ -8,7 +8,7 @@ use lin_alg::f32::Vec3;
 use crate::gromacs::{
     CUSTOM_SOLVENT_GRO, GMX_BUILTIN_TIP4P_WATER, MoleculeInput,
     gro::{AtomGro, Gro},
-    run_gmx,
+    run_gmx_logged,
 };
 
 pub(in crate::gromacs) const CUSTOM_REGIONS_SOLVENT_GRO: &str = "water_custom_regions.gro";
@@ -89,7 +89,7 @@ fn make_water_opc_custom_regions_gro(
     let y = box_vec.y.to_string();
     let z = box_vec.z.to_string();
 
-    run_gmx(
+    run_gmx_logged(
         dir,
         &[
             "solvate",
@@ -102,6 +102,7 @@ fn make_water_opc_custom_regions_gro(
             "-o",
             CUSTOM_REGIONS_FULL_BOX_GRO,
         ],
+        None,
     )?;
 
     let full_box = Gro::load(&dir.join(CUSTOM_REGIONS_FULL_BOX_GRO))?;

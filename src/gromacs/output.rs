@@ -10,9 +10,8 @@
 
 use std::{
     collections::HashMap,
-    io::{self, ErrorKind, Write as _},
+    io::{self, ErrorKind},
     path::Path,
-    process::Stdio,
 };
 
 use lin_alg::f64::Vec3;
@@ -57,6 +56,10 @@ impl OutputEnergy {
     /// Returns `Ok(Vec::new())` when `gmx` is unavailable or the file yields
     /// no usable data, so callers can treat energy as optional.
     pub fn from_edr(path: &Path) -> io::Result<Vec<Self>> {
+        Self::from_edr_impl(path, false)
+    }
+
+    pub(super) fn from_edr_impl(path: &Path, save_logs: bool) -> io::Result<Vec<Self>> {
         let dir = path.parent().unwrap_or(Path::new("."));
         let edr_name = path
             .file_name()
@@ -70,15 +73,9 @@ impl OutputEnergy {
         let selection =
             b"Temperature\nPressure\nPotential\nKinetic-En.\nTotal-Energy\nVolume\nDensity\n0\n";
 
-        let mut child = match super::gmx_command()
-            .current_dir(dir)
-            .args(["energy", "-f", edr_name, "-o", XVG_OUT])
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-        {
-            Ok(c) => c,
+        let args = ["energy", "-f", edr_name, "-o", XVG_OUT];
+        let out = match super::gmx_output(dir, &args, Some(selection)) {
+            Ok(out) => out,
             Err(e) if e.kind() == ErrorKind::NotFound => {
                 eprintln!("`gmx` not found; skipping energy parsing");
                 return Ok(Vec::new());
@@ -86,11 +83,10 @@ impl OutputEnergy {
             Err(e) => return Err(e),
         };
 
-        if let Some(mut stdin) = child.stdin.take() {
-            let _ = stdin.write_all(selection);
+        if save_logs {
+            super::save_gmx_logs(dir, &out)?;
         }
 
-        let out = child.wait_with_output()?;
         if !out.status.success() {
             // Non-fatal — GROMACS still writes the XVG for valid terms.
             let msg = String::from_utf8_lossy(&out.stderr);
