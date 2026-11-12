@@ -484,13 +484,13 @@ fn parse_notes(payload: &[u8]) -> io::Result<HashMap<String, String>> {
             Event::Start(e) => {
                 depth += 1;
                 if depth == 2 {
-                    let name = String::from_utf8_lossy(e.name().as_ref()).into_owned();
+                    let name = e.name().as_ref().to_owned();
                     field = Some((name, String::new()));
                 }
             }
             Event::Text(t) if depth == 2 => {
                 if let Some((_, text)) = &mut field {
-                    text.push_str(&t.decode().map_err(notes_err)?);
+                    text.push_str(&t.xml10_content());
                 }
             }
             // Entities, e.g. `&lt;`, and character references are separate from the text around
@@ -499,9 +499,7 @@ fn parse_notes(payload: &[u8]) -> io::Result<HashMap<String, String>> {
                 if let Some((_, text)) = &mut field {
                     if let Some(c) = r.resolve_char_ref().map_err(notes_err)? {
                         text.push(c);
-                    } else if let Some(v) =
-                        resolve_predefined_entity(&r.decode().map_err(notes_err)?)
-                    {
+                    } else if let Some(v) = resolve_predefined_entity(&r) {
                         text.push_str(v);
                     }
                 }
