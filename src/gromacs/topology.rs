@@ -25,7 +25,6 @@ use std::{
 };
 
 use super::forcefield::TopologyConfig;
-
 use crate::{
     AtomGeneric, BondGeneric,
     gromacs::solvate::Solvent,
