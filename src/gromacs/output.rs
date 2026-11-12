@@ -44,6 +44,11 @@ pub struct OutputEnergy {
 }
 
 impl OutputEnergy {
+    /// Read an XVG energy table without invoking GROMACS.
+    pub fn from_xvg(path: &Path) -> io::Result<Vec<Self>> {
+        parse_xvg(&std::fs::read_to_string(path)?)
+    }
+
     /// Extract per-frame energy data from a GROMACS binary `.edr` file.
     ///
     /// The EDR format is an XDR-based binary; rather than parsing it directly

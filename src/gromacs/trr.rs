@@ -58,10 +58,7 @@ impl TrrMetadata {
                 ));
             }
 
-            // Version string: u32 length + bytes + padding to 4B boundary.
-            let ver_len = trr_u32(&mut r)? as usize;
-            let ver_pad = (4 - (ver_len % 4)) % 4;
-            r.seek(SeekFrom::Current((ver_len + ver_pad) as i64))?;
+            read_trr_version(&mut r)?;
 
             // Header fields.
             let ir_size = trr_i32(&mut r)? as usize;
@@ -175,10 +172,7 @@ pub fn read_trr(trr: &Path, slice: FrameSlice) -> io::Result<Vec<GromacsFrame>> 
             ));
         }
 
-        // Version string: XDR encoding is u32 length + bytes + padding to 4B boundary.
-        let ver_len = trr_u32(&mut r)? as usize;
-        let ver_pad = (4 - (ver_len % 4)) % 4;
-        r.seek(SeekFrom::Current((ver_len + ver_pad) as i64))?;
+        read_trr_version(&mut r)?;
 
         // Header — all sizes in bytes.
         let ir_size = trr_i32(&mut r)? as usize;
@@ -314,12 +308,26 @@ pub fn read_trr(trr: &Path, slice: FrameSlice) -> io::Result<Vec<GromacsFrame>> 
 /// which is the GROMACS default. Frames with no velocity data (`atom_velocities`
 /// empty or length-mismatched) omit the velocity block (`v_size = 0`).
 pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
-    // XDR version string — 12 bytes, already 4B-aligned so no padding needed.
-    const VERSION: &[u8] = b"GMX_trn_file";
+    write_trr_with_metadata(path, frames, &[])
+}
 
-    let mut w = BufWriter::new(OpenOptions::new().create(true).append(true).open(&*path)?);
+/// Write frames with optional step numbers and orthorhombic box lengths in nm.
+pub fn write_trr_with_metadata(
+    path: &Path,
+    frames: &[GromacsFrame],
+    metadata: &[(i32, Option<[f32; 3]>)],
+) -> io::Result<()> {
+    if !metadata.is_empty() && metadata.len() != frames.len() {
+        return Err(io::Error::new(
+            ErrorKind::InvalidInput,
+            "TRR frame metadata length mismatch",
+        ));
+    }
 
-    for frame in frames {
+    let mut w = BufWriter::new(OpenOptions::new().create(true).append(true).open(path)?);
+
+    for (i, frame) in frames.iter().enumerate() {
+        let (step, cell) = metadata.get(i).copied().unwrap_or_default();
         let natoms = frame.atom_posits.len();
         let has_vel = frame.atom_velocities.len() == natoms && natoms > 0;
         let has_forces = frame.atom_forces.len() == natoms && natoms > 0;
@@ -332,19 +340,17 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
             0
         };
 
-        // Magic
+        // Magic, C-string buffer length, then the XDR version string.
         w.write_all(&1993_i32.to_be_bytes())?;
+        w.write_all(&13_u32.to_be_bytes())?;
+        w.write_all(&12_u32.to_be_bytes())?;
+        w.write_all(b"GMX_trn_file")?;
 
-        // Version string: XDR u32 length + bytes (no padding, len is 4B-aligned)
-        w.write_all(&(VERSION.len() as u32).to_be_bytes())?;
-        w.write_all(VERSION)?;
-
-        // Header: ir, e, box, vir, pres, top, sym sizes (all 0), then x/v/f,
-        // then natoms, step, nre.
+        // Header: ir, e, box, vir, pres, top, sym, x, v, f, natoms, step, nre.
         for val in [
             0i32,
             0,
-            0,
+            if cell.is_some() { 36 } else { 0 },
             0,
             0,
             0,
@@ -353,7 +359,7 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
             v_size,
             f_size,
             natoms as i32,
-            0,
+            step,
             0,
         ] {
             w.write_all(&val.to_be_bytes())?;
@@ -362,6 +368,12 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
         // Time (ps) and lambda — single precision, no lambda in our data.
         w.write_all(&(frame.time as f32).to_be_bytes())?;
         w.write_all(&0_f32.to_be_bytes())?;
+
+        if let Some([a, b, c]) = cell {
+            for component in [a, 0., 0., 0., b, 0., 0., 0., c] {
+                w.write_all(&component.to_be_bytes())?;
+            }
+        }
 
         // These stay in nm.
         for p in &frame.atom_posits {
@@ -387,6 +399,26 @@ pub fn write_trr(path: &Path, frames: &[GromacsFrame]) -> io::Result<()> {
                 w.write_all(&(f.z as f32).to_be_bytes())?;
             }
         }
+    }
+
+    w.flush()
+}
+
+fn read_trr_version(r: &mut impl Read) -> io::Result<()> {
+    // Older Bio Files output omitted the outer buffer length.
+    let length = match trr_u32(r)? {
+        13 => trr_u32(r)?,
+        legacy => legacy,
+    };
+    let mut version = [0; 12];
+    if length != 12 || {
+        r.read_exact(&mut version)?;
+        &version != b"GMX_trn_file"
+    } {
+        return Err(io::Error::new(
+            ErrorKind::InvalidData,
+            "Invalid TRR version string",
+        ));
     }
 
     Ok(())

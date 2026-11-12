@@ -238,9 +238,20 @@ impl GromacsInput {
     /// so that `gmx solvate -cs <model>.gro` works without requiring the file
     /// to be pre-installed in the GROMACS data directory.
     pub fn save(&self, dir: &Path) -> io::Result<()> {
+        self.save_with_mdp(dir, &self.make_mdp(), None)
+    }
+
+    /// Save a production MDP verbatim, including settings outside MdpParams.
+    pub fn save_with_mdp(&self, dir: &Path, mdp: &str, index: Option<&Path>) -> io::Result<()> {
         fs::create_dir_all(dir)?;
 
-        save_txt_to_file(dir.join(MDP_NAME), &self.make_mdp())?;
+        save_txt_to_file(dir.join(MDP_NAME), mdp)?;
+        if let Some(index) = index {
+            let dest = dir.join("index.ndx");
+            if index.canonicalize().ok() != dest.canonicalize().ok() {
+                fs::copy(index, dest)?;
+            }
+        }
         if let Some(gro_text) = &self.initial_gro {
             save_txt_to_file(dir.join(GRO_NAME), gro_text)?;
         } else {
@@ -270,15 +281,27 @@ impl GromacsInput {
 
     /// Run GROMACS and keep its files in a new `md_out/gromacs_N/` directory.
     pub fn run(&self) -> io::Result<GromacsOutput> {
+        self.run_with_mdp(&self.make_mdp(), None)
+    }
+
+    /// Run with a production MDP and optional saved index file.
+    pub fn run_with_mdp(&self, mdp: &str, index: Option<&Path>) -> io::Result<GromacsOutput> {
         let out_dir = Path::new(MD_OUT_DIR);
         let (run_n, dir) = reserve_run_dir(out_dir)?;
 
-        self.run_in(&dir, out_dir, run_n)
+        self.run_in(&dir, out_dir, run_n, mdp, index)
             .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))
     }
 
-    fn run_in(&self, dir: &Path, out_dir: &Path, run_n: usize) -> io::Result<GromacsOutput> {
-        self.save(dir)?;
+    fn run_in(
+        &self,
+        dir: &Path,
+        out_dir: &Path,
+        run_n: usize,
+        mdp: &str,
+        index: Option<&Path>,
+    ) -> io::Result<GromacsOutput> {
+        self.save_with_mdp(dir, mdp, index)?;
 
         let solute_atom_count = self.solute_atom_count();
         let run_command = |args: &[&str]| run_gmx_logged(dir, args, None);
@@ -408,7 +431,7 @@ impl GromacsInput {
         // grompp: Preprocessor. Creates a [binary] TPR file from the generated input files.
         // [Data on TPR](https://manual.gromacs.org/2026.1/reference-manual/file-formats.html#tpr)
         // This format contains everything GROMACS needs to run MD.
-        run_command(&[
+        let mut grompp_args = vec![
             "grompp",
             "-f",
             MDP_NAME,
@@ -420,7 +443,14 @@ impl GromacsInput {
             "topol.tpr",
             "-maxwarn",
             "5",
-        ])?;
+        ];
+        if index.is_some() {
+            grompp_args.extend(["-n", "index.ndx"]);
+        }
+        if self.initial_gro.is_some() {
+            grompp_args.extend(["-r", &md_input_gro]);
+        }
+        run_command(&grompp_args)?;
 
         // mdrun: Run MD.
         let mut mdrun_args = vec![
@@ -571,8 +601,16 @@ fn gmx_command() -> Command {
         .and_then(|resolve| resolve())
         .unwrap_or_else(|| PathBuf::from("gmx"));
 
-    let mut cmd = Command::new(executable);
+    let mut cmd = Command::new(&executable);
     cmd.env("GMX_MAXBACKUP", "-1");
+    if std::env::var_os("GMXLIB").is_none()
+        && let Some(prefix) = executable.parent().and_then(Path::parent)
+    {
+        let top = prefix.join("share/gromacs/top");
+        if top.join("residuetypes.dat").is_file() {
+            cmd.env("GMXLIB", top);
+        }
+    }
 
     cmd
 }
