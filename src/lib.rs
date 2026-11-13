@@ -19,6 +19,7 @@ pub mod snapgene;
 pub mod dat;
 pub mod frcmod;
 pub mod gromacs;
+pub mod md_out;
 pub mod md_params;
 pub mod orca;
 

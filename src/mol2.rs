@@ -449,11 +449,20 @@ impl Mol2 {
         writeln!(w)?;
         writeln!(w)?;
 
+        // Columns are whitespace-separated; e.g. "DNA(ds) 8nt" would shift the charge column.
+        let subst_name: String = self
+            .ident
+            .chars()
+            .map(|c| if c.is_whitespace() { '_' } else { c })
+            .collect();
+
         writeln!(w, "@<TRIPOS>ATOM")?;
         for atom in &self.atoms {
-            let type_in_res = match &atom.type_in_res {
-                Some(n) => n.to_string(),
-                None => atom.element.to_letter(),
+            let type_in_res = match (&atom.type_in_res, &atom.type_in_res_general) {
+                (Some(n), _) => n.to_string(),
+                // E.g. nucleic acids and lipids from Amber templates.
+                (None, Some(n)) => n.clone(),
+                (None, None) => atom.element.to_letter(),
             };
 
             let ff_type = match &atom.force_field_type {
@@ -475,8 +484,8 @@ impl Mol2 {
                 atom.posit.y,
                 atom.posit.z,
                 ff_type,
-                "1",        // Assumes 1 residue.
-                self.ident, // todo: This should really be the residue information.
+                "1",         // Assumes 1 residue.
+                &subst_name, // todo: This should really be the residue information.
                 atom.partial_charge.unwrap_or_default()
             )?;
         }

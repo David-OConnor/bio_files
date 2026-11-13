@@ -27,6 +27,10 @@ impl ForceFieldParamsVec {
         // Handles the lines `N   NA  N2  N*  NC  NB  NT  NY` above vdw data. This, for example,
         // maps NA, N2 etc to the same parameters as N.
         let mut vdw_alias_map: HashMap<String, String> = HashMap::new();
+        // Alias-like lines since the last data line. Only the block directly above MOD4 is
+        // equivalencing; the hydrophilic-types line after MASS (e.g. `C   H   HO  N ...`) has
+        // the same shape, but isn't an alias.
+        let mut pending_aliases: Vec<Vec<String>> = Vec::new();
 
         let mut in_mod4 = false;
 
@@ -59,6 +63,12 @@ impl ForceFieldParamsVec {
             // header that *starts* the block
             if line.starts_with("MOD4") {
                 in_mod4 = true;
+
+                for cols in pending_aliases.drain(..) {
+                    for alias in &cols {
+                        vdw_alias_map.insert(alias.clone(), cols[0].clone());
+                    }
+                }
                 continue; // nothing else to parse on this header line
             }
 
@@ -69,12 +79,11 @@ impl ForceFieldParamsVec {
                     .iter()
                     .all(|t| t.chars().all(|c| c.is_ascii_alphanumeric() || c == '*'))
             {
-                let canonical = cols[0].to_string();
-                for alias in &cols {
-                    vdw_alias_map.insert((*alias).to_string(), canonical.clone());
-                }
+                pending_aliases.push(cols.iter().map(|c| c.to_string()).collect());
                 continue; // don’t try to parse this line any further
             }
+
+            pending_aliases.clear();
 
             let (atom_types, _) = get_atom_types(&cols);
 

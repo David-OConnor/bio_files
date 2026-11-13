@@ -3,14 +3,14 @@
 use std::path::Path;
 
 use bio_files::{MmCif, Mol2, md_params::ForceFieldParams};
-use dynamics::{FfParamSet, prepare_peptide};
 
-fn load() {
-    let param_set = FfParamSet::new_amber().unwrap();
+fn main() {
+    // General force field parameters:
+    let _params = ForceFieldParams::load_dat(Path::new("gaff2.dat")).unwrap();
 
-    let mut protein = MmCif::load(Path::new("1c8k.cif")).unwrap();
-    let mol = Mol2::load(Path::new("CPB.mol2")).unwrap();
-    let mol_specific = ForceFieldParams::load_frcmod(Path::new("CPB.frcmod")).unwrap();
+    let _protein = MmCif::load(Path::new("1c8k.cif")).unwrap();
+    let _mol = Mol2::load(Path::new("CPB.mol2")).unwrap();
+    let _mol_specific = ForceFieldParams::load_frcmod(Path::new("CPB.frcmod")).unwrap();
 
     // Or, instead of loading atoms and mol-specific params separately:
     // let (mol, lig_specific) = load_prmtop("my_mol.prmtop");
@@ -20,22 +20,8 @@ fn load() {
     // let mol = Mol2::new(&data.mol2);
     // let mol_specific = ForceFieldParams::from_frcmod(&data.frcmod);
 
-    // Add Hydrogens, force field type, and partial charge to atoms in the protein; these usually aren't
-    // included from RSCB PDB. You can also call `populate_hydrogens_dihedrals()`, and
-    // `populate_peptide_ff_and_q() separately. Add bonds.
-    prepare_peptide(
-        &mut protein.atoms,
-        &mut protein.bonds,
-        &mut protein.residues,
-        &mut protein.chains,
-        &param_set.peptide_ff_q_map.as_ref().unwrap(),
-        7.0,
-    )
-    .unwrap();
-}
-
-fn main() {
-    // Loading Force field parameters:
-    let p = Path::new("gaff2.dat");
-    let params = ForceFieldParams::load_dat(p).unwrap();
+    // RCSB PDB proteins usually lack hydrogens, force field types, partial charges, and bonds.
+    // The `dynamics` crate adds them:
+    // let param_set = dynamics::FfParamSet::new_amber().unwrap();
+    // dynamics::prepare_peptide(&mut atoms, &mut bonds, &mut residues, &mut chains, ...);
 }

@@ -17,7 +17,7 @@ use std::{
 
 use bio_apis::rcsb;
 use lin_alg::f64::Vec3;
-use na_seq::{AtomTypeInRes, Element};
+use na_seq::{AaIdent, AtomTypeInRes, Element};
 use regex::Regex;
 
 use crate::{
@@ -461,8 +461,12 @@ impl MmCif {
             if id.is_empty() { "UNKNOWN" } else { id }
         };
 
-        // Header + minimal metadata
-        writeln!(file, "data_{}", ident)?;
+        // Header + minimal metadata. A block name can't hold whitespace.
+        let block_name: String = ident
+            .chars()
+            .map(|c| if c.is_whitespace() { '_' } else { c })
+            .collect();
+        writeln!(file, "data_{block_name}")?;
         writeln!(file, "_struct.entry_id {}", quote_if_needed(ident))?;
         if let Some(m) = &self.experimental_method {
             writeln!(file, "_exptl.method {}", quote_if_needed(&m.to_string()))?;
@@ -504,6 +508,7 @@ impl MmCif {
         writeln!(file, "_atom_site.Cartn_z")?;
         writeln!(file, "_atom_site.type_symbol")?;
         writeln!(file, "_atom_site.label_atom_id")?;
+        writeln!(file, "_atom_site.label_alt_id")?;
         writeln!(file, "_atom_site.label_comp_id")?;
         writeln!(file, "_atom_site.label_asym_id")?;
         writeln!(file, "_atom_site.label_seq_id")?;
@@ -511,7 +516,7 @@ impl MmCif {
 
         for a in &self.atoms {
             let group = if a.hetero { "HETATM" } else { "ATOM" };
-            let sym = a.element.to_string();
+            let sym = a.element.to_letter();
             let atom_name = match &a.type_in_res {
                 Some(na_seq::AtomTypeInRes::Hetero(n)) => n.clone(),
                 Some(t) => t.to_string(),
@@ -519,8 +524,14 @@ impl MmCif {
             };
             let res_sn = *atom_to_res.get(&a.serial_number).unwrap_or(&0u32);
             let (res_name, chain_id) = if let Some(r) = res_map.get(&res_sn) {
+                // The component IDs the loader reads; not `ResidueType`'s display names.
+                let res_name = match &r.res_type {
+                    ResidueType::AminoAcid(aa) => aa.to_str(AaIdent::ThreeLetters).to_uppercase(),
+                    ResidueType::Water => "HOH".to_string(),
+                    ResidueType::Other(name) => name.clone(),
+                };
                 (
-                    r.res_type.to_string(),
+                    res_name,
                     atom_to_chain.get(&a.serial_number).copied().unwrap_or("A"),
                 )
             } else {
@@ -534,9 +545,12 @@ impl MmCif {
                 None => "?".to_string(),
             };
 
+            let alt_id = a.alt_conformation_id.as_deref().unwrap_or(".");
+
+            // One row per line; the loader reads them that way.
             writeln!(
                 file,
-                "{} {} {:.3} {:.3} {:.3} {} {} {} {} {}",
+                "{} {} {:.3} {:.3} {:.3} {} {} {} {} {} {} {}",
                 group,
                 a.serial_number,
                 a.posit.x,
@@ -544,11 +558,12 @@ impl MmCif {
                 a.posit.z,
                 quote_if_needed(&sym),
                 quote_if_needed(&atom_name),
+                quote_if_needed(alt_id),
                 quote_if_needed(&res_name),
                 quote_if_needed(chain_id),
                 res_sn,
+                occ_s,
             )?;
-            writeln!(file, "{}", occ_s)?;
         }
 
         writeln!(file, "#")?;

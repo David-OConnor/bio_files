@@ -11,7 +11,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{AtomGeneric, Xyz, xyz::load_xyz_trajectory};
+use crate::{AtomGeneric, Xyz, md_out::create_run_dir, xyz::load_xyz_trajectory};
 
 #[derive(Clone, Debug)]
 pub struct XtbInput {
@@ -160,12 +160,13 @@ impl XtbInput {
         args
     }
 
-    /// Run in a new directory; retain inputs, logs, topology, and restart data.
-    pub fn run(&self, directory: &Path) -> io::Result<XtbOutput> {
-        self.run_with_cancel(directory, &AtomicBool::new(false))
+    /// Run in a new `md_out/xtb_{timestamp}/` directory; retain inputs, logs, topology, and
+    /// restart data.
+    pub fn run(&self) -> io::Result<XtbOutput> {
+        self.run_with_cancel(&AtomicBool::new(false))
     }
 
-    pub fn run_with_cancel(&self, directory: &Path, cancel: &AtomicBool) -> io::Result<XtbOutput> {
+    pub fn run_with_cancel(&self, cancel: &AtomicBool) -> io::Result<XtbOutput> {
         self.validate()?;
         let executable = self
             .executable
@@ -178,11 +179,8 @@ impl XtbInput {
             executable
         };
 
-        if let Some(parent) = directory.parent().filter(|p| !p.as_os_str().is_empty()) {
-            fs::create_dir_all(parent)?;
-        }
-        fs::create_dir(directory)?;
-        self.save(directory)?;
+        let directory = create_run_dir("xtb")?;
+        self.save(&directory)?;
         let directory = fs::canonicalize(directory)?;
         let mut command = Command::new(&executable);
         command

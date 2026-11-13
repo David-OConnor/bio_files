@@ -17,7 +17,7 @@
 //!    [`GromacsInput::run`] to execute the full pipeline and collect output.
 //!
 //! The `run` workflow:
-//! - Writes inputs and runs GROMACS in a new `md_out/gromacs_N/` directory.
+//! - Writes inputs and runs GROMACS in a new `md_out/gromacs_{timestamp}/` directory.
 //! - Keeps the native files and console logs, and parses the trajectory.
 //!
 //! Units throughout follow the rest of the codebase (Å for positions).
@@ -51,9 +51,9 @@ pub use top_parse::GromacsTopology;
 pub use topology::MoleculeTopology;
 use trr::read_trr;
 
-use crate::{AtomGeneric, BondGeneric, FrameSlice, md_params::ForceFieldParams};
-
-const MD_OUT_DIR: &str = "md_out";
+use crate::{
+    AtomGeneric, BondGeneric, FrameSlice, md_out::create_run_dir, md_params::ForceFieldParams,
+};
 
 pub(in crate::gromacs) const GRO_NAME: &str = "conf.gro";
 pub(in crate::gromacs) const TOP_NAME: &str = "topo.top";
@@ -279,28 +279,20 @@ impl GromacsInput {
         Ok(())
     }
 
-    /// Run GROMACS and keep its files in a new `md_out/gromacs_N/` directory.
+    /// Run GROMACS and keep its files in a new `md_out/gromacs_{timestamp}/` directory.
     pub fn run(&self) -> io::Result<GromacsOutput> {
         self.run_with_mdp(&self.make_mdp(), None)
     }
 
     /// Run with a production MDP and optional saved index file.
     pub fn run_with_mdp(&self, mdp: &str, index: Option<&Path>) -> io::Result<GromacsOutput> {
-        let out_dir = Path::new(MD_OUT_DIR);
-        let (run_n, dir) = reserve_run_dir(out_dir)?;
+        let dir = create_run_dir("gromacs")?;
 
-        self.run_in(&dir, out_dir, run_n, mdp, index)
+        self.run_in(&dir, mdp, index)
             .map_err(|e| io::Error::new(e.kind(), format!("{}: {e}", dir.display())))
     }
 
-    fn run_in(
-        &self,
-        dir: &Path,
-        out_dir: &Path,
-        run_n: usize,
-        mdp: &str,
-        index: Option<&Path>,
-    ) -> io::Result<GromacsOutput> {
+    fn run_in(&self, dir: &Path, mdp: &str, index: Option<&Path>) -> io::Result<GromacsOutput> {
         self.save_with_mdp(dir, mdp, index)?;
 
         let solute_atom_count = self.solute_atom_count();
@@ -471,32 +463,14 @@ impl GromacsInput {
         mdrun_args.extend(self.mdrun_extra_args.iter().map(String::as_str));
         run_command(&mdrun_args)?;
 
-        // Copy output files to numbered paths in the permanent output directory.
-        let trr_src = dir.join(TRR_NAME);
-        let trr_dest = out_dir.join(format!("traj_{run_n}.trr"));
-        if trr_src.exists() {
-            fs::copy(&trr_src, &trr_dest)?;
-        }
-
-        let xtc_src = dir.join(XTC_NAME);
-        let xtc_dest = if xtc_src.exists() {
-            let dest = out_dir.join(format!("traj_{run_n}.xtc"));
-            fs::copy(&xtc_src, &dest)?;
-            Some(dest)
-        } else {
-            None
-        };
-
-        let gro_src = dir.join(&md_input_gro);
-        let gro_dest = out_dir.join(format!("mols_in_{run_n}.gro"));
-        if gro_src.exists() {
-            fs::copy(&gro_src, &gro_dest)?;
-        }
+        let trr = dir.join(TRR_NAME);
+        let xtc = dir.join(XTC_NAME);
+        let gro = dir.join(&md_input_gro);
 
         let log_text = read_text(dir.join(LOG_NAME)).unwrap_or_default();
-        let trr_frames = if trr_dest.exists() {
+        let trr_frames = if trr.exists() {
             read_trr(
-                &trr_src,
+                &trr,
                 FrameSlice::Time {
                     start: None,
                     end: None,
@@ -512,45 +486,14 @@ impl GromacsInput {
             OutputEnergy::from_edr_impl(&dir.join(ENERGY_OUT_NAME), true).unwrap_or_default();
 
         let mut result = GromacsOutput::new(log_text, trr_frames, energies, solute_atom_count)?;
-        result.trr_path = if trr_dest.exists() {
-            Some(trr_dest)
-        } else {
-            None
-        };
-
-        result.xtc_path = xtc_dest;
-        result.gro_path = if gro_dest.exists() {
-            Some(gro_dest)
-        } else {
-            None
-        };
+        result.trr_path = trr.exists().then_some(trr);
+        result.xtc_path = xtc.exists().then_some(xtc);
+        result.gro_path = gro.exists().then_some(gro);
         result.final_gro_text = read_text(dir.join(GRO_OUT_NAME)).ok();
         result.final_topology_text = read_text(dir.join(TOP_NAME)).ok();
 
         Ok(result)
     }
-}
-
-fn reserve_run_dir(out_dir: &Path) -> io::Result<(usize, PathBuf)> {
-    fs::create_dir_all(out_dir)?;
-
-    for run_n in 1..=usize::MAX {
-        if out_dir.join(format!("traj_{run_n}.trr")).try_exists()?
-            || out_dir.join(format!("traj_{run_n}.xtc")).try_exists()?
-            || out_dir.join(format!("mols_in_{run_n}.gro")).try_exists()?
-        {
-            continue;
-        }
-
-        let dir = out_dir.join(format!("gromacs_{run_n}"));
-        match fs::create_dir(&dir) {
-            Ok(()) => return Ok((run_n, dir)),
-            Err(e) if e.kind() == ErrorKind::AlreadyExists => continue,
-            Err(e) => return Err(e),
-        }
-    }
-
-    Err(io::Error::other("No GROMACS run index available"))
 }
 
 /// Minimal MDP for a steep-descent energy minimization pass.
