@@ -152,7 +152,7 @@ impl DcdTrajectory {
 ///
 /// For `FrameSlice::Time`, frames whose time (ps) falls outside `[start, end]`
 /// are skipped.  For `FrameSlice::Index`, frames whose 0-based index falls
-/// outside `[start, end]` are skipped.  In both cases skipping is done by
+/// outside `[start, end]`, or off the `step` stride, are skipped.  In both cases skipping is done by
 /// seeking past the coordinate blocks, so only matching frames are decoded.
 /// Use `None` for either bound to leave that end open.
 ///
@@ -206,16 +206,7 @@ pub fn read_dcd(path: &Path, slice: FrameSlice) -> io::Result<Vec<DcdFrame>> {
 
     for i in 0..nset_total {
         let time = (istart + (i as f64) * nsavc) * delta;
-        let in_range = match slice {
-            FrameSlice::Time { start, end } => {
-                start.map_or(true, |t| time >= t) && end.map_or(true, |t| time <= t)
-            }
-            FrameSlice::Index { start, end } => {
-                start.map_or(true, |s| i >= s) && end.map_or(true, |e| i <= e)
-            }
-        };
-
-        if !in_range {
+        if !slice.contains(i, time) {
             // Seek past unit cell record if present.
             if has_unitcell {
                 let len = read_u32_le(&mut r)?;

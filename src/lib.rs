@@ -508,7 +508,25 @@ pub enum FrameSlice {
     Index {
         start: Option<usize>,
         end: Option<usize>,
+        /// Load every `step`th frame, counting from `start`. 0 and 1 load every frame.
+        step: usize,
     },
+}
+
+impl FrameSlice {
+    /// Whether the frame at 0-based index `i`, at time `time`, is in this slice.
+    pub fn contains(&self, i: usize, time: f64) -> bool {
+        match *self {
+            Self::Time { start, end } => {
+                start.is_none_or(|t| time >= t) && end.is_none_or(|t| time <= t)
+            }
+            Self::Index { start, end, step } => {
+                let s = start.unwrap_or(0);
+
+                i >= s && end.is_none_or(|e| i <= e) && (i - s) % step.max(1) == 0
+            }
+        }
+    }
 }
 
 impl Display for FrameSlice {
@@ -526,16 +544,22 @@ impl Display for FrameSlice {
                     format!("{} - {} ps", fmt_idx(start), fmt_idx(end))
                 }
             }
-            Self::Index { start, end } => {
+            Self::Index { start, end, step } => {
                 let fmt_idx = |i: &Option<usize>| match i {
                     Some(v) => v.to_string(),
                     None => String::from("|"),
                 };
 
-                if start.is_none() && end.is_none() {
+                let range = if start.is_none() && end.is_none() {
                     String::from("All")
                 } else {
                     format!("Frames {} - {}", fmt_idx(start), fmt_idx(end))
+                };
+
+                if *step > 1 {
+                    format!("{range}, step {step}")
+                } else {
+                    range
                 }
             }
         };

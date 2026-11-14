@@ -218,14 +218,7 @@ pub fn read_trr(trr: &Path, slice: FrameSlice) -> io::Result<Vec<GromacsFrame>> 
         }
 
         // Slice filter — seek past this frame if it's out of range.
-        let in_range = match slice {
-            FrameSlice::Time { start, end } => {
-                start.map_or(true, |t| time_ps >= t) && end.map_or(true, |t| time_ps <= t)
-            }
-            FrameSlice::Index { start, end } => {
-                start.map_or(true, |s| frame_idx >= s) && end.map_or(true, |e| frame_idx <= e)
-            }
-        };
+        let in_range = slice.contains(frame_idx, time_ps);
         frame_idx += 1;
         if !in_range {
             r.seek(SeekFrom::Current((x_size + v_size + f_size) as i64))?;
